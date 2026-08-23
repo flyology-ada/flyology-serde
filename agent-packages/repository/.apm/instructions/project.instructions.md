@@ -52,17 +52,3 @@ must remain useful independently of Flyology tasking and remoting.
   recorded explicitly.
 - After review fixes, rerun relevant formatting and tests, inspect `git diff --check` and every staged path, and
   perform a final independent diff review. Record findings and resolutions in `docs/reviews/` or the pull request.
-
-## Commits
-
-Use the repository Problem/Solution format:
-
-```text
-Problem: <one-line present-tense problem>
-
-<Affected component, failure mode, and impact.>
-
-Solution: <one-line solution>
-
-<Changes, invariants, tests, and review evidence.>
-```
