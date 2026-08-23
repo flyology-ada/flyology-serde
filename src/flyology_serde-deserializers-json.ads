@@ -33,6 +33,7 @@ package Flyology_Serde.Deserializers.JSON is
 
    --  After exactly one root value, Finish_Document consumes JSON whitespace
    --  and rejects trailing input. Is_Complete becomes true only on success.
+   overriding
    procedure Finish_Document
      (Self : in out Reader; Error : in out Errors.Error_Info);
 

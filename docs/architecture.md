@@ -18,12 +18,24 @@ Serialization and deserialization are separate capabilities. Serialization reads
 indefinite types are not forced through assignment or default construction. A builder holds an unpublished
 candidate. `Begin_Candidate` initializes it, `Commit_Candidate` is the only operation that publishes it, and
 `Rollback_Candidate` releases all candidate-owned resources after any reported failure or exception. A failed
-commit must leave the previously published application value unchanged.
+commit must leave the previously published application value unchanged. `Deserialization_Adapters.Deserialize` is
+a whole-document root transaction: after value traversal it calls the backend's abstract `Finish_Document`, then
+commits only if exact-root and trailing-input validation succeed. Nested combinators call their candidate traversal
+directly and never finish a document.
 
 The bounded core does not allocate. Text, bytes, field names, and variant names are copied into caller-supplied
-buffers by a deserializer. A backend reports `Capacity_Exceeded` instead of allocating. Owned and borrowed modes
-will be separate adapters over this contract. The current API yields no borrowed slice. A future zero-copy API
-must expose input only within a callback or one deserializer step; neither an adapter nor a builder may retain it.
+buffers by a deserializer. A backend reports `Capacity_Exceeded` instead of allocating. The JSON and CBOR
+`Copied_Input` generic facades make a standard-heap snapshot, run one synchronous root transaction, finalize the
+borrowed reader, and then free the snapshot. They preflight `Maximum_Input_Units` before allocation. The current API
+yields no borrowed slice. A future zero-copy API must expose input only within a callback or one deserializer step;
+neither an adapter nor a builder may retain it.
+
+`Adapters.Allocating_Text` and `Adapters.Allocating_Bytes` are explicitly named standard-heap candidate adapters.
+They eagerly allocate one scratch buffer equal to the configured text or byte maximum, decode through the bounded
+copy API, then construct a candidate containing exactly the decoded value; the container implementation may round
+its internal capacity. Tight limits are therefore important. `Storage_Error` propagates after scratch cleanup so
+the outer root transaction can roll back; format capacity remains a status.
+Application-specific allocating builders may instead expose allocator and cleanup hooks as generic actuals.
 
 Every decoder is configured with explicit `Decode_Limits`. Backends enforce nesting, source input units, logical
 values, text and byte lengths, and container items even when the source format has no such limits. Generated

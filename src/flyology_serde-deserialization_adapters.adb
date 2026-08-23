@@ -15,6 +15,9 @@ package body Flyology_Serde.Deserialization_Adapters is
          Deserialize_Value (From, Target, Policy, Error);
       end if;
       if Error.Code = Errors.No_Error then
+         From.Finish_Document (Error);
+      end if;
+      if Error.Code = Errors.No_Error then
          Commit_Candidate (Target, Error);
       end if;
       if Error.Code /= Errors.No_Error then

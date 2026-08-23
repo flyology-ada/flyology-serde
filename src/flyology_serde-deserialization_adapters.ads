@@ -2,7 +2,9 @@ with Flyology_Serde.Deserialization;
 with Flyology_Serde.Errors;
 with Flyology_Serde.Policies;
 
---  Statically binds a format source to a private transactional candidate.
+--  Statically binds one complete format document to a private transactional
+--  candidate. Nested combinators call Deserialize_Value directly and must not
+--  call this root transaction.
 
 generic
    type Builder_Type (<>) is limited private;

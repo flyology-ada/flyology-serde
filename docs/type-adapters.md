@@ -11,8 +11,9 @@ owns its buffer but never retains a reference into the application value.
 
 The bounded pull decoder copies text, bytes, and names into caller-provided buffers. Capacity failure is explicit
 and does not silently truncate. An allocating facade may grow owned strings, vectors, maps, and candidate storage,
-but it is a separate adapter over the same pull grammar. Its allocator and cleanup behavior are explicit generic
-actuals or constructor parameters.
+but it is a separate adapter over the same pull grammar. The explicitly named standard-heap text and byte adapters
+document their eager scratch cost and cleanup. Application-specific allocating builders expose allocator and cleanup
+behavior through generic actuals or constructor parameters.
 
 A future zero-copy decoder is a separate capability. It may lend an input slice only to a callback or for one
 documented pull step. The callback cannot return the slice, store it in a candidate, or use it after the next source

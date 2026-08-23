@@ -29,6 +29,7 @@ package Flyology_Serde.Deserializers.CBOR is
      (Self   : in out Reader;
       Policy : Policies.Decode_Policy := (others => <>));
 
+   overriding
    procedure Finish_Document
      (Self : in out Reader; Error : in out Errors.Error_Info);
 

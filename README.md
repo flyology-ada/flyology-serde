@@ -6,7 +6,9 @@ concrete syntax.
 
 The crate is experimental. It contains bounded interfaces, explicit nonraising errors, transactional construction,
 decode budgets, exact integer and UTF-8 adapters, optional and array combinators, and a counting serializer used to
-validate traversals. JSON, CBOR, allocating convenience adapters, and generated derivations are being implemented.
+validate traversals. JSON and CBOR provide bounded readers and writers, allocating writers, copied-input root
+facades, and standard-heap text and byte candidates. Application builders still own allocating records, maps, and
+arrays. Generated derivations remain under development against the separately reviewed Type IR boundary.
 
 ## Boundaries
 
@@ -16,7 +18,7 @@ validate traversals. JSON, CBOR, allocating convenience adapters, and generated 
 - Allocation and borrowing are explicit adapter capabilities rather than hidden backend behavior.
 
 See [architecture](docs/architecture.md), [type adapters](docs/type-adapters.md),
-[JSON backend](docs/json.md), [CBOR backend](docs/cbor.md),
+[JSON backend](docs/json.md), [CBOR backend](docs/cbor.md), [allocating modes](docs/allocating.md),
 [Libadalang assessment](docs/libadalang-assessment.md), and [derivation](docs/derivation.md).
 
 ## Agent setup

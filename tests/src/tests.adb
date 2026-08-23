@@ -1,4 +1,5 @@
 with Ada.Unchecked_Conversion;
+with Allocating_Decode_Tests;
 with CBOR_Reader_Conformance_Tests;
 with CBOR_Reader_Tests;
 with CBOR_Writer_Tests;
@@ -162,6 +163,7 @@ procedure Tests is
    Budget         : Budgets.Decode_Budget;
    Error          : Errors.Error_Info;
 begin
+   Allocating_Decode_Tests;
    CBOR_Reader_Conformance_Tests;
    CBOR_Reader_Tests;
    CBOR_Writer_Tests;

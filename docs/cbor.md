@@ -3,8 +3,8 @@
 The CBOR backend maps the serde logical model onto one well-formed CBOR data item as defined by RFC 8949. It does
 not define Flyology's message wire format, stable identities, schema evolution, framing, or transport behavior.
 
-At the current checkpoint, the bounded and allocating writers and the bounded pull reader are implemented. An
-allocating input owner and allocating destination facades remain separate later work.
+At the current checkpoint, the bounded and allocating writers, bounded pull reader, copied-input root facade, and
+standard-heap allocating text and byte candidate adapters are implemented.
 
 | Logical value | CBOR representation |
 | --- | --- |
@@ -64,6 +64,12 @@ owner or allocating destination builder is a separate explicit owning facade ove
 reader never lends a source slice to an adapter or builder. While a reader exists, the source must not be mutated
 through another alias or task. A byte offset is zero-based relative to the first source element, regardless of the
 Ada array's lower bound.
+
+`Deserializers.CBOR.Copied_Input` copies a caller array, including its bounds, into a standard-heap snapshot for one
+synchronous root transaction. It rejects a length above `Maximum_Input_Units` before allocation, initializes the
+reader with exactly the adapter policy, leaves the reader scope before freeing the snapshot, and frees on every
+status or exception path. The operation copies rather than taking ownership. Preflight failure reports
+`Capacity_Exceeded` at the first disallowed zero-based byte offset and leaves the target untouched.
 
 Both writers use the JSON writer's incomplete/poison/reset lifecycle. Capacity exhaustion, allocation failure,
 invalid grammar, invalid text, unsupported data, or a known-count mismatch poisons the writer and makes all partial

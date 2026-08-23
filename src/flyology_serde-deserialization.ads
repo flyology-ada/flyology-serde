@@ -20,6 +20,12 @@ package Flyology_Serde.Deserialization is
       return Data_Model.Value_Kind
    is abstract;
 
+   --  Completes one root document after its value traversal. A root adapter
+   --  calls this before publishing its candidate. Nested combinators do not.
+   procedure Finish_Document
+     (Self : in out Deserializer; Error : in out Errors.Error_Info)
+   is abstract;
+
    procedure Read_Null
      (Self : in out Deserializer; Error : in out Errors.Error_Info)
    is abstract;
