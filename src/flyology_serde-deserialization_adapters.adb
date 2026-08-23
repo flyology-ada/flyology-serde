@@ -1,0 +1,28 @@
+package body Flyology_Serde.Deserialization_Adapters is
+   use type Errors.Error_Code;
+
+   procedure Deserialize
+     (From   : in out Deserialization.Deserializer'Class;
+      Target : in out Builder;
+      Error  : in out Errors.Error_Info) is
+   begin
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+
+      Begin_Candidate (Target, Error);
+      if Error.Code = Errors.No_Error then
+         Deserialize_Value (From, Target, Policy, Error);
+      end if;
+      if Error.Code = Errors.No_Error then
+         Commit_Candidate (Target, Error);
+      end if;
+      if Error.Code /= Errors.No_Error then
+         Rollback_Candidate (Target);
+      end if;
+   exception
+      when others =>
+         Rollback_Candidate (Target);
+         raise;
+   end Deserialize;
+end Flyology_Serde.Deserialization_Adapters;

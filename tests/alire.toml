@@ -1,0 +1,18 @@
+name = "tests"
+description = "Tests for flyology_serde"
+version = "0.1.0-dev"
+
+authors = ["Yurii Rashkovskii"]
+maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+website = "https://github.com/flyology-ada/flyology-serde"
+tags = ["test"]
+
+executables = ["tests"]
+
+[[depends-on]]
+flyology_serde = "*"
+
+[[pins]]
+flyology_serde = { path = ".." }

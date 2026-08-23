@@ -1,0 +1,16 @@
+name = "flyology_serde"
+description = "Format-agnostic serialization and deserialization for Ada"
+version = "0.1.0-dev"
+
+authors = ["Yurii Rashkovskii"]
+maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+website = "https://github.com/flyology-ada/flyology-serde"
+tags = ["ada", "serialization", "deserialization", "json", "cbor"]
+
+[[depends-on]]
+gnat = ">=13 & <17"
+
+[build-switches]
+"*" = { Compile_Checks = "warnings" }
