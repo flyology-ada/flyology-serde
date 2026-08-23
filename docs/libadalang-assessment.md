@@ -35,8 +35,11 @@ on a mandatory declaration stops extraction.
 
 ## Facts the extractor can obtain
 
-After those gates, the extractor can rely on the precise syntax tree for declaration form and source order, and on
-successful semantic properties for resolved identity. The supported v1 fixture matrix covers:
+After those gates, an implemented extractor can rely on the precise syntax tree for declaration form and source
+order, and on successful semantic properties for resolved identity. The current extractor executable deliberately
+fails closed and emits no IR. The v1 fixtures cover schema/model shape and GNAT legality for the following planned
+facts; they are not evidence that Libadalang extraction and strict acceptance of every listed construct is already
+implemented:
 
 | Ada construct | Extracted evidence | Fail-closed qualification |
 | --- | --- | --- |
@@ -47,12 +50,13 @@ successful semantic properties for resolved identity. The supported v1 fixture m
 | Discriminated records | Exact nested variant-part, alternative, choice, component, and selector AST | Walk the actual AST; `p_shapes` is diagnostic-only because a summarized shape is not a lossless variant condition |
 | Access, interface, class-wide, task, and protected types | Declaration form, designated/base type where applicable, and semantic category | Serde generation rejects these by default; extraction does not imply a safe value mapping |
 | Private and incomplete views | Public/private/full declaration identities and completion links | Full-view discovery is separate from authorization to expose or name the full view |
-| Aspect specifications, pragmas, predicates, and representation clauses | Exact syntax and resolved associated entity where the property is precise | Physical representation is recorded only as ignored provenance when needed; semantic predicates remain explicit facts and are not guessed |
+| Aspect specifications, pragmas, predicates, and representation clauses | Exact syntax and resolved associated entity where the property is precise | Physical representation may be located for extraction diagnostics but is not serialized in v1; semantic predicates remain explicit facts and are not guessed |
 
 Libadalang exposes syntax fields such as `f_aspects` and semantic properties including designated type declarations,
 base/root types, private completions, discriminants, and static constraints. The generated API index documents those
-queries, while the extractor fixtures establish which 26.0.0 combinations are accepted. API availability alone is
-not a promise that every property call is precise for every program.
+queries. Current fixtures do not establish accepted Libadalang property combinations; each supported combination
+will require a dedicated extractor fixture before strict output is enabled. API availability alone is not a promise
+that every property call is precise for every program.
 
 ## Generics
 
@@ -60,17 +64,20 @@ Libadalang can identify a generic instantiation, its designated generic declarat
 Its [generic-actual example](https://docs.adacore.com/live/wave/libadalang/html/libadalang_ug/examples/generic_instantiation.html)
 also demonstrates that a type expression inside the generic can resolve to its instantiated actual.
 
-The extractor still owns an explicit formal-to-actual map. It walks positional, named, defaulted, boxed, and nested
-associations and distinguishes type, object/value, package, and subprogram formals. Values that affect bounds,
-discriminants, or representation-independent type shape are retained exactly or marked Unknown/Unsupported.
-Remaining formals are not silently represented as their generic declaration. Each supported pattern has a fixture;
-anything outside the tested matrix fails strict extraction.
+The extractor design still owns an explicit formal-to-actual map. Current v1 identity fixtures cover named
+unconstrained type actuals and exact scalar or text value/object facts. Constrained type actuals and
+expression-valued actuals are rejected. Positional, defaulted, boxed, package, subprogram, and nested cases are not
+yet individually fixture-proven extraction support. Values that affect bounds, discriminants, or
+representation-independent type shape must eventually be retained exactly or marked Unknown/Unsupported. A
+remaining formal is never silently represented as its generic declaration; anything outside the tested matrix
+fails strict extraction.
 
 ## Aspects, representation, and annotations
 
 Physical `Size`, alignment, packing, convention, bit/component, storage-order, and enumeration representation
-clauses do not control serde encoding. The extractor may locate them for diagnostics but does not lower them into
-logical events. Enumeration declaration order, not representation value, is the default serde literal order.
+clauses do not control serde encoding. The extractor may locate them for diagnostics during extraction, but v1 does
+not serialize them in the semantic IR. Enumeration declaration order, not representation value, is the default
+serde literal order.
 
 Semantic aspects such as predicates, invariants, defaults, and class-wide/tagged properties can affect whether a
 candidate is valid. They remain structural facts, with Known/Unknown/Unsupported status, for the generator or a

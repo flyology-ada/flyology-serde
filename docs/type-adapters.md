@@ -103,8 +103,11 @@ Ada generic combinators are the normal reusable runtime mechanism: an optional, 
 instantiated with statically bound child adapters and policy. There is no global runtime type registry and no
 reflection lookup on the data path.
 
-For adapters derived from an instantiated user generic, the offline extractor resolves type- and value-affecting
-generic actuals into the shared Type IR. Any unresolved formal on a mandatory path is a generation error. Indefinite
+For adapters derived from an instantiated user generic, the future extraction path resolves supported type- and
+value-affecting generic actuals into the shared Type IR. The current v1 identity model is fixture-gated for named
+unconstrained type actuals and exact scalar or text value/object facts. Constrained type actuals and
+expression-valued actuals are rejected. Positional, defaulted, boxed, package, subprogram, and nested cases are not
+yet fixture-proven extraction support. Any unresolved formal on a mandatory path is a generation error. Indefinite
 types use caller-provided bounds, a bounded candidate with explicit capacity, or an allocating builder; the core
 never hides an allocation merely to make an indefinite result definite.
 
@@ -123,10 +126,13 @@ transactional publication, or error-path behavior.
 
 ## Automated extraction boundary
 
-Libadalang is used only by the pinned offline extractor owned by `flyology_type_ir`. The extractor runs after GNAT
-legality for the exact GPR project, scenario, target, and runtime. It can provide resolved named declarations,
-visibility-linked views, generic bindings, subtype relationships, components, discriminants, representation-independent
-enumeration order, and the discriminant/variant syntax tree when those facts are available and validated.
+Libadalang is used only by the pinned offline extractor owned by `flyology_type_ir`. The planned extractor runs after
+GNAT legality for the exact GPR project, scenario, target, and runtime. The current executable is deliberately
+fail-closed and emits no IR. The checked v1 fixtures establish schema/model shape and GNAT legality coverage; they do
+not yet prove implemented Libadalang extraction for every modeled construct. Once implemented, only fixture-gated,
+precisely resolved named declarations, visibility-linked views, supported generic bindings, subtype relationships,
+components, discriminants, representation-independent enumeration order, and exact discriminant/variant syntax
+trees may enter strict consumer output.
 
 Libadalang alone cannot choose serialized names, optional/default interpretation, unknown-field policy, array-bound
 presentation, numeric loss policy, private construction hooks, resource limits, stable wire tags, or compatibility
