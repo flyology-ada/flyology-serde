@@ -1,4 +1,6 @@
 with Ada.Unchecked_Conversion;
+with CBOR_Reader_Conformance_Tests;
+with CBOR_Reader_Tests;
 with CBOR_Writer_Tests;
 with Flyology_Serde.Budgets;
 with Flyology_Serde.Adapters.Arrays;
@@ -160,6 +162,8 @@ procedure Tests is
    Budget         : Budgets.Decode_Budget;
    Error          : Errors.Error_Info;
 begin
+   CBOR_Reader_Conformance_Tests;
+   CBOR_Reader_Tests;
    CBOR_Writer_Tests;
 
    declare

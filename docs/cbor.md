@@ -3,8 +3,8 @@
 The CBOR backend maps the serde logical model onto one well-formed CBOR data item as defined by RFC 8949. It does
 not define Flyology's message wire format, stable identities, schema evolution, framing, or transport behavior.
 
-At the current checkpoint, the bounded and allocating writers are implemented. Reader statements below are the
-normative contract for the planned reader, not a claim that reader code or its acceptance tests already exist.
+At the current checkpoint, the bounded and allocating writers and the bounded pull reader are implemented. An
+allocating input owner and allocating destination facades remain separate later work.
 
 | Logical value | CBOR representation |
 | --- | --- |
@@ -90,20 +90,21 @@ reader, and require reset.
 
 Heads, arguments, and lengths are parsed as `Unsigned_64`. A scalar numeric argument stays in that domain and is
 checked only against the requested logical scalar range, so `Read_Unsigned` can return `Unsigned_64'Last` regardless
-of `Natural'Last`. Before a structural length, count, or index is narrowed or used in index arithmetic, the reader
-compares it in the unsigned domain with `Natural'Last`, the configured limit, remaining input, and destination
-capacity. No hostile structural value is narrowed first. Definite payloads are bounds-checked before access. An
-indefinite string may require a validation/length pre-scan before caller-buffer copying; that scan is bounded by
-`Input_Remaining`, does not charge or move the cursor, and is followed by one charged consumption pass. No phase
-rescans a nested item, so total parser work is linear and bounded by a small constant multiple of the input-unit
-ceiling.
+of `Natural'Last`. A structural length is compared with `Natural'Last` before narrowing. Once narrowed, the reader
+checks the applicable configured limit and caller capacity; definite payloads are also checked against remaining
+input before access. Declared container counts are not estimated against remaining bytes: traversal validates every
+child head before publishing it as available. An indefinite string may require a validation/length pre-scan before
+caller-buffer copying; that scan is bounded by `Input_Remaining`, does not charge or move the cursor, and is followed
+by one charged consumption pass. No phase rescans a nested item, so total parser work is linear and bounded by a
+small constant multiple of the input-unit ceiling.
 
 An indefinite text or byte string contains only definite chunks of the same major type. Every text chunk is valid
 UTF-8 independently, so a code point cannot cross a chunk boundary. Empty chunks are accepted within the same
 bounds as other chunks.
 
-The typed reader rejects every semantic tag, including self-described CBOR tag 55799, with `Unsupported_Value` and
-rejects unassigned or unsupported simple values for ordinary logical reads. `Skip_Value` accepts and bounds a
+The typed reader rejects every semantic tag, including self-described CBOR tag 55799, with `Unsupported_Value`.
+Unassigned or unsupported major-type-7 simple values likewise report `Unsupported_Value` for ordinary logical
+reads. `Skip_Value` accepts and bounds a
 well-formed tag wrapper and its content so an adapter can discard an unknown field; it checks basic CBOR
 well-formedness but does not claim to validate the tag's unknown semantics. Generic CBOR-map pairs are delivered in
 source order without collapse. Key equivalence and duplicate action are type-specific adapter policy, for which
@@ -120,9 +121,9 @@ The CBOR backend reports every current `Format_Capabilities` member as true. Cap
 operation. An adapter must reject an unsupported or lossy mapping before the first output byte or destination
 mutation.
 
-The writer implementation follows the major-type, additional-information, indefinite-length, break, and
-floating-point rules in [RFC 8949](https://www.rfc-editor.org/rfc/rfc8949.html). The planned reader must reject
-reserved additional-information values, standalone or misplaced breaks, truncated heads and payloads, odd
+The backend follows the major-type, additional-information, indefinite-length, break, and floating-point rules in
+[RFC 8949](https://www.rfc-editor.org/rfc/rfc8949.html). The reader rejects reserved additional-information values,
+standalone or misplaced breaks, truncated heads and payloads, odd
 indefinite maps, wrong string chunk types, trailing bytes after the root item, arithmetic overflow, and all
 configured resource-limit violations.
 
