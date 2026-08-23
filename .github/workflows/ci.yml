@@ -1,0 +1,48 @@
+name: Ada CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flyology-serde-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test / ${{ matrix.os }} / GNAT ${{ matrix.toolchain.gnat }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+        toolchain:
+          - { gnat: 16.1.0, gprbuild: 26.0.1 }
+    steps:
+      - name: Check out sources
+        timeout-minutes: 10
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install Alire
+        timeout-minutes: 15
+        uses: alire-project/setup-alire@fc4c8ce471aa30b3af0d39ce15add1ee9eaf28f2 # v6.0.0
+        with:
+          version: 2.1.1
+          toolchain: >-
+            gnat_native=${{ matrix.toolchain.gnat }}
+            gprbuild=${{ matrix.toolchain.gprbuild }}
+          cache: true
+      - name: Select toolchain
+        timeout-minutes: 10
+        run: |
+          alr --non-interactive toolchain --select \
+            gnat_native=${{ matrix.toolchain.gnat }} \
+            gprbuild=${{ matrix.toolchain.gprbuild }}
+      - name: Build library
+        run: alr build
+      - name: Run assertion-enabled tests
+        working-directory: tests
+        run: alr run
