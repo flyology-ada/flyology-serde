@@ -13,6 +13,7 @@ with Flyology_Serde.Data_Model;
 with Flyology_Serde.Errors;
 with Flyology_Serde.Policies;
 with Flyology_Serde.Serialization;
+with Flyology_Serde.Serialization_Adapters;
 with Flyology_Serde.Serializers.Counting;
 with Flyology_Serde.UTF_8;
 with Interfaces;
@@ -140,11 +141,14 @@ procedure Tests is
       Enabled    : Boolean;
    end record;
 
+   Serialization_Calls : Natural := 0;
+
    procedure Serialize
      (Item  : Sample;
       Into  : in out Serialization.Serializer'Class;
       Error : in out Errors.Error_Info) is
    begin
+      Serialization_Calls := Serialization_Calls + 1;
       Into.Begin_Record ("Tests.Sample", 2, Error);
       Into.Put_Field ("identifier", Error);
       Into.Put_Unsigned (Item.Identifier, Error);
@@ -152,6 +156,11 @@ procedure Tests is
       Into.Put_Boolean (Item.Enabled, Error);
       Into.End_Record (Error);
    end Serialize;
+
+   package Sample_Serialization is new
+     Flyology_Serde.Serialization_Adapters
+       (Source_Type      => Sample,
+        Serialize_Value => Serialize);
 
    Output         : Counting.Counter;
    Mismatch       : Counting.Counter;
@@ -204,11 +213,21 @@ begin
    Record_Adapter_Tests;
    Variant_Adapter_Tests;
 
-   Serialize ((Identifier => 42, Enabled => True), Output, Error);
+   Sample_Serialization.Serialize
+     ((Identifier => 42, Enabled => True), Output, Error);
    pragma Assert (Error.Code = Errors.No_Error);
    pragma Assert (Output.Event_Count = 6);
    pragma Assert (Output.Container_Depth = 0);
+   pragma Assert (Serialization_Calls = 1);
 
+   Errors.Fail (Error, Errors.Application_Error);
+   Sample_Serialization.Serialize
+     ((Identifier => 99, Enabled => False), Output, Error);
+   pragma Assert (Error.Code = Errors.Application_Error);
+   pragma Assert (Serialization_Calls = 1);
+   pragma Assert (Output.Event_Count = 6);
+
+   Errors.Reset (Error);
    Output.End_Record (Error);
    pragma Assert (Error.Code = Errors.Invalid_State);
 
