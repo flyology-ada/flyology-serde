@@ -175,7 +175,7 @@ package body Flyology_Serde.Serializers.Counting is
    overriding
    procedure Put_Float_64
      (Self  : in out Counter;
-      Value : Interfaces.IEEE_Float_64;
+      Value : Data_Model.Float_64_Value;
       Error : in out Errors.Error_Info)
    is
       pragma Unreferenced (Value);

@@ -44,7 +44,7 @@ package Flyology_Serde.Deserialization is
 
    procedure Read_Float_64
      (Self  : in out Deserializer;
-      Value : out Interfaces.IEEE_Float_64;
+      Value : out Data_Model.Float_64_Value;
       Error : in out Errors.Error_Info)
    is abstract;
 

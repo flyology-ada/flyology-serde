@@ -1,5 +1,6 @@
 with Ada.Streams;
 with Ada.Unchecked_Conversion;
+with Flyology_Serde.Data_Model;
 with Flyology_Serde.Errors;
 with Flyology_Serde.Serializers.JSON;
 with Interfaces;
@@ -7,6 +8,7 @@ with Interfaces;
 procedure JSON_Writer_Tests is
    package Errors renames Flyology_Serde.Errors;
    package JSON renames Flyology_Serde.Serializers.JSON;
+   package Data_Model renames Flyology_Serde.Data_Model;
    use type Errors.Error_Code;
    use type Interfaces.IEEE_Float_64;
    use type Interfaces.Unsigned_64;
@@ -78,7 +80,7 @@ begin
    Assert_Output (Writer, """line\n\""quote""");
 
    Writer.Reset;
-   Writer.Put_Float_64 (-0.0, Error);
+   Writer.Put_Float_64 (Data_Model.Make_Finite (-0.0), Error);
    pragma Assert (Error.Code = Errors.No_Error);
    declare
       Buffer     : String (1 .. 64);
@@ -99,12 +101,21 @@ begin
       Copy_Error : Errors.Error_Info;
       Reparsed   : Interfaces.IEEE_Float_64;
    begin
-      Writer.Put_Float_64 (Original, Error);
+      Writer.Put_Float_64 (Data_Model.Make_Finite (Original), Error);
       Writer.Copy_Output (Buffer, Length, Copy_Error);
       pragma Assert (Copy_Error.Code = Errors.No_Error);
       Reparsed := Interfaces.IEEE_Float_64'Value (Buffer (1 .. Length));
       pragma Assert (Bits (Reparsed) = Bits (Original));
    end;
+
+   Writer.Reset;
+   Writer.Put_Float_64 (Data_Model.Positive_Infinity_Value, Error);
+   pragma Assert (Error.Code = Errors.Unsupported_Value);
+   pragma Assert (Writer.Written_Length = 0);
+   pragma Assert (not Writer.Is_Complete);
+
+   Errors.Reset (Error);
+   Writer.Reset;
 
    Small.Put_Null (Error);
    pragma Assert (Error.Code = Errors.No_Error);

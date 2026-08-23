@@ -1,9 +1,11 @@
+with Ada.Unchecked_Conversion;
 with Flyology_Serde.Budgets;
 with Flyology_Serde.Adapters.Arrays;
 with Flyology_Serde.Adapters.Optionals;
 with Flyology_Serde.Adapters.Signed_Integers;
 with Flyology_Serde.Adapters.Text;
 with Flyology_Serde.Deserialization;
+with Flyology_Serde.Data_Model;
 with Flyology_Serde.Errors;
 with Flyology_Serde.Policies;
 with Flyology_Serde.Serialization;
@@ -15,11 +17,18 @@ with JSON_Writer_Tests;
 
 procedure Tests is
    package Budgets renames Flyology_Serde.Budgets;
+   package Data_Model renames Flyology_Serde.Data_Model;
    package Errors renames Flyology_Serde.Errors;
    package Serialization renames Flyology_Serde.Serialization;
    package Counting renames Flyology_Serde.Serializers.Counting;
    use type Errors.Error_Code;
    use type Errors.Input_Offset_Unit;
+   use type Data_Model.Float_64_Category;
+   use type Interfaces.IEEE_Float_64;
+   use type Interfaces.Unsigned_64;
+
+   function Float_Bits is new Ada.Unchecked_Conversion
+     (Interfaces.IEEE_Float_64, Interfaces.Unsigned_64);
 
    package Integer_Adapter is new
      Flyology_Serde.Adapters.Signed_Integers (Integer);
@@ -146,9 +155,37 @@ procedure Tests is
    Some_Value     : Counting.Counter;
    Bad_Some       : Counting.Counter;
    Adapter_Output : Counting.Counter;
+   Float_Output   : Counting.Counter;
    Budget         : Budgets.Decode_Budget;
    Error          : Errors.Error_Info;
 begin
+   declare
+      Default : Data_Model.Float_64_Value;
+   begin
+      pragma Assert (Data_Model.Category (Default) = Data_Model.Finite_Float);
+      pragma Assert (Data_Model.Finite_Value (Default) = 0.0);
+      pragma Assert (Float_Bits (Data_Model.Finite_Value (Default)) = 0);
+   end;
+
+   pragma Assert
+     (Data_Model.Category (Data_Model.Positive_Infinity_Value)
+      = Data_Model.Positive_Infinity);
+   pragma Assert
+     (Data_Model.Category (Data_Model.Negative_Infinity_Value)
+      = Data_Model.Negative_Infinity);
+   pragma Assert
+     (Data_Model.Category (Data_Model.Not_A_Number_Value)
+      = Data_Model.Not_A_Number);
+   pragma Assert (Float_Output.Capabilities.Nonfinite_Float_64);
+   pragma Assert (Float_Output.Capabilities.Signed_Float_Zero);
+
+   Float_Output.Put_Float_64 (Data_Model.Make_Finite (-0.0), Error);
+   Float_Output.Put_Float_64 (Data_Model.Positive_Infinity_Value, Error);
+   Float_Output.Put_Float_64 (Data_Model.Negative_Infinity_Value, Error);
+   Float_Output.Put_Float_64 (Data_Model.Not_A_Number_Value, Error);
+   pragma Assert (Error.Code = Errors.No_Error);
+   pragma Assert (Float_Output.Event_Count = 4);
+
    JSON_Reader_Tests;
    JSON_Writer_Tests;
 

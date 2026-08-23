@@ -20,11 +20,13 @@ operation. Ada accessibility checks should enforce this where possible; otherwis
 
 ## Scalars, strings, and bytes
 
-The core numeric events cover exact 64-bit signed integers, exact 64-bit unsigned integers, and IEEE binary64. A
-generated adapter range-checks before conversion. Wider integers, fixed point, decimal fixed point, and other
-floating formats require an exact handwritten capability or are rejected. Format handling of NaN, infinity, and
-signed zero is a configured capability and can fail with `Unsupported_Value`; no adapter substitutes a rounded or
-textual approximation implicitly.
+The core numeric events cover exact 64-bit signed integers, exact 64-bit unsigned integers, and IEEE binary64. The
+binary64 value is a safe semantic wrapper: finite values carry a valid Ada float, while positive infinity, negative
+infinity, and NaN are explicit categories. It does not carry NaN payload or signaling identity. A generated adapter
+range-checks before conversion. Wider integers, fixed point, decimal fixed point, and other floating formats require
+an exact handwritten capability or are rejected. Format handling of all three nonfinite categories and signed zero
+is a configured capability and can fail with `Unsupported_Value`; no adapter substitutes a rounded or textual
+approximation implicitly.
 
 `Text_Value` is a sequence of Unicode scalar values. The current `String` boundary carries validated UTF-8, not an
 unspecified locale encoding. Generated adapters transcode predefined `String`, `Wide_String`, and

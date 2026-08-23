@@ -45,7 +45,7 @@ package Flyology_Serde.Serializers.JSON is
    overriding
    procedure Put_Float_64
      (Self  : in out Writer_Base;
-      Value : Interfaces.IEEE_Float_64;
+      Value : Data_Model.Float_64_Value;
       Error : in out Errors.Error_Info);
 
    overriding

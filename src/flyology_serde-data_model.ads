@@ -1,3 +1,5 @@
+with Interfaces;
+
 --  Logical value kinds exchanged between Ada adapters and format backends.
 
 package Flyology_Serde.Data_Model
@@ -29,6 +31,30 @@ is
    function Known_Length (Length : Natural) return Length_Information
    is ((Known => True, Length => Length));
 
+   type Float_64_Category is
+     (Finite_Float, Positive_Infinity, Negative_Infinity, Not_A_Number);
+
+   type Float_64_Value is private;
+
+   function Category (Item : Float_64_Value) return Float_64_Category;
+
+   function Finite_Value
+     (Item : Float_64_Value) return Interfaces.IEEE_Float_64
+   with Pre => Category (Item) = Finite_Float;
+
+   function Make_Finite
+     (Value : Interfaces.IEEE_Float_64) return Float_64_Value
+   with Post => Category (Make_Finite'Result) = Finite_Float;
+
+   function Positive_Infinity_Value return Float_64_Value
+   with Post => Category (Positive_Infinity_Value'Result) = Positive_Infinity;
+
+   function Negative_Infinity_Value return Float_64_Value
+   with Post => Category (Negative_Infinity_Value'Result) = Negative_Infinity;
+
+   function Not_A_Number_Value return Float_64_Value
+   with Post => Category (Not_A_Number_Value'Result) = Not_A_Number;
+
    type Format_Capabilities is record
       Unknown_Container_Lengths : Boolean := False;
       Byte_Values               : Boolean := False;
@@ -39,4 +65,10 @@ is
    end record;
 
    All_Capabilities : constant Format_Capabilities := (others => True);
+
+private
+   type Float_64_Value is record
+      Kind  : Float_64_Category := Finite_Float;
+      Value : Interfaces.IEEE_Float_64 := 0.0;
+   end record;
 end Flyology_Serde.Data_Model;

@@ -46,6 +46,8 @@ the full representation. Whitespace is accepted between JSON structural tokens. 
 hexadecimal JSON string; this is the backend's exact tagged representation, not a general JSON object coercion.
 
 Strings and names must be valid UTF-8. Control characters, quotation marks, and reverse solidus are escaped. Other
-valid UTF-8 bytes are preserved. Byte values use uppercase hexadecimal. Nonfinite binary64 is rejected before the
-first output event. Finite values use 17 significant decimal digits for bit-exact binary64 round trips; signed zero
-and adjacent representable values are retained as JSON numbers.
+valid UTF-8 bytes are preserved. Byte values use uppercase hexadecimal. `Put_Float_64` rejects a nonfinite category
+before emitting any bytes for that event, without constructing an invalid Ada float. An adapter that requires
+nonfinite support checks the backend capability before its traversal's first event. Finite values use 17 significant
+decimal digits for bit-exact binary64 round trips; signed zero and adjacent representable values are retained as
+JSON numbers.

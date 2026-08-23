@@ -5,7 +5,7 @@ with Flyology_Serde.UTF_8;
 
 package body Flyology_Serde.Serializers.JSON is
    use type Errors.Error_Code;
-   use type Interfaces.IEEE_Float_64;
+   use type Data_Model.Float_64_Category;
 
    Hex_Digits : constant String := "0123456789ABCDEF";
 
@@ -327,21 +327,19 @@ package body Flyology_Serde.Serializers.JSON is
    overriding
    procedure Put_Float_64
      (Self  : in out Writer_Base;
-      Value : Interfaces.IEEE_Float_64;
+      Value : Data_Model.Float_64_Value;
       Error : in out Errors.Error_Info)
    is
       Image : String (1 .. 32);
    begin
-      if Value /= Value
-        or else Value < Interfaces.IEEE_Float_64'First
-        or else Value > Interfaces.IEEE_Float_64'Last
-      then
+      if Data_Model.Category (Value) /= Data_Model.Finite_Float then
          Fail (Self, Errors.Unsupported_Value, Error);
          return;
       end if;
 
       Before_Value (Self, Error);
-      Float_64_IO.Put (Image, Value, Aft => 16, Exp => 3);
+      Float_64_IO.Put
+        (Image, Data_Model.Finite_Value (Value), Aft => 16, Exp => 3);
       Append
         (Writer_Base'Class (Self),
          Ada.Strings.Fixed.Trim (Image, Ada.Strings.Both),

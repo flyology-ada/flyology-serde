@@ -925,26 +925,29 @@ package body Flyology_Serde.Deserializers.JSON is
    overriding
    procedure Read_Float_64
      (Self  : in out Reader;
-      Value : out Interfaces.IEEE_Float_64;
+      Value : out Data_Model.Float_64_Value;
       Error : in out Errors.Error_Info)
    is
       Buffer     : String (1 .. 768);
       Length     : Natural;
       Is_Integer : Boolean;
       Negative   : Boolean;
+      Parsed     : Interfaces.IEEE_Float_64;
    begin
-      Value := 0.0;
+      Value := Data_Model.Make_Finite (0.0);
       Require_Leading (Self, "-0123456789", Error);
       Prepare_Value (Self, Error);
       Read_Number_Text (Self, Buffer, Length, Is_Integer, Negative, Error);
       if Error.Code = Errors.No_Error then
          begin
-            Value := Interfaces.IEEE_Float_64'Value (Buffer (1 .. Length));
-            if Value /= Value
-              or else Value < Interfaces.IEEE_Float_64'First
-              or else Value > Interfaces.IEEE_Float_64'Last
+            Parsed := Interfaces.IEEE_Float_64'Value (Buffer (1 .. Length));
+            if Parsed /= Parsed
+              or else Parsed < Interfaces.IEEE_Float_64'First
+              or else Parsed > Interfaces.IEEE_Float_64'Last
             then
                Fail (Self, Errors.Out_Of_Range, Error, Self.Cursor - Length);
+            else
+               Value := Data_Model.Make_Finite (Parsed);
             end if;
          exception
             when Constraint_Error =>

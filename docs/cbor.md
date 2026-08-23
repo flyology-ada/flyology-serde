@@ -43,6 +43,11 @@ well-formed nonpreferred argument widths and binary16, binary32, or binary64 flo
 finite shorter value exactly, retains infinity and signed zero, and retains the NaN category without promising its
 payload.
 
+The writer encodes the positive-infinity, negative-infinity, and NaN categories as binary64 bit patterns
+`7FF0000000000000`, `FFF0000000000000`, and canonical quiet NaN `7FF8000000000000` respectively. A reader classifies
+the sign, exponent, and significand bits before any Ada floating conversion. Only a proven-finite representation is
+converted or promoted, so hostile nonfinite input never creates an invalid Ada floating value.
+
 `Put_Signed` uses major type 0 for a nonnegative signed value and major type 1 for a negative value. `Read_Signed`
 accepts either, but rejects a major-type-0 argument greater than `Integer_64'Last` and a major-type-1 value below
 `Integer_64'First`. `Read_Unsigned` accepts only major type 0. `Peek_Kind` therefore follows a CBOR surface

@@ -73,7 +73,7 @@ package Flyology_Serde.Deserializers.JSON is
    overriding
    procedure Read_Float_64
      (Self  : in out Reader;
-      Value : out Interfaces.IEEE_Float_64;
+      Value : out Data_Model.Float_64_Value;
       Error : in out Errors.Error_Info);
 
    overriding

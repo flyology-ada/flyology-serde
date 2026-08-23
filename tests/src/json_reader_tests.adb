@@ -161,12 +161,14 @@ begin
       Input : aliased constant String := "-0.0";
       Item  : JSON.Reader (Input'Access);
       Error : Errors.Error_Info;
-      Value : Interfaces.IEEE_Float_64;
+      Value : Flyology_Serde.Data_Model.Float_64_Value;
    begin
       Item.Initialize;
       Item.Read_Float_64 (Value, Error);
       pragma Assert
-        (Value = 0.0 and then Bits (Value) = 16#8000_0000_0000_0000#);
+        (Flyology_Serde.Data_Model.Finite_Value (Value) = 0.0
+         and then Bits (Flyology_Serde.Data_Model.Finite_Value (Value))
+                  = 16#8000_0000_0000_0000#);
       Finish (Item, Error);
    end;
 

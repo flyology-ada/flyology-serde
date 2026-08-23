@@ -39,7 +39,7 @@ package Flyology_Serde.Serialization is
 
    procedure Put_Float_64
      (Self  : in out Serializer;
-      Value : Interfaces.IEEE_Float_64;
+      Value : Data_Model.Float_64_Value;
       Error : in out Errors.Error_Info)
    is abstract;
 

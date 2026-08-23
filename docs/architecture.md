@@ -70,9 +70,13 @@ or bounded name comparison. Those tokens are unstable build artifacts and never 
 
 ## Scalar fidelity
 
-The initial logical numeric events are exact signed and unsigned 64-bit integers and IEEE binary64. Binary64 events
-preserve the value category, including NaN, infinity, and signed zero; a backend may return `Unsupported_Value` when
-its format cannot preserve one. A generated adapter must prove that an Ada scalar fits an event exactly. Wider
+The initial logical numeric events are exact signed and unsigned 64-bit integers and IEEE binary64. A binary64 event
+uses a definite private value containing a semantic category and an always-valid finite Ada slot. It never passes an
+invalid Ada floating representation across a subprogram boundary. Default initialization is finite positive zero;
+`Make_Finite` preserves the sign bit of zero. The three nonfinite categories are positive infinity, negative
+infinity, and NaN, without a NaN payload or signaling-state promise. `Nonfinite_Float_64` means that a backend
+accepts and returns all three categories. A backend may return `Unsupported_Value` when its format cannot preserve
+them. A generated adapter must prove that an Ada scalar fits an event exactly. Wider
 integers, decimal or ordinary fixed point, non-binary64 floating point, and constrained scalar semantics require an
 explicit exact adapter or a checked `Unsupported_Value` diagnostic. Generation and runtime must never truncate,
 round, or infer a lossy conversion.
