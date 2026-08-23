@@ -669,6 +669,21 @@ package body Flyology_Serde.Deserializers.CBOR is
       Initialize (Self, Policy);
    end Reset;
 
+   overriding
+   procedure Abort_Document
+     (Self : in out Reader; Error : in out Errors.Error_Info) is
+   begin
+      Latch (Self, Error);
+      while Budgets.Depth (Self.Budget) > 0 loop
+         Budgets.Leave_Container (Self.Budget, Error);
+      end loop;
+      Self.Stack := [others => <>];
+      Self.Depth := 0;
+      Self.Failed := True;
+      Self.Document_Complete := False;
+   end Abort_Document;
+
+   overriding
    procedure Finish_Document
      (Self : in out Reader; Error : in out Errors.Error_Info) is
    begin

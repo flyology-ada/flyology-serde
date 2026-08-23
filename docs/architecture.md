@@ -21,7 +21,10 @@ candidate. `Begin_Candidate` initializes it, `Commit_Candidate` is the only oper
 commit must leave the previously published application value unchanged. `Deserialization_Adapters.Deserialize` is
 a whole-document root transaction: after value traversal it calls the backend's abstract `Finish_Document`, then
 commits only if exact-root and trailing-input validation succeed. Nested combinators call their candidate traversal
-directly and never finish a document.
+directly and never finish a document. On every reported failure or exception, the root first calls the backend's
+nonraising, idempotent `Abort_Document`, then rolls back the unpublished candidate. Abort unwinds every entered
+backend scope while preserving an earlier status and poisons the operation; the backend's explicit reset is the only
+route to reuse. A raised adapter exception remains the primary exception.
 
 The bounded core does not allocate. Text, bytes, field names, and variant names are copied into caller-supplied
 buffers by a deserializer. A backend reports `Capacity_Exceeded` instead of allocating. The JSON and CBOR
@@ -48,8 +51,9 @@ type-specific traversal; a backend constructor must be given the same or stricte
 One concrete deserializer owns exactly one `Decode_Budget`. The backend charges raw input units as its cursor
 advances, one logical value when it accepts that value, one container item when it accepts that item, and text/byte
 length before copying. Generated adapters do not charge this budget. They bound separate schema work such as field
-lookup and candidate capacity. A backend must unwind every successfully entered budget scope exactly once even when
-an error is already latched; unwind preserves the primary error.
+lookup and candidate capacity. A backend operation may unwind scopes when it detects its own failure; root abort
+must also unwind scopes left open by an adapter failure or exception. Each successfully entered scope is unwound
+exactly once even when an error is already latched, and unwind preserves the primary error.
 
 For JSON and CBOR, input units and error offsets are zero-based bytes. Any future backend that uses code units or
 code points must select that unit at construction and retain it for the operation. Capabilities are likewise stable

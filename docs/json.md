@@ -29,6 +29,9 @@ variant names are copied into caller-owned buffers. `Initialize` is required bef
 After exactly one root value, `Finish_Document` consumes trailing JSON whitespace and rejects any other trailing
 input; only then does `Is_Complete` become true. Any parse, capacity, budget, or protocol error unwinds all entered
 budget scopes, poisons the reader, and requires `Reset`, which restarts at byte offset zero with a fresh budget.
+If an adapter reports or raises while it owns an open traversal scope, the root transaction invokes
+`Abort_Document`; abort is nonraising and idempotent, unwinds the remaining scopes without replacing the primary
+status, and leaves the reader poisoned until reset.
 
 `Deserializers.JSON.Copied_Input` is a generic synchronous snapshot facade around a complete root adapter. It checks
 the caller input length against `Maximum_Input_Units` before allocation, copies the string on the standard Ada heap,

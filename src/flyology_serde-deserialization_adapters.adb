@@ -21,10 +21,12 @@ package body Flyology_Serde.Deserialization_Adapters is
          Commit_Candidate (Target, Error);
       end if;
       if Error.Code /= Errors.No_Error then
+         From.Abort_Document (Error);
          Rollback_Candidate (Target);
       end if;
    exception
       when others =>
+         From.Abort_Document (Error);
          Rollback_Candidate (Target);
          raise;
    end Deserialize;

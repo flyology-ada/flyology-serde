@@ -26,6 +26,13 @@ package Flyology_Serde.Deserialization is
      (Self : in out Deserializer; Error : in out Errors.Error_Info)
    is abstract;
 
+   --  Poisons one failed root operation and unwinds every backend-owned
+   --  scope without replacing a primary status. Must be nonraising and
+   --  idempotent; Reset is required before reuse.
+   procedure Abort_Document
+     (Self : in out Deserializer; Error : in out Errors.Error_Info)
+   is abstract;
+
    procedure Read_Null
      (Self : in out Deserializer; Error : in out Errors.Error_Info)
    is abstract;

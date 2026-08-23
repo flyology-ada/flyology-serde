@@ -37,6 +37,12 @@ package Flyology_Serde.Deserializers.JSON is
    procedure Finish_Document
      (Self : in out Reader; Error : in out Errors.Error_Info);
 
+   --  Nonraising, idempotent root cleanup. Preserves a latched status, unwinds
+   --  all open traversal scopes, and poisons the reader until Reset.
+   overriding
+   procedure Abort_Document
+     (Self : in out Reader; Error : in out Errors.Error_Info);
+
    function Is_Complete (Self : Reader) return Boolean;
    function Input_Offset (Self : Reader) return Natural;
 

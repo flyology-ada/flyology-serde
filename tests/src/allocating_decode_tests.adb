@@ -1,10 +1,12 @@
 with Ada.Containers;
+with Ada.Exceptions;
 with Ada.Streams;
 with Ada.Strings.Unbounded;
 with Flyology_Serde.Adapters.Allocating_Bytes;
 with Flyology_Serde.Adapters.Allocating_Text;
 with Flyology_Serde.Adapters.Optionals;
 with Flyology_Serde.Adapters.Signed_Integers;
+with Flyology_Serde.Data_Model;
 with Flyology_Serde.Deserialization;
 with Flyology_Serde.Deserialization_Adapters;
 with Flyology_Serde.Deserializers.CBOR;
@@ -17,11 +19,13 @@ with Flyology_Serde.Serialization;
 with Flyology_Serde.Serializers.CBOR;
 with Flyology_Serde.Serializers.Counting;
 with Flyology_Serde.Serializers.JSON;
+with Interfaces;
 
 procedure Allocating_Decode_Tests is
    package Allocating_Bytes renames Flyology_Serde.Adapters.Allocating_Bytes;
    package Allocating_Text renames Flyology_Serde.Adapters.Allocating_Text;
    package CBOR renames Flyology_Serde.Deserializers.CBOR;
+   package Data_Model renames Flyology_Serde.Data_Model;
    package Errors renames Flyology_Serde.Errors;
    package JSON renames Flyology_Serde.Deserializers.JSON;
    package Policies renames Flyology_Serde.Policies;
@@ -31,8 +35,11 @@ procedure Allocating_Decode_Tests is
    use type Ada.Containers.Count_Type;
    use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Array;
+   use type Data_Model.Value_Kind;
    use type Errors.Error_Code;
    use type Errors.Input_Offset_Unit;
+   use type Errors.Path_Element_Kind;
+   use type Interfaces.Integer_64;
 
    subtype Bytes is Ada.Streams.Stream_Element_Array;
 
@@ -47,9 +54,13 @@ procedure Allocating_Decode_Tests is
       Rollbacks : Natural := 0;
    end record;
 
-   Finish_Observed : Boolean := False;
-   Require_Finish  : Boolean := False;
-   Raise_During_Read : Boolean := False;
+   Finish_Observed          : Boolean := False;
+   Require_Finish           : Boolean := False;
+   Raise_During_Read        : Boolean := False;
+   Report_In_Open_Sequence  : Boolean := False;
+   Raise_In_Open_Sequence   : Boolean := False;
+   Report_During_Commit     : Boolean := False;
+   Raise_During_Commit      : Boolean := False;
 
    procedure Begin_Integer
      (Target : in out Integer_Builder; Error : in out Errors.Error_Info) is
@@ -65,18 +76,44 @@ procedure Allocating_Decode_Tests is
       Policy : Policies.Decode_Policy;
       Error  : in out Errors.Error_Info) is
       pragma Unreferenced (Policy);
+      Length    : Data_Model.Length_Information;
+      Available : Boolean;
    begin
       if Raise_During_Read then
          raise Program_Error with "injected candidate failure";
       end if;
+
+      if Report_In_Open_Sequence or else Raise_In_Open_Sequence then
+         From.Begin_Sequence (Length, Error);
+         if Error.Code = Errors.No_Error then
+            From.Next_Element (Available, Error);
+         end if;
+         if Error.Code /= Errors.No_Error then
+            return;
+         end if;
+         pragma Assert (Available);
+
+         if Report_In_Open_Sequence then
+            Errors.Push_Field (Error, "payload");
+            Errors.Fail (Error, Errors.Application_Error);
+            return;
+         end if;
+         raise Program_Error with "injected open-container failure";
+      end if;
+
       Integers.Deserialize_Candidate (From, Target.Candidate, Error);
    end Read_Integer;
 
    procedure Commit_Integer
      (Target : in out Integer_Builder; Error : in out Errors.Error_Info) is
-      pragma Unreferenced (Error);
    begin
       pragma Assert (not Require_Finish or else Finish_Observed);
+      if Report_During_Commit then
+         Errors.Fail (Error, Errors.Application_Error);
+         return;
+      elsif Raise_During_Commit then
+         raise Program_Error with "injected commit failure";
+      end if;
       Target.Published := Target.Candidate;
       Target.Active := False;
       Target.Commits := Target.Commits + 1;
@@ -263,6 +300,123 @@ begin
       Root_Default.Deserialize (From, Target, Error);
       pragma Assert (Error.Code = Errors.Syntax_Error);
       pragma Assert (Target.Published = 3 and then Target.Rollbacks = 1);
+   end;
+
+   --  Root failure unwinds open backend scopes, poisons reuse, and preserves
+   --  the primary status until an explicit reader reset.
+   declare
+      Input     : aliased constant String := "[7]";
+      From      : JSON.Reader (Input'Access);
+      Target    : Integer_Builder := (Published => 3, others => <>);
+      Error     : Errors.Error_Info;
+      Length    : Data_Model.Length_Information;
+      Available : Boolean;
+      Value     : Interfaces.Integer_64;
+   begin
+      Report_In_Open_Sequence := True;
+      From.Initialize (Root_Default.Configured_Policy);
+      Root_Default.Deserialize (From, Target, Error);
+      Report_In_Open_Sequence := False;
+      pragma Assert (Error.Code = Errors.Application_Error);
+      pragma Assert (Error.Input_Offset = 1);
+      pragma Assert (Error.Offset_Unit = Errors.Byte_Offset);
+      pragma Assert (Error.Path_Length = 1);
+      pragma Assert (Error.Path (1).Kind = Errors.Field_Element);
+      pragma Assert (Error.Path (1).Name_Length = 7);
+      pragma Assert (Error.Path (1).Name (1 .. 7) = "payload");
+      pragma Assert (Target.Published = 3 and then Target.Rollbacks = 1);
+
+      From.Abort_Document (Error);
+      pragma Assert (Error.Code = Errors.Application_Error);
+      Errors.Reset (Error);
+      pragma Assert (From.Peek_Kind (Error) = Data_Model.Null_Value);
+      pragma Assert (Error.Code = Errors.Invalid_State);
+
+      Errors.Reset (Error);
+      From.Reset (Root_Default.Configured_Policy);
+      From.Begin_Sequence (Length, Error);
+      From.Next_Element (Available, Error);
+      From.Read_Signed (Value, Error);
+      pragma Assert (Available and then Value = 7);
+      From.Next_Element (Available, Error);
+      From.End_Sequence (Error);
+      From.Finish_Document (Error);
+      pragma Assert (Error.Code = Errors.No_Error and then not Available);
+   end;
+
+   --  The same unwind and poison contract applies when an adapter raises.
+   declare
+      Input  : aliased constant Bytes := [16#81#, 7];
+      From   : CBOR.Reader (Input'Access);
+      Target : Integer_Builder := (Published => 3, others => <>);
+      Error  : Errors.Error_Info;
+      Raised : Boolean := False;
+   begin
+      Raise_In_Open_Sequence := True;
+      From.Initialize (Root_Default.Configured_Policy);
+      begin
+         Root_Default.Deserialize (From, Target, Error);
+      exception
+         when Occurrence : Program_Error =>
+            Raised :=
+              Ada.Exceptions.Exception_Message (Occurrence)
+              = "injected open-container failure";
+      end;
+      Raise_In_Open_Sequence := False;
+      pragma Assert (Raised);
+      pragma Assert (Target.Published = 3 and then Target.Rollbacks = 1);
+      From.Abort_Document (Error);
+      Errors.Reset (Error);
+      pragma Assert (From.Peek_Kind (Error) = Data_Model.Null_Value);
+      pragma Assert (Error.Code = Errors.Invalid_State);
+   end;
+
+   --  A commit status after successful document finishing still aborts the
+   --  backend and rolls back without publishing the candidate.
+   declare
+      Input  : aliased constant String := "7";
+      From   : JSON.Reader (Input'Access);
+      Target : Integer_Builder := (Published => 3, others => <>);
+      Error  : Errors.Error_Info;
+   begin
+      Report_During_Commit := True;
+      From.Initialize (Root_Default.Configured_Policy);
+      Root_Default.Deserialize (From, Target, Error);
+      Report_During_Commit := False;
+      pragma Assert (Error.Code = Errors.Application_Error);
+      pragma Assert (Error.Input_Offset = 1);
+      pragma Assert (Error.Offset_Unit = Errors.Byte_Offset);
+      pragma Assert (not From.Is_Complete);
+      pragma Assert (Target.Published = 3 and then Target.Rollbacks = 1);
+      Errors.Reset (Error);
+      pragma Assert (From.Peek_Kind (Error) = Data_Model.Null_Value);
+      pragma Assert (Error.Code = Errors.Invalid_State);
+   end;
+
+   --  A commit exception likewise remains primary after abort and rollback.
+   declare
+      Input  : aliased constant Bytes := [7];
+      From   : CBOR.Reader (Input'Access);
+      Target : Integer_Builder := (Published => 3, others => <>);
+      Error  : Errors.Error_Info;
+      Raised : Boolean := False;
+   begin
+      Raise_During_Commit := True;
+      From.Initialize (Root_Default.Configured_Policy);
+      begin
+         Root_Default.Deserialize (From, Target, Error);
+      exception
+         when Occurrence : Program_Error =>
+            Raised :=
+              Ada.Exceptions.Exception_Message (Occurrence)
+              = "injected commit failure";
+      end;
+      Raise_During_Commit := False;
+      pragma Assert (Raised and then Error.Code = Errors.No_Error);
+      pragma Assert (not From.Is_Complete);
+      pragma Assert (Target.Published = 3 and then Target.Rollbacks = 1);
+      pragma Assert (From.Peek_Kind (Error) = Data_Model.Null_Value);
+      pragma Assert (Error.Code = Errors.Invalid_State);
    end;
 
    declare

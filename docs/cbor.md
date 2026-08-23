@@ -92,7 +92,8 @@ overflow-checked and bounded. The active logical depth plus raw skipped-subtree 
 `Maximum_Nesting_Depth`; a skip begun inside a nearly full logical container receives no independent depth
 allowance. Each tag or other wrapper adds only constant work. Tags do not consume logical values, and chunks do not
 consume logical text or byte events. Errors report zero-based byte offsets, unwind entered budget scopes, poison the
-reader, and require reset.
+reader, and require reset. Root `Abort_Document` additionally unwinds scopes left open by an adapter status or
+exception. It is nonraising and idempotent, preserves a primary status, and leaves the reader poisoned until reset.
 
 Heads, arguments, and lengths are parsed as `Unsigned_64`. A scalar numeric argument stays in that domain and is
 checked only against the requested logical scalar range, so `Read_Unsigned` can return `Unsigned_64'Last` regardless
