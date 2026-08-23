@@ -39,6 +39,11 @@ Enumeration literals use their declared logical names after an explicit rename p
 representation values are not serialized. Character types may map to one scalar text value or to their enumeration
 literal, but the choice is adapter policy and must round-trip.
 
+The reviewed generated-enumeration seam bounds total literals and every type, primary, and alias name. It validates
+all declared mappings before a format event or typed read, then serializes the canonical primary name. Decode scans
+every literal so an ambiguous handwritten matcher is rejected and an unmatched name is invalid. It never indexes by
+`Enum_Rep`, assumes monotonic representation values, or emits an Ada position.
+
 ## Optionals
 
 Optionality is a logical `none` or `some(value)` construct, not merely a nullable field. This distinction preserves
@@ -100,6 +105,18 @@ come from the resolved Type IR condition tree, never reparsing presentation synt
 Type IR also retains the resolved default-expression tree. The serde overlay chooses whether serialization or
 construction policy uses that Known structure; it cannot alter the expression or replace a mandatory Unknown or
 Unsupported default or bound. Array-bound transformation follows the same rule.
+
+The reviewed finite-variant seam may lower exact nested variant paths to complete leaf alternatives only when the
+mapping is finite, bounded, and lossless. A common declaration has one field identity across every leaf that contains
+it; distinct branch declarations remain distinct even with equal presentation names. Constructor resolution happens
+before the builder's `Begin_Alternative` hook. That hook stages only unpublished candidate state and must leave outer
+rollback valid after a status or exception. After selected fields, defaults, and `End_Variant`, the final hook checks
+or constructs the exact discriminant path. It cannot invent a discriminant choice or override structural facts.
+
+Integer or dynamic discriminants, unresolved choices, unsafe constrained construction, and visibility gaps require a
+generator diagnostic and a handwritten or generator-specific staged builder. A zero-field alternative still applies
+unknown-field policy to supplied payload entries. An all-nullary sum uses a separate variant combinator so its logical
+variant envelope is not silently changed to an enumeration.
 
 ## Private, limited, controlled, and concurrent types
 

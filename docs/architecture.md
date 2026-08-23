@@ -60,6 +60,10 @@ code points must select that unit at construction and retain it for the operatio
 for one backend configuration and operation. An adapter must reject a required unsupported or lossy capability
 before its first output event or destination mutation.
 
+Adapter-generated semantic errors do not claim a token-start offset that the pull interface cannot recover. The
+mandatory root transaction's `Abort_Document` attaches the backend's current next-unread position and unit when the
+error has no offset. JSON and CBOR therefore attach a byte position after the typed name or constructor read.
+
 ## Event grammar
 
 A serialization call emits exactly one value. Scalars and enumerations are complete values. A sequence is
@@ -90,6 +94,24 @@ keep-first each call `Skip_Value` once; keep-last calls the field hook once with
 After `End_Record`, missing hooks run in ordinal order and a final hook checks cross-field and discriminant-dependent
 invariants. The generic covers records with at least one flattened logical field; null records and generated exact
 variant selection require distinct adapters rather than invented ordinals.
+
+The reviewed enumeration design has an independent maximum literal count and bounded type, literal, and alias
+names. It iterates checked local ordinal tables rather than representation values or positions. Declared names must
+map uniquely to their own literal; handwritten matchers may accept extra names, but runtime ambiguity is an
+application metadata error and no match is an invalid value. Literal contents do not become a structural path
+element; the enclosing field/index path and backend offset identify the failure.
+
+The reviewed finite-variant design independently bounds all alternatives, all global field declarations, and fields
+selected by one alternative. One global field ordinal represents one logical declaration: a common component keeps
+one ordinal across leaf alternatives, while distinct branch declarations keep distinct ordinals even when their
+names match. Name uniqueness is checked only within one alternative. Filtered global ordinal order controls output
+and missing hooks, and unused field ordinals are rejected. An `Alternative_Element` path component identifies the
+selected constructor above any field path.
+
+A selected zero-known-field alternative still traverses every incoming payload entry as an unknown field and either
+rejects or skips its value once. A separate nullary-variant combinator preserves `Begin_Variant (..., 0)` and
+`End_Variant`; mapping a nullary sum to enumeration is an explicit overlay policy because it changes the logical kind
+and JSON/CBOR representation.
 
 ## Scalar fidelity
 

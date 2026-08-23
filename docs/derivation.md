@@ -15,6 +15,11 @@ Generated deserializers must validate into component-local state and publish onl
 records are constructed once after their discriminants and active variant have been validated; a generator must not
 change an existing object's discriminants in place.
 
+Finite variant generation enumerates only exact, fixture-supported leaf paths from Type IR. It bounds the global
+declaration set and every alternative membership independently, retains common declarations across leaves, and
+keeps same-spelled branch declarations distinct. A dynamic, unresolved, or visibility-illegal discriminant path is a
+checked adapter diagnostic, not permission to use representation values, summarized shapes, or guessed defaults.
+
 Generated record lookup uses bounded name comparisons or package-private ordinals. Rename aliases are explicit,
 ordered adapter metadata. The ordinals may change whenever code is regenerated and must not be serialized, placed
 in Type IR, or treated as schema identity.
