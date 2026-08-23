@@ -44,6 +44,7 @@ package Flyology_Serde.Deserialization is
       Error : in out Errors.Error_Info)
    is abstract;
 
+   --  Copies validated UTF-8; Length is the number of bytes copied.
    procedure Read_Text
      (Self   : in out Deserializer;
       Value  : out String;
@@ -51,6 +52,7 @@ package Flyology_Serde.Deserialization is
       Error  : in out Errors.Error_Info)
    is abstract;
 
+   --  Copies bytes; Length is the number of stream elements copied.
    procedure Read_Bytes
      (Self   : in out Deserializer;
       Value  : out Ada.Streams.Stream_Element_Array;

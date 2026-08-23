@@ -15,7 +15,8 @@ borrowing, allocating convenience adapters, and generated derivations remain fol
 - Malformed input is reported through `Flyology_Serde.Errors`; it is not ordinary exception control flow.
 - Allocation and borrowing are explicit adapter capabilities rather than hidden backend behavior.
 
-See [architecture](docs/architecture.md) and [derivation](docs/derivation.md).
+See [architecture](docs/architecture.md), [type adapters](docs/type-adapters.md),
+[Libadalang assessment](docs/libadalang-assessment.md), and [derivation](docs/derivation.md).
 
 ## Build and test
 

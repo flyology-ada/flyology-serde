@@ -23,6 +23,15 @@ Scope: the first bounded serde contracts, counting backend, derivation boundary,
 - P2: truncated error-path names were not marked. `Name_Truncated` now preserves that diagnostic fact.
 - P2: the counting backend did not validate field/value alternation or declared item counts. It now checks the full
   event grammar and reports counter overflow instead of relying on a constraint exception.
+- P2: mappings for optionals, array bounds, Unicode strings, multidimensional arrays, controlled candidates, generic
+  combinators, and allocating builders were only implicit. The type-adapter decision documents each mapping and its
+  failure or ownership rule.
+- P2: the Libadalang boundary was stated without a fact-by-fact reliability matrix. The assessment now distinguishes
+  precise syntax/resolution from GNAT legality, fixture-gated generic rebinding, ignored representation, and required
+  serde overlay metadata.
+- P1: the extraction tuple did not prove which source and configuration contents it selected. Provenance now
+  requires a deterministic effective-closure manifest/digest, and overlays are explicitly forbidden from overriding
+  mandatory structural uncertainty or visibility.
 
 ## Accepted boundaries
 

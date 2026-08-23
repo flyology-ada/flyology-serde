@@ -19,6 +19,7 @@ generic
    with
      procedure Commit_Candidate
        (Target : in out Builder_Type; Error : in out Errors.Error_Info);
+   --  Must be nonraising and valid after any attempted Begin_Candidate.
    with procedure Rollback_Candidate (Target : in out Builder_Type);
 package Flyology_Serde.Deserialization_Adapters is
    subtype Builder is Builder_Type;

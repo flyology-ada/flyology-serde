@@ -39,12 +39,14 @@ package Flyology_Serde.Serialization is
       Error : in out Errors.Error_Info)
    is abstract;
 
+   --  Value is validated UTF-8 and is borrowed only until this call returns.
    procedure Put_Text
      (Self  : in out Serializer;
       Value : String;
       Error : in out Errors.Error_Info)
    is abstract;
 
+   --  Value is borrowed only until this call returns.
    procedure Put_Bytes
      (Self  : in out Serializer;
       Value : Ada.Streams.Stream_Element_Array;
