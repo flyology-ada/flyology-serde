@@ -1,4 +1,5 @@
 with Ada.Streams;
+with Ada.Unchecked_Conversion;
 with Flyology_Serde.Errors;
 with Flyology_Serde.Serializers.JSON;
 with Interfaces;
@@ -8,6 +9,10 @@ procedure JSON_Writer_Tests is
    package JSON renames Flyology_Serde.Serializers.JSON;
    use type Errors.Error_Code;
    use type Interfaces.IEEE_Float_64;
+   use type Interfaces.Unsigned_64;
+
+   function Bits is new Ada.Unchecked_Conversion
+     (Interfaces.IEEE_Float_64, Interfaces.Unsigned_64);
 
    Writer  : JSON.Bounded_Writer (512);
    Small   : JSON.Bounded_Writer (4);
@@ -83,6 +88,22 @@ begin
       Writer.Copy_Output (Buffer, Length, Copy_Error);
       pragma Assert (Copy_Error.Code = Errors.No_Error);
       pragma Assert (Length > 0 and then Buffer (1) = '-');
+   end;
+
+   Writer.Reset;
+   declare
+      Original   : constant Interfaces.IEEE_Float_64 :=
+        Interfaces.IEEE_Float_64'Adjacent (1.0, 2.0);
+      Buffer     : String (1 .. 64);
+      Length     : Natural;
+      Copy_Error : Errors.Error_Info;
+      Reparsed   : Interfaces.IEEE_Float_64;
+   begin
+      Writer.Put_Float_64 (Original, Error);
+      Writer.Copy_Output (Buffer, Length, Copy_Error);
+      pragma Assert (Copy_Error.Code = Errors.No_Error);
+      Reparsed := Interfaces.IEEE_Float_64'Value (Buffer (1 .. Length));
+      pragma Assert (Bits (Reparsed) = Bits (Original));
    end;
 
    Small.Put_Null (Error);

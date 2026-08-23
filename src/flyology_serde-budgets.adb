@@ -120,4 +120,9 @@ package body Flyology_Serde.Budgets is
 
    function Input_Consumed (Self : Decode_Budget) return Natural
    is (Self.Input);
+
+   function Input_Remaining (Self : Decode_Budget) return Natural
+   is (if Self.Input >= Self.Limits.Maximum_Input_Units
+       then 0
+       else Self.Limits.Maximum_Input_Units - Self.Input);
 end Flyology_Serde.Budgets;

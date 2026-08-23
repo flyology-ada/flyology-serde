@@ -10,6 +10,7 @@ with Flyology_Serde.Serialization;
 with Flyology_Serde.Serializers.Counting;
 with Flyology_Serde.UTF_8;
 with Interfaces;
+with JSON_Reader_Tests;
 with JSON_Writer_Tests;
 
 procedure Tests is
@@ -148,6 +149,7 @@ procedure Tests is
    Budget         : Budgets.Decode_Budget;
    Error          : Errors.Error_Info;
 begin
+   JSON_Reader_Tests;
    JSON_Writer_Tests;
 
    Serialize ((Identifier => 42, Enabled => True), Output, Error);

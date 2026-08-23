@@ -48,6 +48,7 @@ is
    function Depth (Self : Decode_Budget) return Natural;
    function Values_Consumed (Self : Decode_Budget) return Natural;
    function Input_Consumed (Self : Decode_Budget) return Natural;
+   function Input_Remaining (Self : Decode_Budget) return Natural;
 
 private
    type Container_Count_Array is

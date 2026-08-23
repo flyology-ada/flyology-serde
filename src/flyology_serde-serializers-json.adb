@@ -1,5 +1,6 @@
 with Ada.Strings;
 with Ada.Strings.Fixed;
+with Ada.Text_IO;
 with Flyology_Serde.UTF_8;
 
 package body Flyology_Serde.Serializers.JSON is
@@ -7,6 +8,9 @@ package body Flyology_Serde.Serializers.JSON is
    use type Interfaces.IEEE_Float_64;
 
    Hex_Digits : constant String := "0123456789ABCDEF";
+
+   package Float_64_IO is new Ada.Text_IO.Float_IO
+     (Interfaces.IEEE_Float_64);
 
    procedure Append
      (Self  : in out Writer_Base'Class;
@@ -324,7 +328,9 @@ package body Flyology_Serde.Serializers.JSON is
    procedure Put_Float_64
      (Self  : in out Writer_Base;
       Value : Interfaces.IEEE_Float_64;
-      Error : in out Errors.Error_Info) is
+      Error : in out Errors.Error_Info)
+   is
+      Image : String (1 .. 32);
    begin
       if Value /= Value
         or else Value < Interfaces.IEEE_Float_64'First
@@ -335,10 +341,10 @@ package body Flyology_Serde.Serializers.JSON is
       end if;
 
       Before_Value (Self, Error);
+      Float_64_IO.Put (Image, Value, Aft => 16, Exp => 3);
       Append
         (Writer_Base'Class (Self),
-         Ada.Strings.Fixed.Trim
-           (Interfaces.IEEE_Float_64'Image (Value), Ada.Strings.Both),
+         Ada.Strings.Fixed.Trim (Image, Ada.Strings.Both),
          Error);
       After_Value (Self, Error);
    end Put_Float_64;

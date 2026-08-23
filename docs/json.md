@@ -22,7 +22,30 @@ there is no unconstrained-string convenience result on the bounded path. `Alloca
 `Ada.Strings.Unbounded` explicitly and offers `Output`. Both writers are poisoned after a capacity, grammar, text, or
 unsupported-value error and must be reset before reuse. A partial prefix is never reported as complete.
 
+`Deserializers.JSON.Reader` is the bounded pull reader. Its access discriminant borrows one immutable input string
+for the reader's lifetime under Ada accessibility checks. The source owner must also exclude mutation through any
+other alias or task during traversal. The reader returns no borrowed slice: decoded text, bytes, field names, and
+variant names are copied into caller-owned buffers. `Initialize` is required before the first event.
+After exactly one root value, `Finish_Document` consumes trailing JSON whitespace and rejects any other trailing
+input; only then does `Is_Complete` become true. Any parse, capacity, budget, or protocol error unwinds all entered
+budget scopes, poisons the reader, and requires `Reset`, which restarts at byte offset zero with a fresh budget.
+
+The reader owns exactly one `Decode_Budget`. Cursor movement charges UTF-8 input bytes, accepting a logical value
+charges one value, accepting a logical container child charges one item at the active depth, and decoded text or
+byte length is checked before copying. Errors use zero-based byte offsets. `Skip_Value` charges exactly its one
+discarded logical value; nested JSON representation nodes are not charged as logical values or containers. Because
+the adapter has discarded the expected Ada kind, the raw subtree is separately checked against the configured
+syntax depth, per-container item, decoded-string, and input-work ceilings.
+
+JSON syntax-level peeking cannot recover the adapter's expected logical kind: a string may be text or an
+enumeration, an array may be a sequence, map, optional, or variant, and an object may be a record or bytes. Therefore
+`Peek_Kind` reports a JSON surface convention rather than recovering the adapter's logical kind: fractional or
+exponent numbers are float, negative integers are signed, nonnegative integers are unsigned, strings are text,
+arrays are sequences, and objects are records. The type adapter selects the typed read operation, which validates
+the full representation. Whitespace is accepted between JSON structural tokens. Byte payloads use an unescaped
+hexadecimal JSON string; this is the backend's exact tagged representation, not a general JSON object coercion.
+
 Strings and names must be valid UTF-8. Control characters, quotation marks, and reverse solidus are escaped. Other
 valid UTF-8 bytes are preserved. Byte values use uppercase hexadecimal. Nonfinite binary64 is rejected before the
-first output event; finite values, including signed zero, use Ada's target IEEE binary64 image and are tested as JSON
-numbers.
+first output event. Finite values use 17 significant decimal digits for bit-exact binary64 round trips; signed zero
+and adjacent representable values are retained as JSON numbers.

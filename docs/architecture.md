@@ -25,10 +25,11 @@ buffers by a deserializer. A backend reports `Capacity_Exceeded` instead of allo
 will be separate adapters over this contract. The current API yields no borrowed slice. A future zero-copy API
 must expose input only within a callback or one deserializer step; neither an adapter nor a builder may retain it.
 
-Every decoder is configured with explicit `Decode_Limits`. Backends enforce nesting, source input units, text and
-byte lengths, and container lengths even when the source format has no such limits. Generated adapters separately
-bound logical values and field work, so a compact source cannot cause unbounded construction. Input offsets are
-zero-based, and each backend reports whether its unit is bytes, encoding code units, or Unicode code points.
+Every decoder is configured with explicit `Decode_Limits`. Backends enforce nesting, source input units, logical
+values, text and byte lengths, and container items even when the source format has no such limits. Generated
+adapters separately bound schema work and candidate capacity, so a compact source cannot cause unbounded
+construction. Input offsets are zero-based, and each backend reports whether its unit is bytes, encoding code
+units, or Unicode code points.
 The static deserialization adapter exposes its selected `Configured_Policy` and passes that policy into the
 type-specific traversal; a backend constructor must be given the same or stricter limits.
 
