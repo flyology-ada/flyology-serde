@@ -23,7 +23,10 @@ package body Flyology_Serde.Errors is
       end if;
    end Fail;
 
-   procedure Push_Field (Item : in out Error_Info; Name : String) is
+   procedure Push_Name
+     (Item : in out Error_Info;
+      Name : String;
+      Kind : Path_Element_Kind) is
       Retained : constant Natural :=
         Natural'Min (Name'Length, Maximum_Name_Length);
       Target   : Positive;
@@ -38,14 +41,24 @@ package body Flyology_Serde.Errors is
       Item.Path_Length := Item.Path_Length + 1;
       Target := Item.Path_Length;
       Item.Path (Target) := (others => <>);
-      Item.Path (Target).Kind := Field_Element;
+      Item.Path (Target).Kind := Kind;
       Item.Path (Target).Name_Length := Retained;
       Item.Path (Target).Name_Truncated := Retained < Name'Length;
       if Retained > 0 then
          Item.Path (Target).Name (1 .. Retained) :=
            Name (Name'First .. Name'First + Retained - 1);
       end if;
+   end Push_Name;
+
+   procedure Push_Field (Item : in out Error_Info; Name : String) is
+   begin
+      Push_Name (Item, Name, Field_Element);
    end Push_Field;
+
+   procedure Push_Alternative (Item : in out Error_Info; Name : String) is
+   begin
+      Push_Name (Item, Name, Alternative_Element);
+   end Push_Alternative;
 
    procedure Push_Index (Item : in out Error_Info; Index : Natural) is
       Target : Positive;

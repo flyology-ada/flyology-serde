@@ -22,7 +22,8 @@ is
       Invalid_State,
       Application_Error);
 
-   type Path_Element_Kind is (Field_Element, Index_Element);
+   type Path_Element_Kind is
+     (Field_Element, Index_Element, Alternative_Element);
 
    type Path_Element is record
       Kind           : Path_Element_Kind := Field_Element;
@@ -55,6 +56,8 @@ is
       Offset_Unit  : Input_Offset_Unit := Unknown_Offset);
 
    procedure Push_Field (Item : in out Error_Info; Name : String);
+
+   procedure Push_Alternative (Item : in out Error_Info; Name : String);
 
    procedure Push_Index (Item : in out Error_Info; Index : Natural);
 

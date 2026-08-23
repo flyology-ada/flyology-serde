@@ -4,14 +4,15 @@
 adapters traverse typed values through a common logical data model; JSON, CBOR, and future backends own the
 concrete syntax.
 
-The crate is experimental. It contains bounded interfaces, explicit nonraising errors, transactional construction,
-decode budgets, exact integer and UTF-8 adapters, optional and array combinators, and a counting serializer used to
-validate traversals. The bounded enumeration combinator adds representation-independent logical names and aliases.
-The bounded record combinator adds exact name/alias metadata, duplicate and unknown-field policy, missing-field
-hooks, and final candidate validation. JSON and CBOR provide bounded readers and writers, allocating writers,
-copied-input root facades, and standard-heap text and byte candidates. Application builders still own allocating
-records, maps, and arrays. Generated derivations remain under development against the separately reviewed Type IR
-boundary.
+The crate is experimental. It contains bounded interfaces, explicit nonraising errors, transactional
+construction, decode budgets, exact integer and UTF-8 adapters, optional and array combinators, and a counting
+serializer used to validate traversals. The bounded enumeration combinator adds representation-independent logical
+names and aliases. The bounded record combinator adds exact name/alias metadata, duplicate and unknown-field
+policy, missing-field hooks, and final candidate validation. Bounded finite and nullary variant combinators preserve
+alternative identity, selected field membership, transactional construction, and the logical variant envelope.
+JSON and CBOR provide bounded readers and writers, allocating writers, copied-input root facades, and standard-heap
+text and byte candidates. Application builders still own allocating records, maps, and arrays. Generated
+derivations remain under development against the separately reviewed Type IR boundary.
 
 ## Boundaries
 
@@ -40,10 +41,10 @@ apm audit --ci --no-policy
 ```
 
 `apm.lock.yaml` pins the shared `flyology-ada/agents` revision. Change the local instruction primitive under
-`agent-packages/repository/`, not generated `AGENTS.md`, and commit the primitive, lockfile, and regenerated output
-together. This repository has no separate organization-policy package, so its audit explicitly verifies the
-lockfile, deployed content, and drift without policy discovery. Start a fresh client session after provisioning so
-it discovers the generated skills.
+`agent-packages/repository/`, not generated `AGENTS.md`, and commit the primitive, lockfile, and regenerated
+output together. This repository has no separate organization-policy package, so its audit explicitly verifies
+the lockfile, deployed content, and drift without policy discovery. Start a fresh client session after provisioning
+so it discovers the generated skills.
 
 ## Build and test
 
