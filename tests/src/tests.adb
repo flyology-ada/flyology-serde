@@ -16,6 +16,7 @@ with Flyology_Serde.Serialization;
 with Flyology_Serde.Serializers.Counting;
 with Flyology_Serde.UTF_8;
 with Interfaces;
+with Enumeration_Adapter_Tests;
 with JSON_Reader_Tests;
 with JSON_Writer_Tests;
 with Record_Adapter_Tests;
@@ -168,6 +169,7 @@ begin
    CBOR_Reader_Conformance_Tests;
    CBOR_Reader_Tests;
    CBOR_Writer_Tests;
+   Enumeration_Adapter_Tests;
 
    declare
       Default : Data_Model.Float_64_Value;

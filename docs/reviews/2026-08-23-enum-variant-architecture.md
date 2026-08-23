@@ -35,8 +35,8 @@ and re-reviewed. The final verdict was P0 none, P1 none, P2 none, with clearance
 
 ## Required implementation evidence
 
-- Enumeration primary/alias success, no-match and ambiguity, metadata failure before events/input, and a
-  nonmonotonic representation-clause fixture.
+- Enumeration primary/alias success, no-match and ambiguity, metadata failure before events/input, and a legal
+  non-default, noncontiguous representation-clause fixture.
 - Alternative aliases, unknown and ambiguous constructors before builder mutation, common fields, disjoint
   same-spelled fields, unused/global/per-alternative bounds, and selected-only missing order.
 - Zero-field unknown reject and nested-value ignore, plus exact JSON and CBOR all-nullary envelopes.
