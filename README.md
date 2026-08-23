@@ -16,8 +16,8 @@ validate traversals. JSON, CBOR, allocating convenience adapters, and generated 
 - Allocation and borrowing are explicit adapter capabilities rather than hidden backend behavior.
 
 See [architecture](docs/architecture.md), [type adapters](docs/type-adapters.md),
-[JSON backend](docs/json.md), [Libadalang assessment](docs/libadalang-assessment.md), and
-[derivation](docs/derivation.md).
+[JSON backend](docs/json.md), [CBOR backend](docs/cbor.md),
+[Libadalang assessment](docs/libadalang-assessment.md), and [derivation](docs/derivation.md).
 
 ## Agent setup
 
