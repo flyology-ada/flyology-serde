@@ -11,6 +11,10 @@ package Flyology_Serde.Deserialization is
 
    type Deserializer is limited interface;
 
+   function Capabilities
+     (Self : Deserializer) return Data_Model.Format_Capabilities
+   is abstract;
+
    function Peek_Kind
      (Self : in out Deserializer; Error : in out Errors.Error_Info)
       return Data_Model.Value_Kind
@@ -61,6 +65,16 @@ package Flyology_Serde.Deserialization is
    is abstract;
 
    procedure Skip_Value
+     (Self : in out Deserializer; Error : in out Errors.Error_Info)
+   is abstract;
+
+   procedure Begin_Optional
+     (Self    : in out Deserializer;
+      Present : out Boolean;
+      Error   : in out Errors.Error_Info)
+   is abstract;
+
+   procedure End_Optional
      (Self : in out Deserializer; Error : in out Errors.Error_Info)
    is abstract;
 

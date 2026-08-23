@@ -1,9 +1,11 @@
+with Flyology_Serde.Budgets;
 with Flyology_Serde.Errors;
 with Flyology_Serde.Serialization;
 with Flyology_Serde.Serializers.Counting;
 with Interfaces;
 
 procedure Tests is
+   package Budgets renames Flyology_Serde.Budgets;
    package Errors renames Flyology_Serde.Errors;
    package Serialization renames Flyology_Serde.Serialization;
    package Counting renames Flyology_Serde.Serializers.Counting;
@@ -28,12 +30,16 @@ procedure Tests is
       Into.End_Record (Error);
    end Serialize;
 
-   Output    : Counting.Counter;
-   Mismatch  : Counting.Counter;
-   Bad_Count : Counting.Counter;
-   Bad_Field : Counting.Counter;
-   Deep      : Counting.Counter;
-   Error     : Errors.Error_Info;
+   Output     : Counting.Counter;
+   Mismatch   : Counting.Counter;
+   Bad_Count  : Counting.Counter;
+   Bad_Field  : Counting.Counter;
+   Deep       : Counting.Counter;
+   None_Value : Counting.Counter;
+   Some_Value : Counting.Counter;
+   Bad_Some   : Counting.Counter;
+   Budget     : Budgets.Decode_Budget;
+   Error      : Errors.Error_Info;
 begin
    Serialize ((Identifier => 42, Enabled => True), Output, Error);
    pragma Assert (Error.Code = Errors.No_Error);
@@ -83,4 +89,49 @@ begin
    Errors.Fail (Error, Errors.Syntax_Error, 12, Errors.Byte_Offset);
    pragma Assert (Error.Input_Offset = 12);
    pragma Assert (Error.Offset_Unit = Errors.Byte_Offset);
+
+   Errors.Reset (Error);
+   None_Value.Begin_Optional (False, Error);
+   None_Value.End_Optional (Error);
+   pragma Assert (Error.Code = Errors.No_Error);
+   pragma Assert (None_Value.Event_Count = 2);
+
+   Some_Value.Begin_Optional (True, Error);
+   Some_Value.Put_Null (Error);
+   Some_Value.End_Optional (Error);
+   pragma Assert (Error.Code = Errors.No_Error);
+   pragma Assert (Some_Value.Event_Count = 3);
+
+   Bad_Some.Begin_Optional (True, Error);
+   Bad_Some.End_Optional (Error);
+   pragma Assert (Error.Code = Errors.Invalid_State);
+
+   Errors.Reset (Error);
+   Budgets.Initialize
+     (Budget,
+      (Maximum_Nesting_Depth   => 1,
+       Maximum_Container_Items => 2,
+       Maximum_Text_Length     => 3,
+       Maximum_Byte_Length     => 4,
+       Maximum_Input_Units     => 5,
+       Maximum_Logical_Values  => 1));
+   Budgets.Consume_Input (Budget, 5, Error);
+   Budgets.Consume_Input (Budget, 1, Error);
+   pragma Assert (Error.Code = Errors.Capacity_Exceeded);
+
+   Errors.Reset (Error);
+   Budgets.Consume_Value (Budget, Error);
+   Budgets.Consume_Value (Budget, Error);
+   pragma Assert (Error.Code = Errors.Capacity_Exceeded);
+
+   Errors.Reset (Error);
+   Budgets.Enter_Container (Budget, (Known => True, Length => 3), Error);
+   pragma Assert (Error.Code = Errors.Capacity_Exceeded);
+
+   Errors.Reset (Error);
+   Budgets.Enter_Container (Budget, (Known => False, Length => 0), Error);
+   Budgets.Consume_Container_Item (Budget, Error);
+   Budgets.Consume_Container_Item (Budget, Error);
+   Budgets.Consume_Container_Item (Budget, Error);
+   pragma Assert (Error.Code = Errors.Capacity_Exceeded);
 end Tests;

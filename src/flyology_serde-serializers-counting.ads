@@ -11,6 +11,10 @@ package Flyology_Serde.Serializers.Counting is
 
    type Counter is limited new Serialization.Serializer with private;
 
+   overriding
+   function Capabilities
+     (Self : Counter) return Data_Model.Format_Capabilities;
+
    function Event_Count (Self : Counter) return Natural;
 
    function Container_Depth (Self : Counter) return Natural;
@@ -52,6 +56,16 @@ package Flyology_Serde.Serializers.Counting is
      (Self  : in out Counter;
       Value : Ada.Streams.Stream_Element_Array;
       Error : in out Errors.Error_Info);
+
+   overriding
+   procedure Begin_Optional
+     (Self    : in out Counter;
+      Present : Boolean;
+      Error   : in out Errors.Error_Info);
+
+   overriding
+   procedure End_Optional
+     (Self : in out Counter; Error : in out Errors.Error_Info);
 
    overriding
    procedure Begin_Sequence
@@ -108,7 +122,11 @@ package Flyology_Serde.Serializers.Counting is
 
 private
    type Container_Kind is
-     (Sequence_Container, Map_Container, Record_Container, Variant_Container);
+     (Optional_Container,
+      Sequence_Container,
+      Map_Container,
+      Record_Container,
+      Variant_Container);
 
    type Container_Frame is record
       Kind              : Container_Kind := Sequence_Container;

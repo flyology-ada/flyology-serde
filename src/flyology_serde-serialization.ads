@@ -11,6 +11,10 @@ package Flyology_Serde.Serialization is
 
    type Serializer is limited interface;
 
+   function Capabilities
+     (Self : Serializer) return Data_Model.Format_Capabilities
+   is abstract;
+
    procedure Put_Null
      (Self : in out Serializer; Error : in out Errors.Error_Info)
    is abstract;
@@ -51,6 +55,16 @@ package Flyology_Serde.Serialization is
      (Self  : in out Serializer;
       Value : Ada.Streams.Stream_Element_Array;
       Error : in out Errors.Error_Info)
+   is abstract;
+
+   procedure Begin_Optional
+     (Self    : in out Serializer;
+      Present : Boolean;
+      Error   : in out Errors.Error_Info)
+   is abstract;
+
+   procedure End_Optional
+     (Self : in out Serializer; Error : in out Errors.Error_Info)
    is abstract;
 
    procedure Begin_Sequence

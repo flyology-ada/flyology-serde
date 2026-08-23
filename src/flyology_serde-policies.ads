@@ -3,11 +3,14 @@
 package Flyology_Serde.Policies
   with Pure
 is
+   Maximum_Supported_Nesting : constant Positive := 256;
+   type Nesting_Limit is range 0 .. Maximum_Supported_Nesting;
+
    type Unknown_Field_Action is (Reject_Unknown, Ignore_Unknown);
    type Duplicate_Field_Action is (Reject_Duplicate, Keep_First, Keep_Last);
 
    type Decode_Limits is record
-      Maximum_Nesting_Depth   : Natural := 32;
+      Maximum_Nesting_Depth   : Nesting_Limit := 32;
       Maximum_Container_Items : Natural := 1_024;
       Maximum_Text_Length     : Natural := 1_048_576;
       Maximum_Byte_Length     : Natural := 1_048_576;

@@ -1,6 +1,14 @@
 package body Flyology_Serde.Serializers.Counting is
    use type Errors.Error_Code;
 
+   overriding
+   function Capabilities (Self : Counter) return Data_Model.Format_Capabilities
+   is
+      pragma Unreferenced (Self);
+   begin
+      return Data_Model.All_Capabilities;
+   end Capabilities;
+
    procedure Note_Event
      (Self : in out Counter; Error : in out Errors.Error_Info) is
    begin
@@ -20,7 +28,7 @@ package body Flyology_Serde.Serializers.Counting is
          return;
       elsif Self.Depth > 0 then
          case Self.Stack (Self.Depth).Kind is
-            when Sequence_Container                   =>
+            when Optional_Container | Sequence_Container =>
                if Self.Stack (Self.Depth).Expected_Known
                  and then Self.Stack (Self.Depth).Observed_Items
                           = Self.Stack (Self.Depth).Expected_Items
@@ -34,7 +42,7 @@ package body Flyology_Serde.Serializers.Counting is
                Self.Stack (Self.Depth).Observed_Items :=
                  Self.Stack (Self.Depth).Observed_Items + 1;
 
-            when Map_Container                        =>
+            when Map_Container                           =>
                if not Self.Stack (Self.Depth).Waiting_For_Value
                  and then Self.Stack (Self.Depth).Expected_Known
                  and then Self.Stack (Self.Depth).Observed_Items
@@ -54,7 +62,7 @@ package body Flyology_Serde.Serializers.Counting is
                Self.Stack (Self.Depth).Waiting_For_Value :=
                  not Self.Stack (Self.Depth).Waiting_For_Value;
 
-            when Record_Container | Variant_Container =>
+            when Record_Container | Variant_Container    =>
                if not Self.Stack (Self.Depth).Waiting_For_Value then
                   Errors.Fail (Error, Errors.Invalid_State);
                   return;
@@ -194,6 +202,26 @@ package body Flyology_Serde.Serializers.Counting is
    begin
       Note_Value (Self, Error);
    end Put_Bytes;
+
+   overriding
+   procedure Begin_Optional
+     (Self    : in out Counter;
+      Present : Boolean;
+      Error   : in out Errors.Error_Info) is
+   begin
+      Open_Container
+        (Self,
+         Optional_Container,
+         Data_Model.Known_Length (Boolean'Pos (Present)),
+         Error);
+   end Begin_Optional;
+
+   overriding
+   procedure End_Optional
+     (Self : in out Counter; Error : in out Errors.Error_Info) is
+   begin
+      Close_Container (Self, Optional_Container, Error);
+   end End_Optional;
 
    overriding
    procedure Begin_Sequence

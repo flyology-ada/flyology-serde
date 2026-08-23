@@ -39,8 +39,8 @@ literal, but the choice is adapter policy and must round-trip.
 ## Optionals
 
 Optionality is a logical `none` or `some(value)` construct, not merely a nullable field. This distinction preserves
-nested optionals and `some(null)`. The eventual event grammar will add an explicit optional container with zero or
-one child. A JSON backend may choose a tagged representation when plain `null` would be ambiguous; a configuration
+nested optionals and `some(null)`. The event grammar uses an explicit optional container with zero or one child. A
+JSON backend may choose a tagged representation when plain `null` would be ambiguous; a configuration
 that requests the compact nullable representation must reject values it cannot distinguish.
 
 For records, field absence is separate from an optional field whose value is `none`. Missing fields use the
@@ -76,6 +76,9 @@ resources are released by rollback. Commit is the only publication step.
 Defaulted discriminants and component defaults retain two separate facts: whether a default exists and, when it
 does, whether its value is statically known. `no default` is not an unknown semantic fact. Variant choice semantics
 come from the resolved Type IR condition tree, never reparsing presentation syntax in the serde generator.
+Type IR also retains the resolved default-expression tree. The serde overlay chooses whether serialization or
+construction policy uses that Known structure; it cannot alter the expression or replace a mandatory Unknown or
+Unsupported default or bound. Array-bound transformation follows the same rule.
 
 ## Private, limited, controlled, and concurrent types
 

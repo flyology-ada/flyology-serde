@@ -42,6 +42,9 @@ then `End_Variant`; the constructor name and payload are distinct. Begin calls m
 Known lengths must match the emitted item count. Calls are strictly nested and a backend reports `Invalid_State`
 for an illegal transition without emitting partial output where feasible.
 
+An optional is `Begin_Optional`, zero children when absent or exactly one child when present, then `End_Optional`.
+This logical distinction allows a backend to preserve nested optionals rather than conflating absence with null.
+
 A pull decoder mirrors that grammar. `Next_*` positions the source at one complete child and `End_*` is legal only
 after all children have been consumed. `Skip_Value` consumes exactly one complete child and is the bounded mechanism
 for an accepted unknown field or a duplicate value that policy discards.
