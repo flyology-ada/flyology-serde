@@ -125,11 +125,31 @@ begin
    pragma Assert (Error.Code = Errors.Capacity_Exceeded);
    pragma Assert (not Small.Is_Complete);
 
+   declare
+      Buffer       : String (1 .. 4);
+      Length       : Natural := Natural'Last;
+      Output_Error : Errors.Error_Info;
+   begin
+      Small.Copy_Output (Buffer, Length, Output_Error);
+      pragma Assert (Output_Error.Code = Errors.Invalid_State);
+      pragma Assert (Length = 0 and then Buffer = "    ");
+   end;
+
    Errors.Reset (Error);
    Small.Reset;
    Small.Put_Null (Error);
    pragma Assert (Small.Is_Complete);
 
+   Dynamic.Begin_Sequence ((Known => False, Length => 0), Error);
+   Dynamic.Put_Boolean (False, Error);
+   Dynamic.Put_Enumeration ("Tests.Color", "Red", Error);
+   pragma Assert (Dynamic.Output = "");
+   Dynamic.End_Record (Error);
+   pragma Assert (Error.Code = Errors.Invalid_State);
+   pragma Assert (Dynamic.Output = "");
+
+   Errors.Reset (Error);
+   Dynamic.Reset;
    Dynamic.Begin_Sequence ((Known => False, Length => 0), Error);
    Dynamic.Put_Boolean (False, Error);
    Dynamic.Put_Enumeration ("Tests.Color", "Red", Error);

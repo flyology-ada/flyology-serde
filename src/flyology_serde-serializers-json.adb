@@ -579,14 +579,17 @@ package body Flyology_Serde.Serializers.JSON is
       Error  : in out Errors.Error_Info) is
    begin
       Target := [others => ' '];
-      Length := Self.Length;
+      Length := 0;
       if Error.Code /= Errors.No_Error then
          return;
+      elsif not Complete (Writer_Base (Self)) then
+         Errors.Fail (Error, Errors.Invalid_State);
       elsif Target'Length < Self.Length then
          Errors.Fail (Error, Errors.Capacity_Exceeded);
       elsif Self.Length > 0 then
          Target (Target'First .. Target'First + Self.Length - 1) :=
            Self.Buffer (1 .. Self.Length);
+         Length := Self.Length;
       end if;
    end Copy_Output;
 
@@ -605,7 +608,8 @@ package body Flyology_Serde.Serializers.JSON is
       Ada.Strings.Unbounded.Append (Self.Buffer, Value);
    exception
       when Storage_Error =>
-         Fail (Writer_Base (Self), Errors.Capacity_Exceeded, Error);
+         Self.Failed := True;
+         raise;
    end Emit;
 
    procedure Reset (Self : in out Allocating_Writer) is
@@ -614,8 +618,13 @@ package body Flyology_Serde.Serializers.JSON is
       Ada.Strings.Unbounded.Set_Unbounded_String (Self.Buffer, "");
    end Reset;
 
-   function Output (Self : Allocating_Writer) return String
-   is (Ada.Strings.Unbounded.To_String (Self.Buffer));
+   function Output (Self : Allocating_Writer) return String is
+   begin
+      if not Complete (Writer_Base (Self)) then
+         return "";
+      end if;
+      return Ada.Strings.Unbounded.To_String (Self.Buffer);
+   end Output;
 
    function Is_Complete (Self : Allocating_Writer) return Boolean
    is (Complete (Writer_Base (Self)));

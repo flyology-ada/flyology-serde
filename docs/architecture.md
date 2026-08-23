@@ -39,6 +39,8 @@ copy API, then construct a candidate containing exactly the decoded value; the c
 its internal capacity. Tight limits are therefore important. `Storage_Error` propagates after scratch cleanup so
 the outer root transaction can roll back; format capacity remains a status.
 Application-specific allocating builders may instead expose allocator and cleanup hooks as generic actuals.
+Allocating output writers likewise make heap use explicit. If their storage raises `Storage_Error`, they poison the
+operation and propagate that exception; they do not recast unconfigured heap exhaustion as a bounded format status.
 
 Every decoder is configured with explicit `Decode_Limits`. Backends enforce nesting, source input units, logical
 values, text and byte lengths, and container items even when the source format has no such limits. Generated

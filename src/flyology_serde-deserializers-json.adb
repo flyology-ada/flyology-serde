@@ -1067,6 +1067,20 @@ package body Flyology_Serde.Deserializers.JSON is
       Syntax_Depth : Natural;
       Error        : in out Errors.Error_Info);
 
+   procedure Check_Raw_Depth
+     (Self : in out Reader;
+      Raw_Depth : Natural;
+      Error : in out Errors.Error_Info) is
+   begin
+      if Budgets.Depth (Self.Budget) > Natural (Self.Policy.Limits.Maximum_Nesting_Depth)
+        or else Raw_Depth
+                > Natural (Self.Policy.Limits.Maximum_Nesting_Depth)
+                  - Budgets.Depth (Self.Budget)
+      then
+         Fail (Self, Errors.Depth_Exceeded, Error);
+      end if;
+   end Check_Raw_Depth;
+
    procedure Skip_Raw_String
      (Self : in out Reader; Error : in out Errors.Error_Info)
    is
@@ -1106,8 +1120,8 @@ package body Flyology_Serde.Deserializers.JSON is
             Scan_Number (Self, Raw_Length, Integerish, Negative, Error);
             Advance (Self, Raw_Length, Error);
          when '[' | '{' =>
-            if Syntax_Depth = Natural (Self.Policy.Limits.Maximum_Nesting_Depth) then
-               Fail (Self, Errors.Depth_Exceeded, Error);
+            Check_Raw_Depth (Self, Syntax_Depth + 1, Error);
+            if Error.Code /= Errors.No_Error then
                return;
             end if;
             declare

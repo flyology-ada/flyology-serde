@@ -1,11 +1,12 @@
 # JSON backend
 
-The JSON backend maps every serde logical value losslessly using UTF-8 JSON. It is deterministic for one event
-stream but does not sort record fields or claim RFC canonicalization.
+The JSON backend maps every supported serde logical value losslessly using UTF-8 JSON. It is deterministic for one
+event stream but does not sort record fields or claim RFC canonicalization. Nonfinite binary64 values are outside
+the supported JSON capability.
 
 | Logical value | JSON representation |
 | --- | --- |
-| null, Boolean, signed/unsigned integer, binary64, text | Corresponding JSON scalar |
+| null, Boolean, signed/unsigned integer, finite binary64, text | Corresponding JSON scalar |
 | bytes | `{"$bytes":"<uppercase hexadecimal>"}` |
 | none / some(value) | `[0]` / `[1,value]` |
 | sequence | JSON array |
@@ -18,9 +19,13 @@ The tags above are backend representation, not Type IR or wire identities. A rea
 type adapter requests the corresponding logical kind.
 
 `Bounded_Writer` owns fixed-capacity storage and exposes output only through `Copy_Output` into a caller buffer;
-there is no unconstrained-string convenience result on the bounded path. `Allocating_Writer` uses
-`Ada.Strings.Unbounded` explicitly and offers `Output`. Both writers are poisoned after a capacity, grammar, text, or
-unsupported-value error and must be reset before reuse. A partial prefix is never reported as complete.
+an incomplete or failed writer reports `Invalid_State`, returns length zero, and copies no prefix. There is no
+unconstrained-string convenience result on the bounded path. `Allocating_Writer` uses `Ada.Strings.Unbounded`
+explicitly and offers `Output`, which returns an empty string until the writer is complete. Both writers are
+poisoned after a capacity, grammar, text, or unsupported-value error and must be reset before reuse. Heap exhaustion
+during mutation of the explicitly allocating writer poisons it and propagates `Storage_Error`; it is not reported
+as a format capacity status. A later `Output` call may independently exhaust memory while copying a completed
+buffer; that exception leaves the completed writer retryable.
 
 `Deserializers.JSON.Reader` is the bounded pull reader. Its access discriminant borrows one immutable input string
 for the reader's lifetime under Ada accessibility checks. The source owner must also exclude mutation through any
@@ -44,7 +49,8 @@ charges one value, accepting a logical container child charges one item at the a
 byte length is checked before copying. Errors use zero-based byte offsets. `Skip_Value` charges exactly its one
 discarded logical value; nested JSON representation nodes are not charged as logical values or containers. Because
 the adapter has discarded the expected Ada kind, the raw subtree is separately checked against the configured
-syntax depth, per-container item, decoded-string, and input-work ceilings.
+per-container item, decoded-string, and input-work ceilings. Its raw syntax depth plus the reader's active logical
+depth must remain within the same configured nesting limit.
 
 JSON syntax-level peeking cannot recover the adapter's expected logical kind: a string may be text or an
 enumeration, an array may be a sequence, map, optional, or variant, and an object may be a record or bytes. Therefore

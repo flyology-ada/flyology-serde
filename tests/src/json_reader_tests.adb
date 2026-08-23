@@ -196,6 +196,32 @@ begin
       Finish (Item, Error);
    end;
 
+   --  A skipped raw subtree shares the active logical nesting allowance.
+   declare
+      Input       : aliased constant String := "{""ignored"":[]}";
+      Item        : JSON.Reader (Input'Access);
+      Error       : Errors.Error_Info;
+      Policy      : Policies.Decode_Policy := (others => <>);
+      Length      : Data_Model.Length_Information;
+      Name        : String (1 .. 16);
+      Name_Length : Natural;
+      Has_Field   : Boolean;
+   begin
+      Policy.Limits.Maximum_Nesting_Depth := 1;
+      Item.Initialize (Policy);
+      Item.Begin_Record ("Tests.Skip_Depth", Length, Error);
+      Item.Next_Field (Name, Name_Length, Has_Field, Error);
+      pragma Assert (Has_Field and then Name (1 .. Name_Length) = "ignored");
+      Item.Skip_Value (Error);
+      pragma Assert (Error.Code = Errors.Depth_Exceeded);
+      Item.Abort_Document (Error);
+
+      Errors.Reset (Error);
+      Item.Reset (Policy);
+      Item.Read_Null (Error);
+      pragma Assert (Error.Code = Errors.Unexpected_Kind);
+   end;
+
    declare
       Input  : aliased constant String := "[1,[1,[0]]]";
       Item   : JSON.Reader (Input'Access);
