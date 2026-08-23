@@ -44,7 +44,9 @@ is
 
    function Make_Finite
      (Value : Interfaces.IEEE_Float_64) return Float_64_Value
-   with Post => Category (Make_Finite'Result) = Finite_Float;
+   with
+     Pre  => Value'Valid,
+     Post => Category (Make_Finite'Result) = Finite_Float;
 
    function Positive_Infinity_Value return Float_64_Value
    with Post => Category (Positive_Infinity_Value'Result) = Positive_Infinity;

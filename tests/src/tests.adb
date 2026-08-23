@@ -1,4 +1,5 @@
 with Ada.Unchecked_Conversion;
+with CBOR_Writer_Tests;
 with Flyology_Serde.Budgets;
 with Flyology_Serde.Adapters.Arrays;
 with Flyology_Serde.Adapters.Optionals;
@@ -159,6 +160,8 @@ procedure Tests is
    Budget         : Budgets.Decode_Budget;
    Error          : Errors.Error_Info;
 begin
+   CBOR_Writer_Tests;
+
    declare
       Default : Data_Model.Float_64_Value;
    begin

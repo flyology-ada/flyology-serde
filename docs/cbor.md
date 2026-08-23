@@ -3,6 +3,9 @@
 The CBOR backend maps the serde logical model onto one well-formed CBOR data item as defined by RFC 8949. It does
 not define Flyology's message wire format, stable identities, schema evolution, framing, or transport behavior.
 
+At the current checkpoint, the bounded and allocating writers are implemented. Reader statements below are the
+normative contract for the planned reader, not a claim that reader code or its acceptance tests already exist.
+
 | Logical value | CBOR representation |
 | --- | --- |
 | null and Boolean | CBOR null, false, and true simple values |
@@ -66,8 +69,9 @@ Both writers use the JSON writer's incomplete/poison/reset lifecycle. Capacity e
 invalid grammar, invalid text, unsupported data, or a known-count mismatch poisons the writer and makes all partial
 bytes unavailable as a complete item until `Reset`. An odd map and an incomplete optional or variant likewise never
 become publishable output. The bounded writer reports capacity failure as a status. `Storage_Error` may propagate
-from the explicitly allocating writer, but the writer is poisoned before propagation and its partial output must be
-discarded.
+from the explicitly allocating writer during mutation; the writer is poisoned before propagation and its partial
+output must be discarded. Allocating `Output` makes a separate copy after the item is complete. If that copy raises
+`Storage_Error`, it publishes no result and leaves the completed writer unchanged so the caller may retry or reset.
 
 One reader owns one `Decode_Budget`. It charges each input byte when consumed, each accepted logical value once,
 each logical container item once, and decoded text or byte length before copying. A sequence element is one
@@ -116,15 +120,16 @@ The CBOR backend reports every current `Format_Capabilities` member as true. Cap
 operation. An adapter must reject an unsupported or lossy mapping before the first output byte or destination
 mutation.
 
-The implementation follows the major-type, additional-information, indefinite-length, break, and floating-point
-rules in [RFC 8949](https://www.rfc-editor.org/rfc/rfc8949.html). It rejects reserved additional-information values,
-standalone or misplaced breaks, truncated heads and payloads, odd indefinite maps, wrong string chunk types,
-trailing bytes after the root item, arithmetic overflow, and all configured resource-limit violations.
+The writer implementation follows the major-type, additional-information, indefinite-length, break, and
+floating-point rules in [RFC 8949](https://www.rfc-editor.org/rfc/rfc8949.html). The planned reader must reject
+reserved additional-information values, standalone or misplaced breaks, truncated heads and payloads, odd
+indefinite maps, wrong string chunk types, trailing bytes after the root item, arithmetic overflow, and all
+configured resource-limit violations.
 
-The conformance matrix includes golden bytes for scalars and typed envelopes; nonpreferred integer and length
-inputs; exact binary16 and binary32 promotion; positive and negative zero, infinities, and the NaN category;
-unsigned-64 and signed-64 boundaries; definite and indefinite containers, envelopes, payloads, and strings; source-
-order duplicate maps; tag-skip depth, including a skip entered from nearly maximum logical depth; oversized 64-bit
-lengths; empty chunks; UTF-8 split across chunks; nested indefinite strings; reserved additional information;
-invalid simple-value encodings; misplaced breaks; odd maps; truncation; trailing bytes; every independent resource
-limit; and poison, unwind, and reset behavior after failure.
+The required completed-backend conformance matrix includes golden bytes for scalars and typed envelopes;
+nonpreferred integer and length inputs; exact binary16 and binary32 promotion; positive and negative zero,
+infinities, and the NaN category; unsigned-64 and signed-64 boundaries; definite and indefinite containers,
+envelopes, payloads, and strings; source-order duplicate maps; tag-skip depth, including a skip entered from nearly
+maximum logical depth; oversized 64-bit lengths; empty chunks; UTF-8 split across chunks; nested indefinite strings;
+reserved additional information; invalid simple-value encodings; misplaced breaks; odd maps; truncation; trailing
+bytes; every independent resource limit; and poison, unwind, and reset behavior after failure.
