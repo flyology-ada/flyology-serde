@@ -4,9 +4,9 @@
 adapters traverse typed values through a common logical data model; JSON, CBOR, and future backends own the
 concrete syntax.
 
-The crate is experimental. The first milestone contains bounded interfaces, explicit nonraising errors, separate
-serialization and construction adapters, and a counting serializer used to validate traversals. JSON, CBOR,
-borrowing, allocating convenience adapters, and generated derivations remain follow-up work.
+The crate is experimental. It contains bounded interfaces, explicit nonraising errors, transactional construction,
+decode budgets, exact integer and UTF-8 adapters, optional and array combinators, and a counting serializer used to
+validate traversals. JSON, CBOR, allocating convenience adapters, and generated derivations are being implemented.
 
 ## Boundaries
 

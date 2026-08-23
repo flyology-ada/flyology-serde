@@ -1,7 +1,14 @@
 with Flyology_Serde.Budgets;
+with Flyology_Serde.Adapters.Arrays;
+with Flyology_Serde.Adapters.Optionals;
+with Flyology_Serde.Adapters.Signed_Integers;
+with Flyology_Serde.Adapters.Text;
+with Flyology_Serde.Deserialization;
 with Flyology_Serde.Errors;
+with Flyology_Serde.Policies;
 with Flyology_Serde.Serialization;
 with Flyology_Serde.Serializers.Counting;
+with Flyology_Serde.UTF_8;
 with Interfaces;
 
 procedure Tests is
@@ -11,6 +18,104 @@ procedure Tests is
    package Counting renames Flyology_Serde.Serializers.Counting;
    use type Errors.Error_Code;
    use type Errors.Input_Offset_Unit;
+
+   package Integer_Adapter is new
+     Flyology_Serde.Adapters.Signed_Integers (Integer);
+
+   type Integer_Array is array (Positive range <>) of Integer;
+
+   type Array_Builder is limited record
+      Count : Natural := 0;
+   end record;
+
+   procedure Begin_Array
+     (Target : in out Array_Builder;
+      Length : Natural;
+      Policy : Flyology_Serde.Policies.Decode_Policy;
+      Error  : in out Errors.Error_Info)
+   is
+      pragma Unreferenced (Length, Policy, Error);
+   begin
+      Target.Count := 0;
+   end Begin_Array;
+
+   procedure Append_Integer
+     (From     : in out Flyology_Serde.Deserialization.Deserializer'Class;
+      Target   : in out Array_Builder;
+      Position : Natural;
+      Policy   : Flyology_Serde.Policies.Decode_Policy;
+      Error    : in out Errors.Error_Info)
+   is
+      pragma Unreferenced (From, Position, Policy, Error);
+   begin
+      Target.Count := Target.Count + 1;
+   end Append_Integer;
+
+   procedure Finish_Array
+     (Target : in out Array_Builder; Error : in out Errors.Error_Info)
+   is
+      pragma Unreferenced (Target, Error);
+   begin
+      null;
+   end Finish_Array;
+
+   package Integer_Arrays is new
+     Flyology_Serde.Adapters.Arrays
+       (Index_Type        => Positive,
+        Element_Type      => Integer,
+        Array_Type        => Integer_Array,
+        Builder_Type      => Array_Builder,
+        Serialize_Element => Integer_Adapter.Serialize_Value,
+        Begin_Candidate   => Begin_Array,
+        Append_Element    => Append_Integer,
+        Finish_Candidate  => Finish_Array);
+
+   type Maybe_Integer is record
+      Present : Boolean := False;
+      Value   : Integer := 0;
+   end record;
+
+   function Has_Value (Item : Maybe_Integer) return Boolean
+   is (Item.Present);
+
+   procedure Serialize_Maybe_Value
+     (Item  : Maybe_Integer;
+      Into  : in out Serialization.Serializer'Class;
+      Error : in out Errors.Error_Info) is
+   begin
+      Integer_Adapter.Serialize_Value (Item.Value, Into, Error);
+   end Serialize_Maybe_Value;
+
+   procedure Set_None
+     (Target : in out Maybe_Integer; Error : in out Errors.Error_Info)
+   is
+      pragma Unreferenced (Error);
+   begin
+      Target := (Present => False, Value => 0);
+   end Set_None;
+
+   procedure Read_Some
+     (From   : in out Flyology_Serde.Deserialization.Deserializer'Class;
+      Target : in out Maybe_Integer;
+      Policy : Flyology_Serde.Policies.Decode_Policy;
+      Error  : in out Errors.Error_Info)
+   is
+      pragma Unreferenced (Policy);
+   begin
+      Integer_Adapter.Deserialize_Candidate (From, Target.Value, Error);
+      if Error.Code = Errors.No_Error then
+         Target.Present := True;
+      end if;
+   end Read_Some;
+
+   package Maybe_Integers is new
+     Flyology_Serde.Adapters.Optionals
+       (Source_Type         => Maybe_Integer,
+        Builder_Type        => Maybe_Integer,
+        Is_Present          => Has_Value,
+        Serialize_Present   => Serialize_Maybe_Value,
+        Set_Absent          => Set_None,
+        Deserialize_Present => Read_Some);
 
    type Sample is record
       Identifier : Interfaces.Unsigned_64;
@@ -30,16 +135,17 @@ procedure Tests is
       Into.End_Record (Error);
    end Serialize;
 
-   Output     : Counting.Counter;
-   Mismatch   : Counting.Counter;
-   Bad_Count  : Counting.Counter;
-   Bad_Field  : Counting.Counter;
-   Deep       : Counting.Counter;
-   None_Value : Counting.Counter;
-   Some_Value : Counting.Counter;
-   Bad_Some   : Counting.Counter;
-   Budget     : Budgets.Decode_Budget;
-   Error      : Errors.Error_Info;
+   Output         : Counting.Counter;
+   Mismatch       : Counting.Counter;
+   Bad_Count      : Counting.Counter;
+   Bad_Field      : Counting.Counter;
+   Deep           : Counting.Counter;
+   None_Value     : Counting.Counter;
+   Some_Value     : Counting.Counter;
+   Bad_Some       : Counting.Counter;
+   Adapter_Output : Counting.Counter;
+   Budget         : Budgets.Decode_Budget;
+   Error          : Errors.Error_Info;
 begin
    Serialize ((Identifier => 42, Enabled => True), Output, Error);
    pragma Assert (Error.Code = Errors.No_Error);
@@ -129,9 +235,67 @@ begin
    pragma Assert (Error.Code = Errors.Capacity_Exceeded);
 
    Errors.Reset (Error);
+   Budgets.Initialize
+     (Budget,
+      (Maximum_Nesting_Depth   => 2,
+       Maximum_Container_Items => 1,
+       Maximum_Text_Length     => 3,
+       Maximum_Byte_Length     => 4,
+       Maximum_Input_Units     => 5,
+       Maximum_Logical_Values  => 2));
+   Budgets.Enter_Container (Budget, (Known => False, Length => 0), Error);
    Budgets.Enter_Container (Budget, (Known => False, Length => 0), Error);
    Budgets.Consume_Container_Item (Budget, Error);
    Budgets.Consume_Container_Item (Budget, Error);
-   Budgets.Consume_Container_Item (Budget, Error);
    pragma Assert (Error.Code = Errors.Capacity_Exceeded);
+   Budgets.Leave_Container (Budget, Error);
+   Budgets.Leave_Container (Budget, Error);
+   pragma Assert (Budgets.Depth (Budget) = 0);
+
+   Errors.Reset (Error);
+   Budgets.Enter_Container (Budget, (Known => False, Length => 0), Error);
+   pragma Assert (Error.Code = Errors.No_Error);
+   Budgets.Leave_Container (Budget, Error);
+
+   Integer_Arrays.Serialize_Value ([1, 2, 3], Adapter_Output, Error);
+   pragma Assert (Error.Code = Errors.No_Error);
+   pragma Assert (Adapter_Output.Event_Count = 5);
+
+   Maybe_Integers.Serialize_Value
+     ((Present => True, Value => 7), Adapter_Output, Error);
+   pragma Assert (Error.Code = Errors.No_Error);
+
+   Flyology_Serde.Adapters.Text.Serialize_Value
+     ("valid UTF-8", Adapter_Output, Error);
+   pragma Assert (Error.Code = Errors.No_Error);
+
+   Errors.Reset (Error);
+   Flyology_Serde.Adapters.Text.Serialize_Value
+     (String'[1 => Character'Val (16#C0#)], Adapter_Output, Error);
+   pragma Assert (Error.Code = Errors.Invalid_Text);
+
+   pragma
+     Assert
+       (not Flyology_Serde.UTF_8.Is_Valid
+              (String'
+                 [1 => Character'Val (16#E2#), 2 => Character'Val (16#82#)]));
+   pragma
+     Assert
+       (not Flyology_Serde.UTF_8.Is_Valid
+              (String'
+                 [1 => Character'Val (16#ED#),
+                  2 => Character'Val (16#A0#),
+                  3 => Character'Val (16#80#)]));
+   pragma
+     Assert
+       (not Flyology_Serde.UTF_8.Is_Valid
+              (String'
+                 [1 => Character'Val (16#F4#),
+                  2 => Character'Val (16#90#),
+                  3 => Character'Val (16#80#),
+                  4 => Character'Val (16#80#)]));
+   pragma
+     Assert
+       (Flyology_Serde.UTF_8.Is_Valid
+          (String'[1 => Character'Val (16#C2#), 2 => Character'Val (16#A2#)]));
 end Tests;

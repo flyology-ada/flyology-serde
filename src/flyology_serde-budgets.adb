@@ -79,11 +79,12 @@ package body Flyology_Serde.Budgets is
    procedure Leave_Container
      (Self : in out Decode_Budget; Error : in out Errors.Error_Info) is
    begin
-      if Error.Code /= Errors.No_Error then
-         return;
-      elsif Self.Current_Depth = 0 then
-         Errors.Fail (Error, Errors.Invalid_State);
+      if Self.Current_Depth = 0 then
+         if Error.Code = Errors.No_Error then
+            Errors.Fail (Error, Errors.Invalid_State);
+         end if;
       else
+         --  Unwind accounting even while preserving an earlier primary error.
          Self.Container_Items (Self.Current_Depth) := 0;
          Self.Current_Depth := Self.Current_Depth - 1;
       end if;

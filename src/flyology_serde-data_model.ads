@@ -35,7 +35,7 @@ is
       Nonfinite_Float_64        : Boolean := False;
       Signed_Float_Zero         : Boolean := False;
       Arbitrary_Map_Keys        : Boolean := False;
-      Nested_Optionals          : Boolean := False;
+      Lossless_Optionals        : Boolean := False;
    end record;
 
    All_Capabilities : constant Format_Capabilities := (others => True);

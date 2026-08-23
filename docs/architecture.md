@@ -32,6 +32,17 @@ zero-based, and each backend reports whether its unit is bytes, encoding code un
 The static deserialization adapter exposes its selected `Configured_Policy` and passes that policy into the
 type-specific traversal; a backend constructor must be given the same or stricter limits.
 
+One concrete deserializer owns exactly one `Decode_Budget`. The backend charges raw input units as its cursor
+advances, one logical value when it accepts that value, one container item when it accepts that item, and text/byte
+length before copying. Generated adapters do not charge this budget. They bound separate schema work such as field
+lookup and candidate capacity. A backend must unwind every successfully entered budget scope exactly once even when
+an error is already latched; unwind preserves the primary error.
+
+For JSON and CBOR, input units and error offsets are zero-based bytes. Any future backend that uses code units or
+code points must select that unit at construction and retain it for the operation. Capabilities are likewise stable
+for one backend configuration and operation. An adapter must reject a required unsupported or lossy capability
+before its first output event or destination mutation.
+
 ## Event grammar
 
 A serialization call emits exactly one value. Scalars and enumerations are complete values. A sequence is
@@ -44,6 +55,8 @@ for an illegal transition without emitting partial output where feasible.
 
 An optional is `Begin_Optional`, zero children when absent or exactly one child when present, then `End_Optional`.
 This logical distinction allows a backend to preserve nested optionals rather than conflating absence with null.
+`Lossless_Optionals` means every nesting and child combination is distinct, including none, some(none), and
+some(null); a backend that cannot guarantee all combinations reports false.
 
 A pull decoder mirrors that grammar. `Next_*` positions the source at one complete child and `End_*` is legal only
 after all children have been consumed. `Skip_Value` consumes exactly one complete child and is the bounded mechanism
