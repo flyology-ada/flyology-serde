@@ -6,9 +6,11 @@ concrete syntax.
 
 The crate is experimental. It contains bounded interfaces, explicit nonraising errors, transactional construction,
 decode budgets, exact integer and UTF-8 adapters, optional and array combinators, and a counting serializer used to
-validate traversals. JSON and CBOR provide bounded readers and writers, allocating writers, copied-input root
-facades, and standard-heap text and byte candidates. Application builders still own allocating records, maps, and
-arrays. Generated derivations remain under development against the separately reviewed Type IR boundary.
+validate traversals. The bounded record combinator adds exact name/alias metadata, duplicate and unknown-field
+policy, missing-field hooks, and final candidate validation. JSON and CBOR provide bounded readers and writers,
+allocating writers, copied-input root facades, and standard-heap text and byte candidates. Application builders
+still own allocating records, maps, and arrays. Generated derivations remain under development against the
+separately reviewed Type IR boundary.
 
 ## Boundaries
 

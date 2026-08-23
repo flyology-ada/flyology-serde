@@ -18,6 +18,7 @@ with Flyology_Serde.UTF_8;
 with Interfaces;
 with JSON_Reader_Tests;
 with JSON_Writer_Tests;
+with Record_Adapter_Tests;
 
 procedure Tests is
    package Budgets renames Flyology_Serde.Budgets;
@@ -197,6 +198,7 @@ begin
 
    JSON_Reader_Tests;
    JSON_Writer_Tests;
+   Record_Adapter_Tests;
 
    Serialize ((Identifier => 42, Enabled => True), Output, Error);
    pragma Assert (Error.Code = Errors.No_Error);

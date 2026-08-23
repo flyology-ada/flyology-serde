@@ -83,6 +83,13 @@ Record policy explicitly chooses reject/ignore for unknown fields and reject/kee
 Missing-field handling and aliases are field-specific generated metadata: a missing required field fails, while a
 declared default may be applied only when the adapter says so. Decode lookup uses generator-private local ordinals
 or bounded name comparison. Those tokens are unstable build artifacts and never Type IR identities or wire tags.
+`Adapters.Records` bounds schema work with `Maximum_Fields`, `Maximum_Field_Name_Length`, and a per-field alias
+maximum. It validates primary and alias metadata before the first format event. Decode performs a full field scan so
+an ambiguous handwritten matcher fails before duplicate handling and before consuming the value. Unknown-ignore and
+keep-first each call `Skip_Value` once; keep-last calls the field hook once with explicit replacement ownership.
+After `End_Record`, missing hooks run in ordinal order and a final hook checks cross-field and discriminant-dependent
+invariants. The generic covers records with at least one flattened logical field; null records and generated exact
+variant selection require distinct adapters rather than invented ordinals.
 
 ## Scalar fidelity
 

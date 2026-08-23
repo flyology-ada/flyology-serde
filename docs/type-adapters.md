@@ -70,6 +70,24 @@ Record fields are matched by bounded name lookup or generator-private local ordi
 declaration order. The candidate tracks seen fields, aliases, duplicates, missing required fields, and defaults.
 Aliases are accepted names for one field, not additional fields, and two aliases may not resolve ambiguously.
 
+`Adapters.Records` is the bounded runtime combinator for a record with one or more logical fields. Its generic
+instance supplies an ordinal enumeration, exact primary and alias names, bounded matcher, per-field serialization
+and construction hooks, missing-field hook, and final candidate-validity hook. Metadata is stable and nonallocating
+for an operation. Before its first backend event, the combinator bounds the number and length of names, validates
+UTF-8, proves that every declared name maps only to its own ordinal, and rejects duplicate declared names. A
+handwritten matcher may accept additional names, so decode still scans every ordinal and rejects runtime ambiguity
+with `Application_Error` before duplicate policy or value consumption.
+
+Serialization emits every ordinal in declaration order. Conditional omission is not implicit. Decode order is
+`Begin_Record`, repeated name resolution and one child action, `End_Record`, missing hooks in declaration order, and
+final candidate validation. Unknown-ignore and keep-first skip exactly one child. Keep-last passes
+`Replacing = True`; its hook replaces only the unpublished candidate and must leave all owned resources safe for
+outer rollback if decoding fails. Error paths retain the incoming spelling for unknown, ambiguous, duplicate, and
+field-decode errors, and use the canonical primary name for missing fields, subject to `Error_Info`'s fixed
+`Maximum_Name_Length`; longer names retain the bounded prefix and set `Name_Truncated`. A missing hook returning
+`Applied = False` performs no field mutation. Null records use a separate adapter, since Ada has no empty enumeration
+from which to manufacture a safe ordinal.
+
 A discriminated record is never built by changing the discriminants of an existing object. The adapter first
 decodes discriminants and enough field state to select exactly one variant path, validates every component against
 that path, then constructs the candidate once. In bounded mode, generated candidate storage has a declared capacity
