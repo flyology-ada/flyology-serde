@@ -10,6 +10,7 @@ with Flyology_Serde.Serialization;
 with Flyology_Serde.Serializers.Counting;
 with Flyology_Serde.UTF_8;
 with Interfaces;
+with JSON_Writer_Tests;
 
 procedure Tests is
    package Budgets renames Flyology_Serde.Budgets;
@@ -147,6 +148,8 @@ procedure Tests is
    Budget         : Budgets.Decode_Budget;
    Error          : Errors.Error_Info;
 begin
+   JSON_Writer_Tests;
+
    Serialize ((Identifier => 42, Enabled => True), Output, Error);
    pragma Assert (Error.Code = Errors.No_Error);
    pragma Assert (Output.Event_Count = 6);
