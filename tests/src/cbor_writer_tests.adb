@@ -2,6 +2,7 @@ with Ada.Streams;
 with Flyology_Serde.Data_Model;
 with Flyology_Serde.Errors;
 with Flyology_Serde.Policies;
+with Flyology_Serde.Serialization;
 with Flyology_Serde.Serializers.CBOR;
 with Interfaces;
 
@@ -13,6 +14,7 @@ procedure CBOR_Writer_Tests is
    use type Ada.Streams.Stream_Element_Array;
    use type Data_Model.Format_Capabilities;
    use type Errors.Error_Code;
+   use type Flyology_Serde.Serialization.Serializer_State;
    use type Interfaces.IEEE_Float_64;
    use type Interfaces.Integer_64;
 
@@ -25,12 +27,14 @@ procedure CBOR_Writer_Tests is
    Error   : Errors.Error_Info;
 
    procedure Assert_Output
-     (Self : CBOR.Bounded_Writer; Expected : Byte_Array)
+     (Self : in out CBOR.Bounded_Writer; Expected : Byte_Array)
    is
       Buffer     : Byte_Array (1 .. Byte_Offset (Expected'Length));
       Length     : Natural;
       Copy_Error : Errors.Error_Info;
    begin
+      Self.Finish_Document (Copy_Error);
+      pragma Assert (Copy_Error.Code = Errors.No_Error);
       Self.Copy_Output (Buffer, Length, Copy_Error);
       pragma Assert (Copy_Error.Code = Errors.No_Error);
       pragma Assert (Length = Expected'Length);
@@ -47,8 +51,8 @@ begin
 
    Writer.Put_Null (Error);
    pragma Assert (Error.Code = Errors.No_Error);
-   pragma Assert (Writer.Is_Complete);
    Assert_Output (Writer, [1 => 16#F6#]);
+   pragma Assert (Writer.Is_Complete);
 
    Reset_Writer;
    Writer.Put_Boolean (True, Error);
@@ -223,6 +227,7 @@ begin
       Copy_Error : Errors.Error_Info;
    begin
       Writer.Put_Text (Text, Error);
+      Writer.Finish_Document (Copy_Error);
       Writer.Copy_Output (Buffer, Length, Copy_Error);
       pragma Assert (Error.Code = Errors.No_Error);
       pragma Assert (Copy_Error.Code = Errors.No_Error);
@@ -402,8 +407,8 @@ begin
    Small.Reset;
    Small.Put_Null (Error);
    pragma Assert (Error.Code = Errors.No_Error);
-   pragma Assert (Small.Is_Complete);
    Assert_Output (Small, [1 => 16#F6#]);
+   pragma Assert (Small.Is_Complete);
 
    Errors.Reset (Error);
    Dynamic.Begin_Sequence (Data_Model.Known_Length (1), Error);
@@ -422,7 +427,66 @@ begin
    Dynamic.Put_Boolean (False, Error);
    Dynamic.Put_Null (Error);
    Dynamic.End_Sequence (Error);
+   Dynamic.Finish_Document (Error);
    pragma Assert (Error.Code = Errors.No_Error);
    pragma Assert (Dynamic.Is_Complete);
    pragma Assert (Dynamic.Output = Byte_Array'[16#9F#, 16#F4#, 16#F6#, 16#FF#]);
+
+   Reset_Writer;
+   Errors.Fail (Error, Errors.Application_Error);
+   Writer.Put_Text (String'[1 => Character'Val (16#C0#)], Error);
+   pragma Assert (Error.Code = Errors.Application_Error);
+   pragma Assert (Writer.State = Flyology_Serde.Serialization.Ready);
+
+   Errors.Reset (Error);
+   Writer.Put_Null (Error);
+   declare
+      Buffer : Byte_Array (1 .. 1);
+      Length : Natural := Natural'Last;
+      Copy_Error : Errors.Error_Info;
+   begin
+      Writer.Copy_Output (Buffer, Length, Copy_Error);
+      pragma Assert (Copy_Error.Code = Errors.Invalid_State and then Length = 0);
+   end;
+   Writer.Finish_Document (Error);
+   pragma Assert (Writer.State = Flyology_Serde.Serialization.Finished);
+   Errors.Reset (Error);
+   Writer.Begin_Variant
+     ("Tests.Shape", String'[1 => Character'Val (16#C0#)], 0, Error);
+   pragma Assert (Error.Code = Errors.Invalid_State);
+   pragma Assert (Writer.State = Flyology_Serde.Serialization.Finished);
+   Errors.Reset (Error);
+   Writer.Finish_Document (Error);
+   pragma Assert (Error.Code = Errors.Invalid_State);
+   pragma Assert (Writer.State = Flyology_Serde.Serialization.Finished);
+   declare
+      Buffer : Byte_Array (1 .. 1);
+      Length : Natural := 0;
+      Copy_Error : Errors.Error_Info;
+   begin
+      Writer.Copy_Output (Buffer, Length, Copy_Error);
+      pragma Assert (Copy_Error.Code = Errors.No_Error);
+      pragma Assert (Buffer = Byte_Array'[1 => 16#F6#] and then Length = 1);
+   end;
+
+   Writer.Abort_Document;
+   Errors.Reset (Error);
+   Writer.Put_Boolean (True, Error);
+   pragma Assert (Error.Code = Errors.Invalid_State);
+   pragma Assert (Writer.State = Flyology_Serde.Serialization.Poisoned);
+
+   Errors.Reset (Error);
+   Writer.Reset;
+   Writer.Put_Boolean (True, Error);
+   Writer.Finish_Document (Error);
+   pragma Assert (Error.Code = Errors.No_Error);
+   pragma Assert (Writer.State = Flyology_Serde.Serialization.Finished);
+   declare
+      Buffer : Byte_Array (1 .. 1);
+      Length : Natural := 0;
+   begin
+      Writer.Copy_Output (Buffer, Length, Error);
+      pragma Assert (Error.Code = Errors.No_Error);
+      pragma Assert (Buffer = Byte_Array'[16#F5#] and then Length = 1);
+   end;
 end CBOR_Writer_Tests;

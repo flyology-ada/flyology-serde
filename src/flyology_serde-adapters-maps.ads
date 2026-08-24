@@ -4,16 +4,21 @@ with Flyology_Serde.Policies;
 with Flyology_Serde.Serialization;
 
 generic
-   type Index_Type is (<>);
-   type Element_Type is limited private;
-   type Array_Type is array (Index_Type range <>) of Element_Type;
+   type Source_Type (<>) is limited private;
    type Builder_Type (<>) is limited private;
-   Maximum_Elements : Natural;
+   Maximum_Entries          : Natural;
+   --  True is a promise that every serialized and deserialized key has exactly
+   --  logical Text_Value or Enumeration_Value kind. It does not mean that an
+   --  arbitrary logical key is later rendered as text. False requires the
+   --  backend's Arbitrary_Map_Keys capability.
+   Keys_Use_Restricted_Kinds : Boolean;
+   with function Entry_Count (Item : Source_Type) return Natural;
    with
-     procedure Serialize_Element
-       (Item  : Element_Type;
-        Into  : in out Serialization.Serializer'Class;
-        Error : in out Errors.Error_Info);
+     procedure Serialize_Entry
+       (Item     : Source_Type;
+        Position : Natural;
+        Into     : in out Serialization.Serializer'Class;
+        Error    : in out Errors.Error_Info);
    with
      procedure Begin_Candidate
        (Target : in out Builder_Type;
@@ -21,7 +26,7 @@ generic
         Policy : Policies.Decode_Policy;
         Error  : in out Errors.Error_Info);
    with
-     procedure Append_Element
+     procedure Deserialize_Entry
        (From     : in out Deserialization.Deserializer'Class;
         Target   : in out Builder_Type;
         Position : Natural;
@@ -30,9 +35,11 @@ generic
    with
      procedure Finish_Candidate
        (Target : in out Builder_Type; Error : in out Errors.Error_Info);
-package Flyology_Serde.Adapters.Arrays is
+package Flyology_Serde.Adapters.Maps is
+   --  Deserialize_Entry owns duplicate-key detection and replacement for its
+   --  unpublished candidate. The generic adds no implicit duplicate policy.
    procedure Serialize_Value
-     (Item  : Array_Type;
+     (Item  : Source_Type;
       Into  : in out Serialization.Serializer'Class;
       Error : in out Errors.Error_Info);
 
@@ -41,4 +48,4 @@ package Flyology_Serde.Adapters.Arrays is
       Target : in out Builder_Type;
       Policy : Policies.Decode_Policy;
       Error  : in out Errors.Error_Info);
-end Flyology_Serde.Adapters.Arrays;
+end Flyology_Serde.Adapters.Maps;

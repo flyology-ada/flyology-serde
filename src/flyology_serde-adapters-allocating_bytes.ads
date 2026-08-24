@@ -23,7 +23,7 @@ package Flyology_Serde.Adapters.Allocating_Bytes is
 
    procedure Deserialize_Candidate
      (From   : in out Deserialization.Deserializer'Class;
-      Target : out Value;
+      Target : in out Value;
       Policy : Policies.Decode_Policy;
       Error  : in out Errors.Error_Info);
 end Flyology_Serde.Adapters.Allocating_Bytes;

@@ -364,6 +364,7 @@ begin
    begin
       People.Serialize_Value
         ((Identifier => 7, Enabled => True), Into, Error);
+      Into.Finish_Document (Error);
       Into.Copy_Output (Buffer, Length, Error);
       pragma Assert (Error.Code = Errors.No_Error);
       pragma Assert
@@ -397,6 +398,7 @@ begin
    begin
       People.Serialize_Value
         ((Identifier => 7, Enabled => True), Into, Error);
+      Into.Finish_Document (Error);
       Into.Copy_Output (Buffer, Length, Error);
       pragma Assert (Error.Code = Errors.No_Error);
       pragma Assert

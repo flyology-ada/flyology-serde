@@ -44,6 +44,12 @@ all declared mappings before a format event or typed read, then serializes the c
 every literal so an ambiguous handwritten matcher is rejected and an unmatched name is invalid. It never indexes by
 `Enum_Rep`, assumes monotonic representation values, or emits an Ada position.
 
+The bounded runtime supplies leaf adapters for Boolean, signed and modular integers, validated UTF-8 text,
+caller-buffer bytes, the semantic binary64 wrapper, and application-defined null values. Byte decode has prefix and
+exact-cardinality forms; the exact form leaves its candidate unchanged on a length mismatch. The binary64 adapter
+checks the backend's nonfinite capability before serialization or candidate mutation and retains finite negative
+zero. Null construction is an explicit callback into unpublished builder state.
+
 ## Optionals
 
 Optionality is a logical `none` or `some(value)` construct, not merely a nullable field. This distinction preserves
@@ -68,6 +74,13 @@ storage order do not affect the logical traversal.
 Generic sequence and map combinators take a statically bound element or key/value adapter. Bounded instances carry
 maximum length and construction capacity as generic actuals. Allocating instances own their containers and honor
 the configured decode limits before growing them.
+
+The general array combinator preserves whether the backend supplied a known length and independently enforces its
+instance maximum and the operation's container-item limit. `Constrained_Arrays` stages a complete local candidate,
+requires exact cardinality, and assigns only after `End_Sequence`; controlled or resource-owning elements use the
+general builder seam. The map combinator bounds entry count and checks the backend's map-key capability before the
+first event or builder callback. Its `Deserialize_Entry` callback owns duplicate-key detection and replacement,
+because logical key equality is application policy rather than a format-parser decision.
 
 ## Records, discriminants, and variants
 
@@ -156,7 +169,7 @@ never hides an allocation merely to make an indefinite result definite.
 | Ada-source derivation | Existing public Ada data types | Preserves Ada names and constraints; low duplication | Annotations and construction hooks for presentation, visibility, defaults, and unsupported semantics |
 | Schema-first generation | External contracts and multi-language models | Contract is explicit before Ada layout; can generate value types and adapters together | Handwritten invariants, private APIs, controlled resources, and application-specific validation |
 | Generic combinators | Standard containers and reusable application abstractions | Compile-time composition; no extractor or registry at runtime | A handwritten leaf adapter when the element or construction policy is not routine |
-| Handwritten adapters | Private, limited, controlled, lossy-looking, or behavior-rich types | Full control of observation, validation, ownership, and commit | Review and tests must demonstrate round-trip and failure cleanup |
+| Handwritten adapters | Private, limited, controlled, lossy-looking, or behavior-rich types | Full control of observation, validation, ownership, and commit | Review must test each implemented direction; deserializers require failure preservation and resource cleanup |
 
 Source derivation and schema-first generation may both emit the same generic combinator instances. Handwritten
 adapters implement the same runtime contracts. No strategy gets permission to weaken exactness, resource limits,

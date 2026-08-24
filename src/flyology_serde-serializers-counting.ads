@@ -2,6 +2,7 @@ with Ada.Streams;
 with Flyology_Serde.Data_Model;
 with Flyology_Serde.Errors;
 with Flyology_Serde.Serialization;
+with Flyology_Serde.Policies;
 with Interfaces;
 
 --  Format-neutral serializer used to validate traversals without producing output.
@@ -14,6 +15,21 @@ package Flyology_Serde.Serializers.Counting is
    overriding
    function Capabilities
      (Self : Counter) return Data_Model.Format_Capabilities;
+
+   overriding
+   function State (Self : Counter) return Serialization.Serializer_State;
+
+   overriding
+   procedure Finish_Document
+     (Self : in out Counter; Error : in out Errors.Error_Info);
+
+   overriding
+   procedure Abort_Document (Self : in out Counter);
+
+   procedure Reset
+     (Self         : in out Counter;
+      Capabilities : Data_Model.Format_Capabilities;
+      Limits       : Serialization.Serialization_Limits);
 
    function Event_Count (Self : Counter) return Natural;
 
@@ -137,11 +153,22 @@ private
    end record;
 
    type Container_Stack is
-     array (Positive range 1 .. Errors.Maximum_Path_Depth) of Container_Frame;
+     array (Positive range 1 .. Policies.Maximum_Supported_Nesting)
+     of Container_Frame;
 
    type Counter is limited new Serialization.Serializer with record
-      Events : Natural := 0;
-      Depth  : Natural := 0;
-      Stack  : Container_Stack := [others => <>];
+      Profile      : Data_Model.Format_Capabilities := Data_Model.All_Capabilities;
+      Limits       : Serialization.Serialization_Limits :=
+        (Maximum_Nesting_Depth   => Policies.Maximum_Supported_Nesting,
+         Maximum_Container_Items => Natural'Last,
+         Maximum_Text_Length     => Natural'Last,
+         Maximum_Byte_Length     => Natural'Last,
+         Maximum_Logical_Events  => Natural'Last);
+      Events       : Natural := 0;
+      Depth        : Natural := 0;
+      Stack        : Container_Stack := [others => <>];
+      Root_Written : Boolean := False;
+      Failed       : Boolean := False;
+      Finalized    : Boolean := False;
    end record;
 end Flyology_Serde.Serializers.Counting;

@@ -20,6 +20,9 @@ package body Flyology_Serde.Adapters.Allocating_Bytes is
    begin
       if Error.Code /= Errors.No_Error then
          return;
+      elsif not Into.Capabilities.Byte_Values then
+         Errors.Fail (Error, Errors.Unsupported_Value);
+         return;
       elsif Ada.Containers.Count_Type'Pos (Item.Length)
         > Ada.Streams.Stream_Element_Offset'Pos
             (Ada.Streams.Stream_Element_Offset'Last)
@@ -44,16 +47,16 @@ package body Flyology_Serde.Adapters.Allocating_Bytes is
 
    procedure Deserialize_Candidate
      (From   : in out Deserialization.Deserializer'Class;
-      Target : out Value;
+      Target : in out Value;
       Policy : Policies.Decode_Policy;
       Error  : in out Errors.Error_Info) is
       Scratch : Scratch_Access := null;
       Length  : Natural := 0;
    begin
-      Target := Byte_Vectors.Empty_Vector;
       if Error.Code /= Errors.No_Error then
          return;
       end if;
+      Target := Byte_Vectors.Empty_Vector;
       Scratch := new Byte_Array
         (1 .. Ada.Streams.Stream_Element_Offset (Policy.Limits.Maximum_Byte_Length));
       From.Read_Bytes (Scratch.all, Length, Error);

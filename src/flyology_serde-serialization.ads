@@ -11,9 +11,48 @@ package Flyology_Serde.Serialization is
 
    type Serializer is limited interface;
 
+   type Serializer_State is (Ready, Active, Finished, Poisoned);
+
+   --  Every implementation starts, or is explicitly reset, in Ready. The
+   --  first accepted root event changes the operation to Active. A successful
+   --  balanced Finish_Document changes it to Finished and makes the published
+   --  document immutable. In Finished, another event or Finish_Document
+   --  reports Invalid_State without changing state or output. Poisoned rejects
+   --  events and Finish_Document with Invalid_State. When Error is already
+   --  latched, every event and Finish_Document is a strict no-op.
+   --
+   --  Abort_Document is the nonraising, idempotent transition from any state
+   --  to Poisoned and revokes publication. A concrete Reset is the only route
+   --  from Finished or Poisoned to Ready. Capabilities remain stable for one
+   --  operation. Together with the root Serialization_Limits, they completely
+   --  determine semantic acceptance of an identical traversal; after a
+   --  successful Counting preflight, only backend storage or sink failures
+   --  may newly fail in the real pass.
+
+   type Serialization_Limits is record
+      Maximum_Nesting_Depth   : Natural;
+      Maximum_Container_Items : Natural;
+      Maximum_Text_Length     : Natural;
+      Maximum_Byte_Length     : Natural;
+      Maximum_Logical_Events  : Natural;
+   end record;
+
    function Capabilities
      (Self : Serializer) return Data_Model.Format_Capabilities
    is abstract;
+
+   function State (Self : Serializer) return Serializer_State is abstract;
+
+   --  Finish publishes one balanced root value. Buffered output remains
+   --  unavailable until this succeeds.
+   procedure Finish_Document
+     (Self : in out Serializer; Error : in out Errors.Error_Info)
+   is abstract;
+
+   --  Abort is nonraising and idempotent. It releases local traversal state
+   --  and poisons the serializer until its concrete Reset operation is used.
+   --  A streaming backend cannot retract bytes already accepted by its sink.
+   procedure Abort_Document (Self : in out Serializer) is abstract;
 
    procedure Put_Null
      (Self : in out Serializer; Error : in out Errors.Error_Info)

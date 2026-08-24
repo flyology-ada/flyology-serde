@@ -27,6 +27,13 @@ during mutation of the explicitly allocating writer poisons it and propagates `S
 as a format capacity status. A later `Output` call may independently exhaust memory while copying a completed
 buffer; that exception leaves the completed writer retryable.
 
+A balanced direct event traversal remains `Active` and unpublishable until `Finish_Document` succeeds. Calling
+`Finish_Document` without exactly one balanced root poisons the writer. A second finish or any event after `Finished`
+reports `Invalid_State` while preserving the completed output. An event after `Poisoned` likewise reports
+`Invalid_State`; only `Reset` returns to `Ready`. A prelatched error makes every event and finish a strict no-op.
+`Abort_Document` is nonraising and idempotent, discards traversal state, and leaves the writer `Poisoned`; aborting a
+finished writer intentionally revokes publication. `Copy_Output` before finish or after failure returns no prefix.
+
 `Deserializers.JSON.Reader` is the bounded pull reader. Its access discriminant borrows one immutable input string
 for the reader's lifetime under Ada accessibility checks. The source owner must also exclude mutation through any
 other alias or task during traversal. The reader returns no borrowed slice: decoded text, bytes, field names, and

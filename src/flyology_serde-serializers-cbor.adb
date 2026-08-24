@@ -30,8 +30,24 @@ package body Flyology_Serde.Serializers.CBOR is
       Error : in out Errors.Error_Info) is
    begin
       Self.Failed := True;
+      Self.Finalized := False;
       Errors.Fail (Error, Code);
    end Fail;
+
+   procedure Guard_Event
+     (Self    : in out Writer_Base;
+      Allowed : out Boolean;
+      Error   : in out Errors.Error_Info) is
+   begin
+      Allowed := False;
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Self.Failed or else Self.Finalized then
+         Errors.Fail (Error, Errors.Invalid_State);
+      else
+         Allowed := True;
+      end if;
+   end Guard_Event;
 
    procedure Emit
      (Self  : in out Writer_Base;
@@ -106,9 +122,12 @@ package body Flyology_Serde.Serializers.CBOR is
    end Increment;
 
    procedure Before_Value
-     (Self : in out Writer_Base; Error : in out Errors.Error_Info) is
+     (Self : in out Writer_Base; Error : in out Errors.Error_Info)
+   is
+      Allowed : Boolean;
    begin
-      if Error.Code /= Errors.No_Error or else Self.Failed then
+      Guard_Event (Self, Allowed, Error);
+      if not Allowed then
          return;
       elsif Self.Depth = 0 then
          if Self.Root_Written then
@@ -201,9 +220,12 @@ package body Flyology_Serde.Serializers.CBOR is
    procedure Pop
      (Self  : in out Writer_Base;
       Kind  : Container_Kind;
-      Error : in out Errors.Error_Info) is
+      Error : in out Errors.Error_Info)
+   is
+      Allowed : Boolean;
    begin
-      if Error.Code /= Errors.No_Error or else Self.Failed then
+      Guard_Event (Self, Allowed, Error);
+      if not Allowed then
          return;
       elsif Self.Depth = 0
         or else Self.Stack (Self.Depth).Kind /= Kind
@@ -260,10 +282,47 @@ package body Flyology_Serde.Serializers.CBOR is
       Self.Depth := 0;
       Self.Root_Written := False;
       Self.Failed := False;
+      Self.Finalized := False;
    end Reset_Common;
 
    function Complete (Self : Writer_Base) return Boolean
-   is (Self.Root_Written and then Self.Depth = 0 and then not Self.Failed);
+   is (Self.Finalized and then not Self.Failed);
+
+   overriding
+   function State (Self : Writer_Base) return Serialization.Serializer_State
+   is
+     (if Self.Failed then Serialization.Poisoned
+      elsif Self.Finalized then Serialization.Finished
+      elsif Self.Root_Written then Serialization.Active
+      else Serialization.Ready);
+
+   overriding
+   procedure Finish_Document
+     (Self : in out Writer_Base; Error : in out Errors.Error_Info) is
+   begin
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Self.Failed or else Self.Finalized then
+         Errors.Fail (Error, Errors.Invalid_State);
+      elsif not Self.Root_Written or else Self.Depth /= 0
+      then
+         Fail (Self, Errors.Invalid_State, Error);
+      else
+         Self.Finalized := True;
+      end if;
+   end Finish_Document;
+
+   overriding
+   procedure Abort_Document (Self : in out Writer_Base) is
+   begin
+      Self.Stack := [others => <>];
+      Self.Depth := 0;
+      Self.Finalized := False;
+      Self.Failed := True;
+   exception
+      when others =>
+         null;
+   end Abort_Document;
 
    overriding
    function Capabilities
@@ -365,9 +424,14 @@ package body Flyology_Serde.Serializers.CBOR is
    overriding
    procedure Put_Text
      (Self  : in out Writer_Base;
-      Value : String;
+     Value : String;
       Error : in out Errors.Error_Info) is
+      Allowed : Boolean;
    begin
+      Guard_Event (Self, Allowed, Error);
+      if not Allowed then
+         return;
+      end if;
       if not UTF_8.Is_Valid (Value) then
          Fail (Self, Errors.Invalid_Text, Error);
          return;
@@ -499,9 +563,12 @@ package body Flyology_Serde.Serializers.CBOR is
    procedure Put_Field
      (Self  : in out Writer_Base;
       Name  : String;
-      Error : in out Errors.Error_Info) is
+      Error : in out Errors.Error_Info)
+   is
+      Allowed : Boolean;
    begin
-      if Error.Code /= Errors.No_Error or else Self.Failed then
+      Guard_Event (Self, Allowed, Error);
+      if not Allowed then
          return;
       elsif not UTF_8.Is_Valid (Name) then
          Fail (Self, Errors.Invalid_Text, Error);
@@ -550,7 +617,12 @@ package body Flyology_Serde.Serializers.CBOR is
       Error            : in out Errors.Error_Info)
    is
       pragma Unreferenced (Type_Name);
+      Allowed : Boolean;
    begin
+      Guard_Event (Self, Allowed, Error);
+      if not Allowed then
+         return;
+      end if;
       if not UTF_8.Is_Valid (Alternative_Name) then
          Fail (Self, Errors.Invalid_Text, Error);
          return;

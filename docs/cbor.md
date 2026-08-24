@@ -71,7 +71,10 @@ reader with exactly the adapter policy, leaves the reader scope before freeing t
 status or exception path. The operation copies rather than taking ownership. Preflight failure reports
 `Capacity_Exceeded` at the first disallowed zero-based byte offset and leaves the target untouched.
 
-Both writers use the JSON writer's incomplete/poison/reset lifecycle. Capacity exhaustion, allocation failure,
+Both writers use the JSON writer's explicit `Ready`/`Active`/`Finished`/`Poisoned` lifecycle. A balanced direct
+traversal remains unpublishable until `Finish_Document`; a second finish or event after `Finished` reports
+`Invalid_State` without revoking output. A prelatched error is a strict no-op. Abort is nonraising and idempotent,
+revokes any completed publication, and leaves the writer poisoned until `Reset`. Capacity exhaustion, allocation failure,
 invalid grammar, invalid text, unsupported data, or a known-count mismatch poisons the writer and makes all partial
 bytes unavailable as a complete item until `Reset`. An odd map and an incomplete optional or variant likewise never
 become publishable output. The bounded writer reports capacity failure as a status. `Storage_Error` may propagate

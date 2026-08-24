@@ -1,0 +1,1 @@
+procedure Adapter_Conformance_Tests;

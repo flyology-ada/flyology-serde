@@ -1,4 +1,5 @@
 with Ada.Unchecked_Conversion;
+with Adapter_Conformance_Tests;
 with Allocating_Decode_Tests;
 with CBOR_Reader_Conformance_Tests;
 with CBOR_Reader_Tests;
@@ -20,6 +21,7 @@ with Interfaces;
 with Enumeration_Adapter_Tests;
 with JSON_Reader_Tests;
 with JSON_Writer_Tests;
+with Handwritten_Type_Tests;
 with Record_Adapter_Tests;
 with Variant_Adapter_Tests;
 
@@ -35,6 +37,13 @@ procedure Tests is
    use type Interfaces.IEEE_Float_64;
    use type Interfaces.Unsigned_64;
 
+   Serialization_Limits : constant Serialization.Serialization_Limits :=
+     (Maximum_Nesting_Depth   => 32,
+      Maximum_Container_Items => 1_024,
+      Maximum_Text_Length     => 1_024,
+      Maximum_Byte_Length     => 1_024,
+      Maximum_Logical_Events  => 4_096);
+
    function Float_Bits is new Ada.Unchecked_Conversion
      (Interfaces.IEEE_Float_64, Interfaces.Unsigned_64);
 
@@ -49,7 +58,7 @@ procedure Tests is
 
    procedure Begin_Array
      (Target : in out Array_Builder;
-      Length : Natural;
+      Length : Data_Model.Length_Information;
       Policy : Flyology_Serde.Policies.Decode_Policy;
       Error  : in out Errors.Error_Info)
    is
@@ -84,6 +93,7 @@ procedure Tests is
         Element_Type      => Integer,
         Array_Type        => Integer_Array,
         Builder_Type      => Array_Builder,
+        Maximum_Elements  => 16,
         Serialize_Element => Integer_Adapter.Serialize_Value,
         Begin_Candidate   => Begin_Array,
         Append_Element    => Append_Integer,
@@ -141,14 +151,11 @@ procedure Tests is
       Enabled    : Boolean;
    end record;
 
-   Serialization_Calls : Natural := 0;
-
    procedure Serialize
      (Item  : Sample;
       Into  : in out Serialization.Serializer'Class;
       Error : in out Errors.Error_Info) is
    begin
-      Serialization_Calls := Serialization_Calls + 1;
       Into.Begin_Record ("Tests.Sample", 2, Error);
       Into.Put_Field ("identifier", Error);
       Into.Put_Unsigned (Item.Identifier, Error);
@@ -160,6 +167,7 @@ procedure Tests is
    package Sample_Serialization is new
      Flyology_Serde.Serialization_Adapters
        (Source_Type      => Sample,
+        Limits           => Serialization_Limits,
         Serialize_Value => Serialize);
 
    Output         : Counting.Counter;
@@ -175,6 +183,7 @@ procedure Tests is
    Budget         : Budgets.Decode_Budget;
    Error          : Errors.Error_Info;
 begin
+   Adapter_Conformance_Tests;
    Allocating_Decode_Tests;
    CBOR_Reader_Conformance_Tests;
    CBOR_Reader_Tests;
@@ -201,15 +210,18 @@ begin
    pragma Assert (Float_Output.Capabilities.Nonfinite_Float_64);
    pragma Assert (Float_Output.Capabilities.Signed_Float_Zero);
 
+   Float_Output.Begin_Sequence (Data_Model.Known_Length (4), Error);
    Float_Output.Put_Float_64 (Data_Model.Make_Finite (-0.0), Error);
    Float_Output.Put_Float_64 (Data_Model.Positive_Infinity_Value, Error);
    Float_Output.Put_Float_64 (Data_Model.Negative_Infinity_Value, Error);
    Float_Output.Put_Float_64 (Data_Model.Not_A_Number_Value, Error);
+   Float_Output.End_Sequence (Error);
    pragma Assert (Error.Code = Errors.No_Error);
-   pragma Assert (Float_Output.Event_Count = 4);
+   pragma Assert (Float_Output.Event_Count = 6);
 
    JSON_Reader_Tests;
    JSON_Writer_Tests;
+   Handwritten_Type_Tests;
    Record_Adapter_Tests;
    Variant_Adapter_Tests;
 
@@ -218,13 +230,11 @@ begin
    pragma Assert (Error.Code = Errors.No_Error);
    pragma Assert (Output.Event_Count = 6);
    pragma Assert (Output.Container_Depth = 0);
-   pragma Assert (Serialization_Calls = 1);
 
    Errors.Fail (Error, Errors.Application_Error);
    Sample_Serialization.Serialize
      ((Identifier => 99, Enabled => False), Output, Error);
    pragma Assert (Error.Code = Errors.Application_Error);
-   pragma Assert (Serialization_Calls = 1);
    pragma Assert (Output.Event_Count = 6);
 
    Errors.Reset (Error);
@@ -247,6 +257,7 @@ begin
    pragma Assert (Error.Code = Errors.Invalid_State);
 
    Errors.Reset (Error);
+   Counting.Reset (Deep, Data_Model.All_Capabilities, Serialization_Limits);
    for Index in 1 .. Errors.Maximum_Path_Depth loop
       Deep.Begin_Sequence ((Known => False, Length => 0), Error);
    end loop;
@@ -337,15 +348,21 @@ begin
    pragma Assert (Error.Code = Errors.No_Error);
    pragma Assert (Adapter_Output.Event_Count = 5);
 
+   Counting.Reset
+     (Adapter_Output, Data_Model.All_Capabilities, Serialization_Limits);
    Maybe_Integers.Serialize_Value
      ((Present => True, Value => 7), Adapter_Output, Error);
    pragma Assert (Error.Code = Errors.No_Error);
 
+   Counting.Reset
+     (Adapter_Output, Data_Model.All_Capabilities, Serialization_Limits);
    Flyology_Serde.Adapters.Text.Serialize_Value
      ("valid UTF-8", Adapter_Output, Error);
    pragma Assert (Error.Code = Errors.No_Error);
 
    Errors.Reset (Error);
+   Counting.Reset
+     (Adapter_Output, Data_Model.All_Capabilities, Serialization_Limits);
    Flyology_Serde.Adapters.Text.Serialize_Value
      (String'[1 => Character'Val (16#C0#)], Adapter_Output, Error);
    pragma Assert (Error.Code = Errors.Invalid_Text);

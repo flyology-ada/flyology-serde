@@ -21,6 +21,16 @@ package Flyology_Serde.Serializers.CBOR is
      (Self : Writer_Base) return Data_Model.Format_Capabilities;
 
    overriding
+   function State (Self : Writer_Base) return Serialization.Serializer_State;
+
+   overriding
+   procedure Finish_Document
+     (Self : in out Writer_Base; Error : in out Errors.Error_Info);
+
+   overriding
+   procedure Abort_Document (Self : in out Writer_Base);
+
+   overriding
    procedure Put_Null
      (Self : in out Writer_Base; Error : in out Errors.Error_Info);
 
@@ -172,6 +182,7 @@ private
       Depth        : Natural := 0;
       Root_Written : Boolean := False;
       Failed       : Boolean := False;
+      Finalized    : Boolean := False;
    end record;
 
    procedure Emit

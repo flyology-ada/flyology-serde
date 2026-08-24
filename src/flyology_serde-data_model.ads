@@ -42,6 +42,8 @@ is
      (Item : Float_64_Value) return Interfaces.IEEE_Float_64
    with Pre => Category (Item) = Finite_Float;
 
+   function Is_Negative_Zero (Item : Float_64_Value) return Boolean;
+
    function Make_Finite
      (Value : Interfaces.IEEE_Float_64) return Float_64_Value
    with
@@ -62,6 +64,8 @@ is
       Byte_Values               : Boolean := False;
       Nonfinite_Float_64        : Boolean := False;
       Signed_Float_Zero         : Boolean := False;
+      --  False accepts exactly Text_Value and Enumeration_Value as map keys.
+      --  True accepts every logical Value_Kind losslessly as a map key.
       Arbitrary_Map_Keys        : Boolean := False;
       Lossless_Optionals        : Boolean := False;
    end record;

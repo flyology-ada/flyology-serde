@@ -604,6 +604,7 @@ begin
    begin
       Shapes.Serialize_Value
         ((Kind => Point_Alternative, Common => 1, Value => 2), Into, Error);
+      Into.Finish_Document (Error);
       Into.Copy_Output (Buffer, Length, Error);
       pragma Assert
         (Buffer (1 .. Length) =
@@ -612,6 +613,7 @@ begin
       Errors.Reset (Error);
       Shapes.Serialize_Value
         ((Kind => Empty_Alternative, others => <>), Into, Error);
+      Into.Finish_Document (Error);
       Into.Copy_Output (Buffer, Length, Error);
       pragma Assert (Buffer (1 .. Length) = "[""empty"",{}]");
    end;
@@ -862,6 +864,7 @@ begin
       Error  : Errors.Error_Info;
    begin
       Signals.Serialize_Value (Started, Into, Error);
+      Into.Finish_Document (Error);
       Into.Copy_Output (Buffer, Length, Error);
       pragma Assert (Buffer (1 .. Length) = "[""started"",{}]");
    end;
@@ -873,6 +876,7 @@ begin
       Error  : Errors.Error_Info;
    begin
       Signals.Serialize_Value (Started, Into, Error);
+      Into.Finish_Document (Error);
       Into.Copy_Output (Buffer, Length, Error);
       pragma Assert
         (Buffer (1 .. Ada.Streams.Stream_Element_Offset (Length))

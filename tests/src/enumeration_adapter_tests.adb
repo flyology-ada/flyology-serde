@@ -204,6 +204,7 @@ begin
       Error  : Errors.Error_Info;
    begin
       Colors.Serialize_Value (Red, Into, Error);
+      Into.Finish_Document (Error);
       Into.Copy_Output (Buffer, Length, Error);
       pragma Assert (Error.Code = Errors.No_Error);
       pragma Assert (Buffer (1 .. Length) = """red""");
@@ -216,6 +217,7 @@ begin
       Error  : Errors.Error_Info;
    begin
       Colors.Serialize_Value (Red, Into, Error);
+      Into.Finish_Document (Error);
       Into.Copy_Output (Buffer, Length, Error);
       pragma Assert (Error.Code = Errors.No_Error);
       pragma Assert

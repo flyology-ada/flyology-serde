@@ -26,6 +26,27 @@ nonraising, idempotent `Abort_Document`, then rolls back the unpublished candida
 backend scope while preserving an earlier status and poisons the operation; the backend's explicit reset is the only
 route to reuse. A raised adapter exception remains the primary exception.
 
+`Serialization_Adapters.Serialize` performs a nonemitting validation traversal through `Serializers.Counting`
+configured with the target backend's immutable capabilities and explicit serialization limits. Only a successful,
+balanced preflight is repeated against the real backend. The whole traversal and every callback it invokes must be
+repeatable and externally side-effect-free except for the supplied serializer and error. The source, observers,
+iterators, and callback results remain stable; otherwise the caller supplies a stable snapshot. Logging, messaging,
+consuming an iterator, or changing application state inside the traversal violates this contract.
+Buffered JSON and CBOR writers expose output only after `Finish_Document`. Serializer state is `Ready`, `Active`,
+`Finished`, or `Poisoned`; abort is nonraising and idempotent. Semantic capability and budget failures therefore
+precede the first real output event. A future streaming sink cannot retract a prefix after an operational sink
+failure, so such a failure poisons the operation and the caller discards that prefix.
+
+Serialization limits are charged by the nonemitting traversal. `Maximum_Nesting_Depth` bounds simultaneously open
+optional, sequence, map, record, and variant containers. `Maximum_Container_Items` applies independently to each
+container: an optional child, sequence element, map pair, or record/variant field is one item. Known lengths are
+prechecked and unknown lengths are counted as children arrive. `Maximum_Text_Length` is a per-string UTF-8 byte
+bound for text values and every type, field, enumeration-literal, and alternative name. `Maximum_Byte_Length` is a
+per-byte-value element bound. `Maximum_Logical_Events` counts one event for each scalar or enumeration, each
+container begin and end, and each `Put_Field`; map keys and values are their ordinary value events. Capabilities and
+these limits completely determine semantic preflight acceptance. Only backend storage or sink failures may occur
+after an identical valid traversal reaches the real backend.
+
 The bounded core does not allocate. Text, bytes, field names, and variant names are copied into caller-supplied
 buffers by a deserializer. A backend reports `Capacity_Exceeded` instead of allocating. The JSON and CBOR
 `Copied_Input` generic facades make a standard-heap snapshot, run one synchronous root transaction, finalize the
@@ -80,6 +101,10 @@ An optional is `Begin_Optional`, zero children when absent or exactly one child 
 This logical distinction allows a backend to preserve nested optionals rather than conflating absence with null.
 `Lossless_Optionals` means every nesting and child combination is distinct, including none, some(none), and
 some(null); a backend that cannot guarantee all combinations reports false.
+
+`Arbitrary_Map_Keys = False` has one exact meaning: only `Text_Value` and `Enumeration_Value` are accepted as map
+keys. `True` accepts every logical value kind losslessly as a key. A backend needing another subset requires a future
+explicit key-kind profile rather than interpreting the Boolean differently.
 
 A pull decoder mirrors that grammar. `Next_*` positions the source at one complete child and `End_*` is legal only
 after all children have been consumed. `Skip_Value` consumes exactly one complete child and is the bounded mechanism

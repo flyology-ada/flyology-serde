@@ -538,6 +538,7 @@ begin
    begin
       Allocating_Text.Serialize_Value (Target, Output, Error);
       pragma Assert (Error.Code = Errors.No_Error);
+      Output.Finish_Document (Error);
       Output.Copy_Output (Buffer, Length, Error);
       pragma Assert (Buffer (1 .. Length) = """ab""");
    end;
@@ -554,6 +555,18 @@ begin
    end;
 
    declare
+      Output : Counting.Counter;
+      Target : constant Allocating_Text.Value :=
+        Ada.Strings.Unbounded.To_Unbounded_String
+          (String'[1 => Character'Val (16#C0#)]);
+      Error : Errors.Error_Info;
+   begin
+      Allocating_Text.Serialize_Value (Target, Output, Error);
+      pragma Assert (Error.Code = Errors.Invalid_Text);
+      pragma Assert (Output.Event_Count = 0);
+   end;
+
+   declare
       Output : CBOR_Writers.Bounded_Writer (16);
       Target : Allocating_Bytes.Value;
       Buffer : Bytes (1 .. 16);
@@ -564,6 +577,7 @@ begin
       Target.Append (1);
       Allocating_Bytes.Serialize_Value (Target, Output, Error);
       pragma Assert (Error.Code = Errors.No_Error);
+      Output.Finish_Document (Error);
       Output.Copy_Output (Buffer, Length, Error);
       pragma Assert
         (Buffer (1 .. Ada.Streams.Stream_Element_Offset (Length))
@@ -666,5 +680,32 @@ begin
       Allocating_Bytes.Deserialize_Candidate (From, Target, Policy, Error);
       pragma Assert (Error.Code = Errors.Capacity_Exceeded);
       pragma Assert (Target.Length = 0);
+   end;
+
+   --  A prelatched status preserves an established allocating candidate.
+   declare
+      Policy : constant Policies.Decode_Policy := (others => <>);
+      Input  : aliased constant String := """new""";
+      From   : JSON.Reader (Input'Access);
+      Target : Allocating_Text.Value :=
+        Ada.Strings.Unbounded.To_Unbounded_String ("old");
+      Error  : Errors.Error_Info;
+   begin
+      Errors.Fail (Error, Errors.Application_Error);
+      Allocating_Text.Deserialize_Candidate (From, Target, Policy, Error);
+      pragma Assert (Ada.Strings.Unbounded.To_String (Target) = "old");
+   end;
+
+   declare
+      Policy : constant Policies.Decode_Policy := (others => <>);
+      Input  : aliased constant Bytes := [16#41#, 1];
+      From   : CBOR.Reader (Input'Access);
+      Target : Allocating_Bytes.Value;
+      Error  : Errors.Error_Info;
+   begin
+      Target.Append (99);
+      Errors.Fail (Error, Errors.Application_Error);
+      Allocating_Bytes.Deserialize_Candidate (From, Target, Policy, Error);
+      pragma Assert (Target.Length = 1 and then Target (0) = 99);
    end;
 end Allocating_Decode_Tests;
