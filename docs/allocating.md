@@ -32,12 +32,24 @@ checks known and observed lengths against the operation's container-item limit a
 `End_Sequence`, and then moves the vector into the unpublished target. A trusted known length may reserve
 proportional storage up to the caller's decode limit. `Storage_Error` propagates for root abort and rollback.
 
-Each decoded element is a fresh local value. Standard-vector reserve or growth may initialize and finalize retained
-spare capacity and copy existing elements; `Append` copies the local value, which then finalizes. The adapter
-therefore accepts definite, nonlimited elements whose `Initialize`, `Adjust`, and `Finalize` are nonraising and keep
-ownership correct for every container copy and spare value. Limited, move-only, identity-owning, or otherwise
-non-copy-safe resources use `Adapters.Arrays` with an application builder or a handwritten adapter. The target must
-have no outstanding container cursor, reference, or iterator during replacement.
+`Adapters.Allocating_Maps` is a generic standard-heap ordered-map candidate for definite, nonlimited, copy-safe keys
+and elements. Comparator equivalence defines logical key equality, and comparator order makes both serialization
+preflight and output traversal stable. The comparator must be a stable, side-effect-free, nonraising strict weak
+ordering. The adapter stages a complete local map, completes `End_Map`, and then moves it into the unpublished
+target. JSON still represents the logical map as an array of key/value pairs; the adapter does not lower it to an
+object.
+
+`Decode_Policy.Maps.Duplicate_Keys` is independent of record duplicate-field policy. `Reject_Duplicate` reports
+`Duplicate_Key` and leaves the later value for root abort. `Keep_First` retains the first key/value and skips the
+later value through the backend. `Keep_Last` retains the first comparator-equivalent key object and replaces only
+its value. Backends preserve source pairs and do not apply logical key equality or replacement policy.
+
+Each decoded sequence element and map key/value is a fresh local value. Standard-container growth, insertion, and
+replacement may initialize, adjust, finalize, and copy retained or spare values. These adapters therefore accept
+definite, nonlimited types whose `Initialize`, `Adjust`, and `Finalize` are nonraising and keep ownership correct for
+every such operation. Limited, move-only, identity-owning, or otherwise non-copy-safe resources use the general
+builder seam or a handwritten adapter. The target must have no outstanding container cursor, reference, or iterator
+during replacement.
 
 The first implementation deliberately layers over the bounded single-copy reader call. It eagerly allocates one
 scratch buffer of `Maximum_Text_Length` or `Maximum_Byte_Length`, including a legal null range when the maximum is

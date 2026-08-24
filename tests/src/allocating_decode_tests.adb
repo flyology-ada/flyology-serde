@@ -130,10 +130,12 @@ procedure Allocating_Decode_Tests is
    Default_Policy : constant Policies.Decode_Policy := (others => <>);
    One_Byte_Policy : constant Policies.Decode_Policy :=
      (Limits  => (Maximum_Input_Units => 1, others => <>),
-      Records => (others => <>));
+      Records => (others => <>),
+      Maps    => (others => <>));
    Two_Byte_Policy : constant Policies.Decode_Policy :=
      (Limits  => (Maximum_Input_Units => 2, others => <>),
-      Records => (others => <>));
+      Records => (others => <>),
+      Maps    => (others => <>));
 
    package Root_Default is new
      Flyology_Serde.Deserialization_Adapters

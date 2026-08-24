@@ -54,11 +54,13 @@ borrowed reader, and then free the snapshot. They preflight `Maximum_Input_Units
 yields no borrowed slice. A future zero-copy API must expose input only within a callback or one deserializer step;
 neither an adapter nor a builder may retain it.
 
-`Adapters.Allocating_Text` and `Adapters.Allocating_Bytes` are explicitly named standard-heap candidate adapters.
-They eagerly allocate one scratch buffer equal to the configured text or byte maximum, decode through the bounded
-copy API, then construct a candidate containing exactly the decoded value; the container implementation may round
-its internal capacity. Tight limits are therefore important. `Storage_Error` propagates after scratch cleanup so
-the outer root transaction can roll back; format capacity remains a status.
+`Adapters.Allocating_Text`, `Adapters.Allocating_Bytes`, `Adapters.Allocating_Sequences`, and
+`Adapters.Allocating_Maps` are explicitly named standard-heap candidate adapters. Text and bytes eagerly allocate
+one scratch buffer equal to the configured maximum, decode through the bounded copy API, then construct a candidate
+containing exactly the decoded value; the container implementation may round its internal capacity. Sequences and
+ordered maps stage complete local containers and move them into unpublished targets only after traversal closes.
+Tight limits are therefore important. `Storage_Error` propagates after local cleanup so the outer root transaction
+can roll back; format capacity remains a status.
 Application-specific allocating builders may instead expose allocator and cleanup hooks as generic actuals.
 Allocating output writers likewise make heap use explicit. If their storage raises `Storage_Error`, they poison the
 operation and propagate that exception; they do not recast unconfigured heap exhaustion as a bounded format status.

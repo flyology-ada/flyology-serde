@@ -23,8 +23,17 @@ is
       Duplicate_Fields : Duplicate_Field_Action := Reject_Duplicate;
    end record;
 
+   subtype Duplicate_Key_Action is Duplicate_Field_Action;
+
+   --  Map duplicate policy is independent of record presentation-name policy.
+   --  A map adapter defines logical key equality; a backend preserves pairs.
+   type Map_Policy is record
+      Duplicate_Keys : Duplicate_Key_Action := Reject_Duplicate;
+   end record;
+
    type Decode_Policy is record
       Limits  : Decode_Limits;
       Records : Record_Policy;
+      Maps    : Map_Policy;
    end record;
 end Flyology_Serde.Policies;

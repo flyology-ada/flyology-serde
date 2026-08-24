@@ -261,17 +261,20 @@ procedure Record_Adapter_Tests is
      (Limits  => (others => <>),
       Records =>
         (Unknown_Fields   => Policies.Ignore_Unknown,
-         Duplicate_Fields => Policies.Reject_Duplicate));
+         Duplicate_Fields => Policies.Reject_Duplicate),
+      Maps    => (others => <>));
    Keep_First_Policy : constant Policies.Decode_Policy :=
      (Limits  => (others => <>),
       Records =>
         (Unknown_Fields   => Policies.Reject_Unknown,
-         Duplicate_Fields => Policies.Keep_First));
+         Duplicate_Fields => Policies.Keep_First),
+      Maps    => (others => <>));
    Keep_Last_Policy : constant Policies.Decode_Policy :=
      (Limits  => (others => <>),
       Records =>
         (Unknown_Fields   => Policies.Reject_Unknown,
-         Duplicate_Fields => Policies.Keep_Last));
+         Duplicate_Fields => Policies.Keep_Last),
+      Maps    => (others => <>));
 
    package Root_Default is new
      Flyology_Serde.Deserialization_Adapters

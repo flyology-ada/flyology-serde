@@ -80,12 +80,13 @@ instance maximum and the operation's container-item limit. `Constrained_Arrays` 
 requires exact cardinality, and assigns only after `End_Sequence`; controlled or resource-owning elements use the
 general builder seam. `Allocating_Sequences` supplies a standard-heap vector candidate for definite nonlimited,
 copy-safe elements. It bounds and stages the full sequence before moving it into unpublished state; limited,
-move-only, or identity-owning elements remain on the builder seam. The map combinator bounds entry count and checks
-the backend's map-key capability before the
-first event or builder callback. Its `Deserialize_Entry` callback owns duplicate-key detection and replacement,
-because logical key equality is application policy rather than a format-parser decision. A callback that rejects a
-key equal to an earlier logical key reports `Duplicate_Key`; accepted or replacement duplicates do not. Record and
-variant presentation-name duplicates remain `Duplicate_Field`.
+move-only, or identity-owning elements remain on the builder seam. The general map combinator bounds entry count and
+checks the backend's map-key capability before the first event or builder callback. Its `Deserialize_Entry` callback
+owns duplicate-key detection and replacement because logical key equality is adapter policy, not a format-parser
+decision. `Allocating_Maps` supplies a standard-heap ordered map for definite, nonlimited, copy-safe keys and values.
+Comparator equivalence defines its logical equality. `Decode_Policy.Maps.Duplicate_Keys` rejects, keeps the first
+pair, or keeps the first key object while replacing its value. A rejected logical duplicate reports `Duplicate_Key`;
+record and variant presentation-name duplicates remain `Duplicate_Field`.
 
 ## Records, discriminants, and variants
 
