@@ -12,6 +12,8 @@ attestation described by the architecture; the nested crate constrains supported
 
 The Ada CLI has no resource defaults. Fixture mode requires `--limits` followed by sixteen positive
 comma-separated values in `Generation_Limits` declaration order; callers select every externally effective bound.
+Alire 2.1 records compiler-provider artifacts per host in its generated lock, so the nested lock is host-local and
+ignored. JSON and SHA-256 remain exact Git commit pins in the manifest and dependency identity.
 
 `generate.py` is the first fail-closed consumer of the reviewed Flyology Type IR v1 boundary. It is an offline
 tool; generated packages depend on `flyology_serde`, but neither the serde runtime nor a format backend depends on

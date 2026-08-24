@@ -1,9 +1,6 @@
 **/obj/
 **/lib/
 **/alire/
-!tools/generator/ada/alire/
-tools/generator/ada/alire/*
-!tools/generator/ada/alire/alire.lock
 **/config/
 **/bin/
 **/__pycache__/

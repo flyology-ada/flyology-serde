@@ -54,8 +54,9 @@ must remain useful independently of Flyology tasking and remoting.
 
 - Build the library with `alr build` and run the test crate with `alr -C tests run`.
 - Build the offline Ada generator with `alr -C tools/generator/ada build`. After the reviewed Ada Type IR consumer
-  API is published, keep its exact pin and nested Alire lock tracked without adding Type IR or Libadalang to the
-  root runtime crate. Until then, keep generation fail-closed rather than pinning an incomplete API.
+  API is published, keep its exact manifest and provenance pin without adding Type IR or Libadalang to the root
+  runtime crate. Alire 2.1 compiler-provider locks are host-local and must not be tracked. Until then, keep generation
+  fail-closed rather than pinning an incomplete API.
 - Add malformed, boundary, reset/cleanup, and round-trip cases for every parser or representation change.
 - Review every architecture decision and every code or documentation change against its parent before considering
   it complete. Fix all P0 and P1 findings. Fix P2 findings unless the accepted limitation and rationale are

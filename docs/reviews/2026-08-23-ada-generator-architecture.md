@@ -42,7 +42,8 @@ units before that API freezes.
 
 Implementation may proceed for consumer-owned code that does not guess or duplicate Type IR. Binding and the
 production source mode remain blocked until a reviewed post-`460e125` Type IR commit publishes the concrete Ada
-API. That dependency will be pinned exactly and its nested Alire lock will be committed. A second independent
+API. That dependency will be pinned exactly in the manifest and dependency identity. Its generated Alire lock remains
+host-local because Alire 2.1 records platform-specific compiler-provider artifacts. A second independent
 P0/P1/P2 diff review is mandatory after implementation; every P0 and P1 and any practical P2 must be fixed before
 the Ada path becomes authoritative.
 
@@ -91,3 +92,16 @@ the runtime and generated-fixture test crates, release-marker and manifest check
 closed provenance enumeration, the 110-column Ada scan, and `git diff --check`. The reviewed Type IR Ada authority
 and query API is still unpublished, so this checkpoint remains a fail-closed consumer-owned loader rather than an
 authoritative generator cutover.
+
+## Alire lock portability correction
+
+Ada CI run `32688953041` showed that the nested lock captured the macOS GNAT artifact and could not resolve that
+path on Ubuntu. The initially considered `alr update gnat` repair is not supported: Alire 2.1.1 rejects it in a clean
+pinned checkout with `Undeployed pin`. The correction leaves the generated nested lock host-local and ignored while
+retaining exact JSON and SHA-256 Git commits in `alire.toml` and their independent content digests in the dependency
+identity. CI selects its supported compiler explicitly before a plain nested `alr build`.
+
+A lock-free build resolved the selected `gnat_native=16.1.0`, retained both exact library commits, and completed the
+Ada build. The runtime tests, Ada generator scaffold and smoke tests, all twelve Python conformance tests, APM audit,
+and `git diff --check` passed. Independent review found P0 none and P1 none. Its P2 request to retain this failure,
+resolution, and verification record is resolved by this section; the fix re-review is P0 none, P1 none, P2 none.

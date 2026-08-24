@@ -89,8 +89,8 @@ line, strictly sorted by unsigned UTF-8 bytes, with no blank or duplicate line. 
 `dependency-identities-v2.json`, `flyology_serde_generator.gpr`, `alire.toml`, every recursively discovered regular
 `.json` file below `schema`, every recursively discovered regular `.ads` and `.adb` file below `src`, every regular
 source file below `native`, and every recursively discovered regular file below `templates`; no other path is
-allowed. The platform-specific generated `alire/alire.lock` is tracked but excluded. Logical paths are relative to the
-crate root, use `/`, contain only portable ASCII letters, digits,
+allowed. The platform-specific generated `alire/alire.lock` is host-local and ignored. Logical paths are relative to
+the crate root, use `/`, contain only portable ASCII letters, digits,
 `_`, `-`, `.`, and `/`, and contain no empty, `.` or `..` component. Every entry must be a regular non-symlink file
 and its digest is over exact bytes.
 
@@ -101,8 +101,9 @@ which belong only in the CI execution attestation. Every entry has `crate`, `ver
 `commit`. `origin` is an already canonical printable-ASCII URI stored and hashed exactly as written; the generator
 performs no URL equivalence normalization. A release identity permits only `git` or `registry` source kinds and
 rejects a local path. The generator verifies these identities against `alire.toml` and the active Alire solution;
-the generated, potentially platform-specific `alire.lock` is committed for its supported host but is not part of
-the cross-platform generator identity.
+the generated, platform-specific `alire.lock` is host-local and is not part of the cross-platform generator identity.
+The linked JSON and SHA-256 dependencies remain exact Git commit pins in `alire.toml` and the dependency identity.
+CI selects a supported compiler before the nested build resolves its host-local toolchain provider.
 
 For a registry dependency, `content_sha256` is the SHA-256 recorded by the locked registry origin over the exact
 downloaded archive bytes. For a Git dependency, it is SHA-256 over the ASCII domain
