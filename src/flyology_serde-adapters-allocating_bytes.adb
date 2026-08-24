@@ -55,22 +55,35 @@ package body Flyology_Serde.Adapters.Allocating_Bytes is
    begin
       if Error.Code /= Errors.No_Error then
          return;
+      elsif Natural'Pos (Policy.Limits.Maximum_Byte_Length)
+        > Ada.Streams.Stream_Element_Offset'Pos
+            (Ada.Streams.Stream_Element_Offset'Last)
+          - Ada.Streams.Stream_Element_Offset'Pos (0)
+      then
+         Errors.Fail (Error, Errors.Capacity_Exceeded);
+         return;
       end if;
       Target := Byte_Vectors.Empty_Vector;
       Scratch := new Byte_Array
         (1 .. Ada.Streams.Stream_Element_Offset (Policy.Limits.Maximum_Byte_Length));
       From.Read_Bytes (Scratch.all, Length, Error);
       if Error.Code = Errors.No_Error then
-         begin
-            Target.Reserve_Capacity (Ada.Containers.Count_Type (Length));
-            for Index in 1 .. Length loop
-               Target.Append (Scratch (Ada.Streams.Stream_Element_Offset (Index)));
-            end loop;
-         exception
-            when Ada.Containers.Capacity_Error =>
-               Target.Clear;
-               Errors.Fail (Error, Errors.Capacity_Exceeded);
-         end;
+         if Natural'Pos (Length)
+           > Ada.Containers.Count_Type'Pos (Ada.Containers.Count_Type'Last)
+         then
+            Errors.Fail (Error, Errors.Capacity_Exceeded);
+         else
+            begin
+               Target.Reserve_Capacity (Ada.Containers.Count_Type (Length));
+               for Index in 1 .. Length loop
+                  Target.Append (Scratch (Ada.Streams.Stream_Element_Offset (Index)));
+               end loop;
+            exception
+               when Ada.Containers.Capacity_Error =>
+                  Target.Clear;
+                  Errors.Fail (Error, Errors.Capacity_Exceeded);
+            end;
+         end if;
       end if;
       Free (Scratch);
    exception

@@ -38,3 +38,8 @@ Format and configured-limit failures remain `Error_Info` statuses. Byte-vector i
 `Capacity_Exceeded`. `Storage_Error` from standard-heap scratch or result construction propagates after local
 scratch cleanup; the enclosing root adapter then invokes `Rollback_Candidate`. A custom allocator, arena, or
 proportional builder remains an application-provided adapter with explicit allocation and cleanup hooks.
+
+The byte adapter also rejects `Maximum_Byte_Length` with `Capacity_Exceeded` before reading or changing its candidate
+when the target's `Ada.Streams.Stream_Element_Offset` cannot represent the configured scratch extent. It rejects an
+accepted length that the target's `Ada.Containers.Count_Type` cannot represent as well; neither conversion escapes as
+`Constraint_Error` on a target with narrower container or stream index types.

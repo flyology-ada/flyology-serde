@@ -6,7 +6,9 @@ with Flyology_Serde.Policies;
 with Flyology_Serde.Serialization;
 
 --  Standard-heap byte-vector candidate adapter. Decode scratch storage is
---  eagerly sized to the configured maximum byte length.
+--  eagerly sized to the configured maximum byte length. A configured maximum
+--  that the target Stream_Element_Offset cannot represent is rejected before
+--  the candidate or input is touched.
 
 package Flyology_Serde.Adapters.Allocating_Bytes is
    package Byte_Vectors is new Ada.Containers.Vectors

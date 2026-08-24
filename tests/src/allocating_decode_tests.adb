@@ -35,6 +35,7 @@ procedure Allocating_Decode_Tests is
    use type Ada.Containers.Count_Type;
    use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Array;
+   use type Ada.Streams.Stream_Element_Offset;
    use type Data_Model.Value_Kind;
    use type Errors.Error_Code;
    use type Errors.Input_Offset_Unit;
@@ -708,4 +709,34 @@ begin
       Allocating_Bytes.Deserialize_Candidate (From, Target, Policy, Error);
       pragma Assert (Target.Length = 1 and then Target (0) = 99);
    end;
+
+   --  Targets whose Natural range exceeds the stream index range reject an
+   --  unrepresentable configured maximum before reading or clearing Target.
+   if Natural'Pos (Natural'Last)
+     > Ada.Streams.Stream_Element_Offset'Pos
+         (Ada.Streams.Stream_Element_Offset'Last)
+       - Ada.Streams.Stream_Element_Offset'Pos (0)
+   then
+      declare
+         Policy : Policies.Decode_Policy := (others => <>);
+         Input  : aliased constant Bytes := [16#41#, 1];
+         From   : CBOR.Reader (Input'Access);
+         Target : Allocating_Bytes.Value;
+         Error  : Errors.Error_Info;
+      begin
+         Policy.Limits.Maximum_Byte_Length := Natural'Last;
+         From.Initialize (Policy);
+         Target.Append (99);
+         Allocating_Bytes.Deserialize_Candidate (From, Target, Policy, Error);
+         pragma Assert (Error.Code = Errors.Capacity_Exceeded);
+         pragma Assert (Target.Length = 1 and then Target (0) = 99);
+
+         Errors.Reset (Error);
+         Policy.Limits.Maximum_Byte_Length := 1;
+         Allocating_Bytes.Deserialize_Candidate (From, Target, Policy, Error);
+         From.Finish_Document (Error);
+         pragma Assert (Error.Code = Errors.No_Error);
+         pragma Assert (Target.Length = 1 and then Target (0) = 1);
+      end;
+   end if;
 end Allocating_Decode_Tests;
