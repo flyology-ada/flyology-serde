@@ -6,13 +6,16 @@ The supported derivation pipeline is moving to a separate offline Ada executable
 
 ## Implementation status
 
-At serde commit `92d9b59`, only the Python fixture-gated generator is implemented. Type IR commit `460e125` does
-not yet provide the concrete Ada codec, checked owner, immutable index, or extractor authority required below. The
-authority modes and Ada publication pipeline in this document are contracts for the migration, not claims about
-the current executable. Consumer-owned scaffolding may be built before that dependency is available, but it must
-remain fail-closed and must not duplicate the Type IR loader. Python remains authoritative for the current fixture
-path; it becomes only a differential oracle after the reviewed Ada cutover. Production record lowering also stays
-closed until Type IR supplies the mandatory record-predicate guarantee described in [Derivation](derivation.md).
+At serde commit `5ff9090`, the nested Ada crate contains a fixture-only payload renderer exercised by tests and
+private build-process/SHA-256 foundations, but the executable has no production Type IR lowering or publication
+action. Published Type IR commit `460e125` does not yet provide the complete typed query surface, extractor
+authority, or offline-support crate required below. Newer Type IR work remains unpublished and is not a consumer
+pin. The authority modes and Ada publication pipeline in this document are contracts for the migration, not claims
+about the current executable. Consumer-owned scaffolding may be built before that dependency is available, but it
+must remain fail-closed and must not duplicate the Type IR loader. Python remains authoritative for the current
+fixture path; it becomes only a differential oracle after the reviewed Ada cutover. Production record lowering
+also stays closed until Type IR supplies the mandatory record-predicate guarantee described in
+[Derivation](derivation.md).
 
 ## Authority modes
 
@@ -195,6 +198,16 @@ bounded explicit argv/environment construction, serialized CLOEXEC-safe spawn se
 capture, process-group cleanup, exact-leader reaping, session-bound results, and the caller-supplied build budget.
 It is not called by the executable yet and selects no public action limit. Its exact charge, timeout, and fail-stop
 contract is recorded in the [Ada build process runner review](reviews/2026-08-24-ada-build-process-runner.md).
+
+Generator identity cannot be established by letting a finished executable hash its current checkout, or by
+linking cached Alire objects after separately hashing dependency sources. The reviewed next boundary is therefore a
+dependency-free, build-time snapshot stage: it same-read copies and hashes the closed generator and exact Git-blob
+source set, then permits a final generator build only from that private snapshot and fresh output directories. The
+temporary implementation remains Serde-private and replaceable by the future Type IR offline-support crate; it
+does not freeze a shared lock, checkout, Git, retained-resource, or digest-query API. The complete pre-implementation
+contract and its closed P0/P1/P2 review are recorded in the
+[Ada build snapshot attestation proposal](reviews/2026-08-24-ada-build-attestation-proposal.md). No proposal action
+has production limits or authority yet.
 
 ## Resource limits and errors
 
