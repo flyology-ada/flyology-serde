@@ -212,6 +212,15 @@ contract and its closed proposal review remain recorded in the
 [Ada build snapshot attestation proposal](reviews/2026-08-24-ada-build-attestation-proposal.md). Neither the request
 owner nor the unimplemented stage selects production limits or establishes extraction/build authority.
 
+The first snapshot subcomponent is also implemented as the private `Build_Attestations.Source_Lists` child. It
+parses already retained and input-charged `provenance-files-v2.txt` bytes into a session-bound limited owner,
+enforces the closed portable path grammar, strict byte ordering, required membership, retained request limits, and
+the reviewed work trace, then exposes paths only through an immediate borrowed callback. Controlled candidates and
+abort-deferred transfers keep partial lists unpublished; cleanup damage poisons the same budget. Exhaustive
+reserve-prefix, malformed-input, arbitrary-bound, allocation, cleanup, callback, and pending-abort tests cover the
+private API. This parser proves only syntax and membership. It performs no filesystem or Git observation and cannot
+create a checked stage or production authority.
+
 ## Resource limits and errors
 
 Offline operation is allocating but bounded. Each operation receives one immutable `Generation_Limits` value and

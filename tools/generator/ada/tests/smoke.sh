@@ -9,6 +9,8 @@ build_sha_256_tests="$generator_root/tests/bin/build_sha_256_tests"
 build_budgets_tests="$generator_root/tests/bin/build_budgets_tests"
 build_attestations_tests="$generator_root/tests/bin/build_attestations_tests"
 build_attestations_abort_test="$generator_root/tests/bin/flyology_serde_generator-build_attestations-abort_test"
+source_lists_test="$generator_root/tests/bin/flyology_serde_generator-build_attestations-source_lists-test"
+source_lists_abort_test="$generator_root/tests/bin/flyology_serde_generator-build_attestations-source_lists-abort_test"
 build_budget_session_test="$generator_root/tests/bin/flyology_serde_generator-build_budgets-session_exhaustion_test"
 build_processes_tests="$generator_root/tests/bin/build_processes_tests"
 build_process_exception_test="$generator_root/tests/bin/flyology_serde_generator-build_processes-exceptional_release_test"
@@ -32,6 +34,10 @@ hook_elision_project="$generator_root/tests/build_process_hook_elision.gpr"
 hook_elision_object="$generator_root/tests/obj/hook_elision/flyology_serde_generator-build_processes.o"
 attestation_hook_project="$generator_root/tests/build_attestation_hook_elision.gpr"
 attestation_hook_object="$generator_root/tests/obj/attestation_hook_elision/flyology_serde_generator-build_attestations.o"
+source_list_hook_object="$generator_root/tests/obj/attestation_hook_elision/"
+source_list_hook_object="${source_list_hook_object}flyology_serde_generator-build_attestations-source_lists.o"
+source_list_hook_ali="$generator_root/tests/obj/attestation_hook_elision/"
+source_list_hook_ali="${source_list_hook_ali}flyology_serde_generator-build_attestations-source_lists.ali"
 overlay_fixture="$generator_root/../tests/fixtures/wire-record-overlay.json"
 policy_overlay_fixture="$generator_root/../tests/fixtures/wire-record-overlay-policy.json"
 type_ir_fixture="$generator_root/../vendor/type_ir/fixtures/wire-record-shape.json"
@@ -58,6 +64,8 @@ test "$("$generator" --version)" = "serde-generator-v2"
 "$build_budgets_tests"
 "$build_attestations_tests"
 "$build_attestations_abort_test"
+"$source_lists_test" "$generator_root/provenance-files-v2.txt"
+"$source_lists_abort_test"
 "$build_budget_session_test"
 "$build_processes_tests"
 "$build_process_exception_test"
@@ -91,6 +99,35 @@ for hook_optimization in -O0 -O2; do
      flyology_serde_generator-build_attestations.adb >/dev/null
    if nm "$attestation_hook_object" | grep -qi flyology_serde_disabled_attestation; then
       echo "disabled build-attestation test hook survived $hook_optimization compilation" >&2
+      exit 1
+   fi
+done
+for hook_optimization in -O0 -O2; do
+   alr -C "$generator_root" exec -- gprbuild -f -p -u -P "$attestation_hook_project" \
+     -XHOOK_OPT="$hook_optimization" \
+     flyology_serde_generator-build_attestations-source_lists.adb >/dev/null
+   if ! test -f "$source_list_hook_object" || ! test -r "$source_list_hook_object"; then
+      echo "source-list hook object is missing after $hook_optimization compilation" >&2
+      exit 1
+   fi
+   if ! test -f "$source_list_hook_ali" || ! test -r "$source_list_hook_ali"; then
+      echo "source-list ALI is missing after $hook_optimization compilation" >&2
+      exit 1
+   fi
+   if nm "$source_list_hook_object" | grep -qi flyology_serde_disabled_attestation; then
+      echo "disabled source-list test hook survived $hook_optimization compilation" >&2
+      exit 1
+   fi
+   if nm "$source_list_hook_object" | grep -Eqi 'json|sha2|type_ir|libadalang'; then
+      echo "source-list parser gained a forbidden dependency under $hook_optimization" >&2
+      exit 1
+   fi
+   if ! awk '
+     $1 == "W" && $2 !~ /^(ada|ada[.]finalization|ada[.]unchecked_deallocation|interfaces|system|system[.]soft_links|flyology_serde_generator|flyology_serde_generator[.]build_attestation_test_hooks|flyology_serde_generator[.]build_attestations)%s$/ { bad = 1 }
+     END { exit bad }
+   ' "$source_list_hook_ali"
+   then
+      echo "source-list parser gained a non-allowlisted direct unit under $hook_optimization" >&2
       exit 1
    fi
 done

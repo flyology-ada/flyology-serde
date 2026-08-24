@@ -155,3 +155,19 @@ closed status sets, reentrancy and post-callback budget precedence, a total deci
 charging, retained request limits, and consumer-owned callback work. The corrected contract received P0 none, P1
 none, and P2 none from both reviewers. This disposition authorizes parser bodies and tests under another mandatory
 change review; it grants no snapshot or build authority.
+
+The first implementation review found P0 none and no parser/body correctness defect. It kept the change blocked on
+one P1 conformance gap and related P2 audit gaps: sampled reserve denials did not prove every atomic boundary,
+abort tests did not retain exact work evidence, cleanup-damage tests lacked exact ownership deltas and an
+independent primary, and the production dependency audit could silently accept a missing object or an unused direct
+dependency. The corrective diff adds an independent complete Parse charge trace, exhaustive Parse and Visit
+reserve-prefix denial runs, exact abort charges, one-entry and `Positive'Last` cases, post-rejection content
+observation, exact cleanup deltas, a foreign-session primary preserved through visit-guard damage, and required
+object plus direct-ALI allowlist checks. The first corrective reviewer reported P0/P1/P2 none. The second reported
+P0/P1 none but found two remaining P2 evidence gaps: equal first-entry comparison amounts could hide a reordered
+required-name check, and retained-payload cleanup damage did not assert exact release counts. The final corrective
+diff added a long leading-path trace with distinct required-name amounts and one-less/exact denial boundaries for
+each fixed-order comparison, plus exact four-path, four-node, and one-payload release deltas. Both final independent
+reviewers
+reported P0 none, P1 none, and P2 none. The focused forced rebuild, functional and abort binaries, full generator
+smoke suite, repository verification matrix, static style checks, and APM audit were repeated before commit.

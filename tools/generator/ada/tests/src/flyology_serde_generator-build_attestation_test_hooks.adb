@@ -4,6 +4,7 @@ package body Flyology_Serde_Generator.Build_Attestation_Test_Hooks is
    use type Ada.Real_Time.Time;
 
    type Boolean_Array is array (Transfer_Point) of Boolean;
+   type Source_Failure_Array is array (Source_Failure_Point) of Boolean;
 
    protected Control is
       procedure Arm_Point (Point : Transfer_Point);
@@ -20,6 +21,21 @@ package body Flyology_Serde_Generator.Build_Attestation_Test_Hooks is
          Requests_Released      : out Natural;
          Dependencies_Allocated : out Natural;
          Dependencies_Released  : out Natural);
+      procedure Source_Path_Allocated;
+      procedure Source_Path_Released;
+      procedure Source_Node_Allocated;
+      procedure Source_Node_Released;
+      procedure Source_Payload_Allocated;
+      procedure Source_Payload_Released;
+      procedure Source_Counts
+        (Paths_Allocated    : out Natural;
+         Paths_Released     : out Natural;
+         Nodes_Allocated    : out Natural;
+         Nodes_Released     : out Natural;
+         Payloads_Allocated : out Natural;
+         Payloads_Released  : out Natural);
+      procedure Arm_Source_Failure (Point : Source_Failure_Point);
+      procedure Take_Source_Failure (Point : Source_Failure_Point; Armed : out Boolean);
       procedure Arm_Request_Storage_Failure;
       procedure Arm_Request_Internal_Failure;
       procedure Arm_Dependency_Storage_Failure;
@@ -37,6 +53,13 @@ package body Flyology_Serde_Generator.Build_Attestation_Test_Hooks is
       Request_Releases       : Natural := 0;
       Dependency_Allocations : Natural := 0;
       Dependency_Releases    : Natural := 0;
+      Source_Path_Allocations : Natural := 0;
+      Source_Path_Releases    : Natural := 0;
+      Source_Node_Allocations : Natural := 0;
+      Source_Node_Releases    : Natural := 0;
+      Source_Payload_Allocations : Natural := 0;
+      Source_Payload_Releases : Natural := 0;
+      Source_Failures         : Source_Failure_Array := [others => False];
       Fail_Request_Storage   : Boolean := False;
       Fail_Request_Internal  : Boolean := False;
       Fail_Dependency_Storage : Boolean := False;
@@ -98,6 +121,63 @@ package body Flyology_Serde_Generator.Build_Attestation_Test_Hooks is
          Dependencies_Allocated := Dependency_Allocations;
          Dependencies_Released := Dependency_Releases;
       end Counts;
+
+      procedure Source_Path_Allocated is
+      begin
+         Source_Path_Allocations := Source_Path_Allocations + 1;
+      end Source_Path_Allocated;
+
+      procedure Source_Path_Released is
+      begin
+         Source_Path_Releases := Source_Path_Releases + 1;
+      end Source_Path_Released;
+
+      procedure Source_Node_Allocated is
+      begin
+         Source_Node_Allocations := Source_Node_Allocations + 1;
+      end Source_Node_Allocated;
+
+      procedure Source_Node_Released is
+      begin
+         Source_Node_Releases := Source_Node_Releases + 1;
+      end Source_Node_Released;
+
+      procedure Source_Payload_Allocated is
+      begin
+         Source_Payload_Allocations := Source_Payload_Allocations + 1;
+      end Source_Payload_Allocated;
+
+      procedure Source_Payload_Released is
+      begin
+         Source_Payload_Releases := Source_Payload_Releases + 1;
+      end Source_Payload_Released;
+
+      procedure Source_Counts
+        (Paths_Allocated    : out Natural;
+         Paths_Released     : out Natural;
+         Nodes_Allocated    : out Natural;
+         Nodes_Released     : out Natural;
+         Payloads_Allocated : out Natural;
+         Payloads_Released  : out Natural) is
+      begin
+         Paths_Allocated := Source_Path_Allocations;
+         Paths_Released := Source_Path_Releases;
+         Nodes_Allocated := Source_Node_Allocations;
+         Nodes_Released := Source_Node_Releases;
+         Payloads_Allocated := Source_Payload_Allocations;
+         Payloads_Released := Source_Payload_Releases;
+      end Source_Counts;
+
+      procedure Arm_Source_Failure (Point : Source_Failure_Point) is
+      begin
+         Source_Failures (Point) := True;
+      end Arm_Source_Failure;
+
+      procedure Take_Source_Failure (Point : Source_Failure_Point; Armed : out Boolean) is
+      begin
+         Armed := Source_Failures (Point);
+         Source_Failures (Point) := False;
+      end Take_Source_Failure;
 
       procedure Arm_Request_Storage_Failure is
       begin
@@ -227,6 +307,68 @@ package body Flyology_Serde_Generator.Build_Attestation_Test_Hooks is
       Control.Counts
         (Requests_Allocated, Requests_Released, Dependencies_Allocated, Dependencies_Released);
    end Allocation_Counts;
+
+   procedure Note_Source_Path_Allocated is
+   begin
+      Control.Source_Path_Allocated;
+   end Note_Source_Path_Allocated;
+
+   procedure Note_Source_Path_Released is
+   begin
+      Control.Source_Path_Released;
+   end Note_Source_Path_Released;
+
+   procedure Note_Source_Node_Allocated is
+   begin
+      Control.Source_Node_Allocated;
+   end Note_Source_Node_Allocated;
+
+   procedure Note_Source_Node_Released is
+   begin
+      Control.Source_Node_Released;
+   end Note_Source_Node_Released;
+
+   procedure Note_Source_Payload_Allocated is
+   begin
+      Control.Source_Payload_Allocated;
+   end Note_Source_Payload_Allocated;
+
+   procedure Note_Source_Payload_Released is
+   begin
+      Control.Source_Payload_Released;
+   end Note_Source_Payload_Released;
+
+   procedure Source_Allocation_Counts
+     (Paths_Allocated    : out Natural;
+      Paths_Released     : out Natural;
+      Nodes_Allocated    : out Natural;
+      Nodes_Released     : out Natural;
+      Payloads_Allocated : out Natural;
+      Payloads_Released  : out Natural) is
+   begin
+      Control.Source_Counts
+        (Paths_Allocated, Paths_Released, Nodes_Allocated, Nodes_Released,
+         Payloads_Allocated, Payloads_Released);
+   end Source_Allocation_Counts;
+
+   procedure Arm_Source_Failure (Point : Source_Failure_Point) is
+   begin
+      Control.Arm_Source_Failure (Point);
+   end Arm_Source_Failure;
+
+   procedure Raise_If_Source_Failure (Point : Source_Failure_Point) is
+      Armed : Boolean;
+   begin
+      Control.Take_Source_Failure (Point, Armed);
+      if Armed then
+         case Point is
+            when Source_Path_Storage | Source_Node_Storage | Source_Payload_Storage =>
+               raise Storage_Error with "injected source-list storage failure";
+            when others =>
+               raise Program_Error with "injected source-list internal or cleanup failure";
+         end case;
+      end if;
+   end Raise_If_Source_Failure;
 
    procedure Arm_Request_Storage_Failure is
    begin
