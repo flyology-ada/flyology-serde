@@ -13,6 +13,7 @@ project Flyology_Serde_Generator is
    package Compiler is
       for Default_Switches ("Ada") use
         Flyology_Serde_Generator_Config.Ada_Compiler_Switches & ("-gnatyM110", "-gnat2022");
+      for Default_Switches ("C") use ("-std=c11", "-Wall", "-Wextra", "-Werror");
    end Compiler;
 
    package Binder is

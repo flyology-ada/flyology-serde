@@ -1,6 +1,7 @@
 alire.toml
 dependency-identities-v2.json
 flyology_serde_generator.gpr
+native/build_process_abi.c
 native/open_regular.c
 provenance-files-v2.txt
 schema/dependency-identities-v2.schema.json
@@ -8,6 +9,7 @@ schema/serde-generation-v2.schema.json
 src/flyology_serde_generate.adb
 src/flyology_serde_generator-build_budgets.adb
 src/flyology_serde_generator-build_budgets.ads
+src/flyology_serde_generator-build_process_abi.ads
 src/flyology_serde_generator-build_sha_256.adb
 src/flyology_serde_generator-build_sha_256.ads
 src/flyology_serde_generator-cli.adb
