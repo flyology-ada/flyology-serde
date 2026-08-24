@@ -5,10 +5,14 @@ builds and fails closed because the reviewed Type IR Ada checked-document API ha
 the authoritative fixture implementation until the reviewed cutover; see
 [`docs/ada-generator.md`](../../docs/ada-generator.md).
 
-The Ada crate also contains a deterministic in-memory payload renderer exercised only through a fixed constructor
-under `ada/tests/src`. It compares the bytes after the legacy seven-line attestation header with fresh Python output
-and the checked-in golden. It does not emit headers, manifests, directories, files, or CLI output, and is not a
-production Type IR input path.
+The Ada crate also contains a deterministic in-memory payload renderer exercised only through a checked-overlay
+fixture lowerer under `ada/tests/src`. The lowerer accepts only the exact reviewed Type IR v1 fixture identities and
+canonical Ada bindings, including the output unit whose visibility context is attested by Type IR. It stages all
+observations in fixed storage and publishes its limited model only after four separate semantic acceptance charges.
+A policy-mutation fixture proves that logical and presentation names and runtime limits remain overlay-owned. The
+renderer compares bytes after the legacy seven-line attestation header with fresh Python output and the checked-in
+golden. It does not emit headers, manifests, directories, files, or CLI output, and is not a production Type IR
+input path.
 
 The retained request and checked-overlay owners use budgeted length and caller-buffer copy queries. Production
 source contains no unconstrained `String` getter for a request path or overlay text. Query work remains in the same

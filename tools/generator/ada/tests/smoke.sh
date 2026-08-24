@@ -6,6 +6,7 @@ generator="$generator_root/bin/flyology_serde_generate"
 scaffold_tests="$generator_root/tests/bin/scaffold_tests"
 renderer_tests="$generator_root/tests/bin/renderer_tests"
 overlay_fixture="$generator_root/../tests/fixtures/wire-record-overlay.json"
+policy_overlay_fixture="$generator_root/../tests/fixtures/wire-record-overlay-policy.json"
 type_ir_fixture="$generator_root/../vendor/type_ir/fixtures/wire-record-shape.json"
 golden_root="$generator_root/../tests/golden"
 test_root=$(mktemp -d)
@@ -31,7 +32,8 @@ python3 "$generator_root/../generate.py" --type-ir "$type_ir_fixture" \
   --overlay "$overlay_fixture" --output "$test_root/python" --test-fixture-shape
 "$renderer_tests" \
   "$golden_root/flyology-generated.ads" "$golden_root/flyology-generated.adb" \
-  "$test_root/python/flyology-generated.ads" "$test_root/python/flyology-generated.adb"
+  "$test_root/python/flyology-generated.ads" "$test_root/python/flyology-generated.adb" \
+  "$overlay_fixture" "$policy_overlay_fixture"
 "$generator" --help >/dev/null
 
 if "$generator" >"$test_root/stdout" 2>"$test_root/stderr"; then

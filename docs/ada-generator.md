@@ -155,13 +155,28 @@ Python leaves supported and installed paths after the Ada loader, verifier, nega
 compilation, and macOS/Linux fixture runs are authoritative.
 
 The first Ada rendering milestone is deliberately narrower than generation. A serde-private, immutable lowered
-record owner can be constructed only by trusted child units; the only constructor currently present is a fixed
-fixture child compiled from the nested test source directory and absent from the executable project. The
-deterministic renderer accepts that owner and produces exactly two unpublished in-memory Ada payloads beginning at
-the first `with` clause. It emits no attestation header, manifest, directory, or file. Tests remove exactly the
+record owner can be constructed only by trusted child units. The current fixture child is compiled from the nested
+test source directory and absent from the executable project. It consumes the real checked Ada overlay owner but
+accepts only the exact reviewed Type IR v1 fixture commit, source and semantic identities, record and component
+stable IDs, field order, with-unit, and canonical Ada record, component, and type bindings. This is a fixture oracle,
+not Type IR authority. The output unit must equal the Type IR accessibility context's consumer unit because changing
+it could reuse visibility facts in another Ada context. Logical and presentation names and runtime limits remain
+overlay policy.
+
+Lowering shares the operation budget used by overlay loading. Scalar, count, length, and copy observations use the
+checked overlay query charges. After validating all fixed structural claims, lowering charges one separate work unit
+for the record and each of its three fields. Queried text first passes an intrinsic 128-byte destination-capacity
+check and then copies into fixed scratch storage. The limited result stays default-empty through every observation,
+validation, and charge and is populated only after complete success, with `Valid` set last. A mismatch reports the
+unsupported-model status without poisoning the budget. Budget denial and `Storage_Error` poison it; unexpected
+exceptions also poison it and preserve an earlier diagnostic. A prelatched diagnostic is a no-op.
+
+The deterministic renderer accepts that owner and produces exactly two unpublished in-memory Ada payloads beginning
+at the first `with` clause. It emits no attestation header, manifest, directory, or file. Tests remove exactly the
 legacy seven-line fixture header and compare every remaining byte with both a fresh Python generation and the
-checked-in golden. The production entry point does not call the fixture constructor or renderer and continues to
-return `generator/type-ir-ada-api-unavailable` without publishing output.
+checked-in golden. Exact and one-less lowering work limits, prelatched failure, structural mismatch, and policy
+propagation are tested directly. The production entry point does not compile the fixture child, does not call the
+renderer, and continues to return `generator/type-ir-ada-api-unavailable` without publishing output.
 
 Rendering owns two artifact-file charges, each artifact's complete payload bytes, aggregate rendered bytes, and
 one work unit per output byte. The renderer separately charges one work unit per observed with-unit and field. It

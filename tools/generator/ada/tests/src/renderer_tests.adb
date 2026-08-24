@@ -5,16 +5,20 @@ with Ada.Strings.Fixed;
 with Flyology_Serde_Generator.Diagnostics;
 with Flyology_Serde_Generator.Lowered_Records;
 with Flyology_Serde_Generator.Lowered_Records.Test_Fixtures;
+with Flyology_Serde_Generator.Overlays;
 with Flyology_Serde_Generator.Rendering;
 with Flyology_Serde_Generator.Requests;
 
 procedure Renderer_Tests is
    use type Ada.Streams.Stream_Element_Offset;
    use type Flyology_Serde_Generator.Diagnostics.Error_Code;
+   use type Flyology_Serde_Generator.Lowered_Records.Runtime_Limit_Set;
    use type Flyology_Serde_Generator.Requests.Limit_Value;
+   use type Flyology_Serde_Generator.Requests.Budget_Usage;
    use type Flyology_Serde_Generator.Requests.Used_Value;
 
    Invalid_Header : exception;
+   Expected_Lowering_Work : constant Flyology_Serde_Generator.Requests.Used_Value := 551;
 
    procedure Require_Header (Condition : Boolean) is
    begin
@@ -115,17 +119,36 @@ procedure Renderer_Tests is
          return True;
    end Rejects_Header;
 
+   function Replace_Once (Source, Before, After : String) return String is
+      Position : constant Natural := Ada.Strings.Fixed.Index (Source, Before);
+   begin
+      pragma Assert (Before'Length = After'Length);
+      pragma Assert (Position /= 0);
+      return Result : String := Source do
+         Result (Position .. Position + Before'Length - 1) := After;
+      end return;
+   end Replace_Once;
+
+   function Replace_One_Variable (Source, Before, After : String) return String is
+      Position : constant Natural := Ada.Strings.Fixed.Index (Source, Before);
+   begin
+      pragma Assert (Position /= 0);
+      return
+        Source (Source'First .. Position - 1) & After &
+        Source (Position + Before'Length .. Source'Last);
+   end Replace_One_Variable;
+
    function Limits return Flyology_Serde_Generator.Requests.Generation_Limits is
-     (Maximum_Path_Bytes              => 1,
-      Maximum_Input_Bytes_Per_File    => 1,
-      Maximum_Total_Input_Bytes       => 1,
-      Maximum_Decoded_String_Bytes    => 1,
-      Maximum_Number_Token_Bytes      => 1,
-      Maximum_JSON_Nesting            => 1,
-      Maximum_Object_Members          => 1,
-      Maximum_Array_Elements          => 1,
+     (Maximum_Path_Bytes              => 4_096,
+      Maximum_Input_Bytes_Per_File    => 1_048_576,
+      Maximum_Total_Input_Bytes       => 2_097_152,
+      Maximum_Decoded_String_Bytes    => 4_096,
+      Maximum_Number_Token_Bytes      => 32,
+      Maximum_JSON_Nesting            => 8,
+      Maximum_Object_Members          => 64,
+      Maximum_Array_Elements          => 4_096,
       Maximum_Type_IR_Nodes           => 1,
-      Maximum_Overlay_Nodes           => 1,
+      Maximum_Overlay_Nodes           => 10_000,
       Maximum_Rendered_Bytes_Per_File => 32_768,
       Maximum_Total_Rendered_Bytes    => 65_536,
       Maximum_Artifact_Files          => 2,
@@ -152,39 +175,324 @@ procedure Renderer_Tests is
       end return;
    end Copied_Payload;
 
+   procedure Assert_Default_Empty
+     (Value : Flyology_Serde_Generator.Lowered_Records.Model)
+   is
+   begin
+      pragma Assert (not Flyology_Serde_Generator.Lowered_Records.Is_Valid (Value));
+      pragma Assert (Flyology_Serde_Generator.Lowered_Records.Output_Unit (Value) = "");
+      pragma Assert (Flyology_Serde_Generator.Lowered_Records.With_Unit_Count (Value) = 0);
+      pragma Assert (Flyology_Serde_Generator.Lowered_Records.Record_Ada_Type (Value) = "");
+      pragma Assert (Flyology_Serde_Generator.Lowered_Records.Logical_Type_Name (Value) = "");
+      pragma Assert (Flyology_Serde_Generator.Lowered_Records.Field_Count (Value) = 0);
+      pragma Assert
+        (Flyology_Serde_Generator.Lowered_Records.Runtime_Limits (Value) = (others => 0));
+   end Assert_Default_Empty;
+
    procedure Expect_Exhausted
-     (Attempt_Limits : Flyology_Serde_Generator.Requests.Generation_Limits;
+     (Value          : Flyology_Serde_Generator.Lowered_Records.Model;
+      Attempt_Limits : Flyology_Serde_Generator.Requests.Generation_Limits;
       Existing       : in out Flyology_Serde_Generator.Rendering.Rendered_Artifacts;
       Prior_Spec     : String)
    is
-      Model      : constant Flyology_Serde_Generator.Lowered_Records.Model :=
-        Flyology_Serde_Generator.Lowered_Records.Test_Fixtures.Wire_Record;
       Budget     : aliased Flyology_Serde_Generator.Requests.Operation_Budget;
       Diagnostic : Flyology_Serde_Generator.Diagnostics.Diagnostic;
    begin
       Flyology_Serde_Generator.Requests.Start_Budget (Attempt_Limits, Budget);
-      Flyology_Serde_Generator.Rendering.Render_Payload (Model, Budget, Existing, Diagnostic);
+      Flyology_Serde_Generator.Rendering.Render_Payload (Value, Budget, Existing, Diagnostic);
       pragma Assert
         (Flyology_Serde_Generator.Diagnostics.Code (Diagnostic) =
            Flyology_Serde_Generator.Diagnostics.Resource_Exhausted);
       pragma Assert (Flyology_Serde_Generator.Requests.Is_Poisoned (Budget));
       pragma Assert
         (Copied_Payload (Existing, Flyology_Serde_Generator.Rendering.Specification) = Prior_Spec);
-      Flyology_Serde_Generator.Rendering.Render_Payload (Model, Budget, Existing, Diagnostic);
+      Flyology_Serde_Generator.Rendering.Render_Payload (Value, Budget, Existing, Diagnostic);
       pragma Assert
         (Flyology_Serde_Generator.Diagnostics.Code (Diagnostic) =
            Flyology_Serde_Generator.Diagnostics.Resource_Exhausted);
    end Expect_Exhausted;
 
-   Model       : constant Flyology_Serde_Generator.Lowered_Records.Model :=
-     Flyology_Serde_Generator.Lowered_Records.Test_Fixtures.Wire_Record;
    Budget      : aliased Flyology_Serde_Generator.Requests.Operation_Budget;
+   Diagnostic  : Flyology_Serde_Generator.Diagnostics.Diagnostic;
+   Load_Usage  : Flyology_Serde_Generator.Requests.Budget_Usage;
+
+   function Load_Fixture_Model return Flyology_Serde_Generator.Lowered_Records.Model is
+      Overlay : Flyology_Serde_Generator.Overlays.Overlay_Document;
+   begin
+      pragma Assert (Ada.Command_Line.Argument_Count = 6);
+      Flyology_Serde_Generator.Requests.Start_Budget (Limits, Budget);
+      Flyology_Serde_Generator.Overlays.Load_Checked
+        (Ada.Command_Line.Argument (5), Budget, Overlay, Diagnostic);
+      pragma Assert
+        (Flyology_Serde_Generator.Diagnostics.Code (Diagnostic) =
+           Flyology_Serde_Generator.Diagnostics.No_Error);
+      Load_Usage := Flyology_Serde_Generator.Requests.Current_Usage (Budget);
+      return Flyology_Serde_Generator.Lowered_Records.Test_Fixtures.Lower_Wire_Record
+        (Overlay, Budget, Diagnostic);
+   end Load_Fixture_Model;
+
+   Model       : constant Flyology_Serde_Generator.Lowered_Records.Model := Load_Fixture_Model;
+   Lower_Usage : constant Flyology_Serde_Generator.Requests.Budget_Usage :=
+     Flyology_Serde_Generator.Requests.Current_Usage (Budget);
    Rendered    : Flyology_Serde_Generator.Rendering.Rendered_Artifacts;
    Again       : Flyology_Serde_Generator.Rendering.Rendered_Artifacts;
-   Diagnostic  : Flyology_Serde_Generator.Diagnostics.Diagnostic;
 begin
-   pragma Assert (Ada.Command_Line.Argument_Count = 4);
-   Flyology_Serde_Generator.Requests.Start_Budget (Limits, Budget);
+   pragma Assert (Ada.Command_Line.Argument_Count = 6);
+   pragma Assert
+     (Flyology_Serde_Generator.Diagnostics.Code (Diagnostic) =
+        Flyology_Serde_Generator.Diagnostics.No_Error);
+   pragma Assert (Flyology_Serde_Generator.Lowered_Records.Is_Valid (Model));
+   pragma Assert (Lower_Usage.Input_Bytes = Load_Usage.Input_Bytes);
+   pragma Assert (Lower_Usage.Overlay_Nodes = Load_Usage.Overlay_Nodes);
+   pragma Assert (Lower_Usage.Rendered_Bytes = 0);
+   pragma Assert (Lower_Usage.Artifact_Files = 0);
+   pragma Assert
+     (Lower_Usage.Work_Units - Load_Usage.Work_Units = Expected_Lowering_Work);
+
+   for Exact in Boolean loop
+      declare
+         Attempt_Limits : Flyology_Serde_Generator.Requests.Generation_Limits := Limits;
+         Attempt_Budget : aliased Flyology_Serde_Generator.Requests.Operation_Budget;
+         Attempt_Overlay : Flyology_Serde_Generator.Overlays.Overlay_Document;
+         Attempt_Diagnostic : Flyology_Serde_Generator.Diagnostics.Diagnostic;
+      begin
+         Attempt_Limits.Maximum_Work_Units :=
+           Flyology_Serde_Generator.Requests.Limit_Value
+             (Load_Usage.Work_Units + Expected_Lowering_Work - (if Exact then 0 else 1));
+         Flyology_Serde_Generator.Requests.Start_Budget (Attempt_Limits, Attempt_Budget);
+         Flyology_Serde_Generator.Overlays.Load_Checked
+           (Ada.Command_Line.Argument (5), Attempt_Budget, Attempt_Overlay, Attempt_Diagnostic);
+         pragma Assert
+           (Flyology_Serde_Generator.Diagnostics.Code (Attempt_Diagnostic) =
+              Flyology_Serde_Generator.Diagnostics.No_Error);
+         declare
+            Attempt_Model : constant Flyology_Serde_Generator.Lowered_Records.Model :=
+              Flyology_Serde_Generator.Lowered_Records.Test_Fixtures.Lower_Wire_Record
+                (Attempt_Overlay, Attempt_Budget, Attempt_Diagnostic);
+            Attempt_Usage : constant Flyology_Serde_Generator.Requests.Budget_Usage :=
+              Flyology_Serde_Generator.Requests.Current_Usage (Attempt_Budget);
+         begin
+            if Exact then
+               pragma Assert
+                 (Flyology_Serde_Generator.Diagnostics.Code (Attempt_Diagnostic) =
+                    Flyology_Serde_Generator.Diagnostics.No_Error);
+               pragma Assert (Flyology_Serde_Generator.Lowered_Records.Is_Valid (Attempt_Model));
+               pragma Assert (not Flyology_Serde_Generator.Requests.Is_Poisoned (Attempt_Budget));
+               pragma Assert
+                 (Attempt_Usage.Work_Units - Load_Usage.Work_Units = Expected_Lowering_Work);
+            else
+               pragma Assert
+                 (Flyology_Serde_Generator.Diagnostics.Code (Attempt_Diagnostic) =
+                    Flyology_Serde_Generator.Diagnostics.Resource_Exhausted);
+               Assert_Default_Empty (Attempt_Model);
+               pragma Assert (Flyology_Serde_Generator.Requests.Is_Poisoned (Attempt_Budget));
+               pragma Assert
+                 (Attempt_Usage.Work_Units - Load_Usage.Work_Units = Expected_Lowering_Work - 1);
+            end if;
+         end;
+      end;
+   end loop;
+
+   declare
+      Latched_Budget : aliased Flyology_Serde_Generator.Requests.Operation_Budget;
+      Latched_Overlay : Flyology_Serde_Generator.Overlays.Overlay_Document;
+      Latched_Diagnostic : Flyology_Serde_Generator.Diagnostics.Diagnostic;
+   begin
+      Flyology_Serde_Generator.Requests.Start_Budget (Limits, Latched_Budget);
+      Flyology_Serde_Generator.Overlays.Load_Checked
+        (Ada.Command_Line.Argument (5), Latched_Budget, Latched_Overlay, Latched_Diagnostic);
+      declare
+         Before : constant Flyology_Serde_Generator.Requests.Budget_Usage :=
+           Flyology_Serde_Generator.Requests.Current_Usage (Latched_Budget);
+      begin
+         Flyology_Serde_Generator.Diagnostics.Set
+           (Latched_Diagnostic, Flyology_Serde_Generator.Diagnostics.Unsupported_Overlay);
+         declare
+            Rejected : constant Flyology_Serde_Generator.Lowered_Records.Model :=
+              Flyology_Serde_Generator.Lowered_Records.Test_Fixtures.Lower_Wire_Record
+                (Latched_Overlay, Latched_Budget, Latched_Diagnostic);
+         begin
+            Assert_Default_Empty (Rejected);
+            pragma Assert
+              (Flyology_Serde_Generator.Requests.Current_Usage (Latched_Budget) = Before);
+            pragma Assert
+              (Flyology_Serde_Generator.Diagnostics.Code (Latched_Diagnostic) =
+                 Flyology_Serde_Generator.Diagnostics.Unsupported_Overlay);
+         end;
+
+         Flyology_Serde_Generator.Requests.Poison (Latched_Budget);
+         declare
+            Poisoned_Before : constant Flyology_Serde_Generator.Requests.Budget_Usage :=
+              Flyology_Serde_Generator.Requests.Current_Usage (Latched_Budget);
+            Rejected : constant Flyology_Serde_Generator.Lowered_Records.Model :=
+              Flyology_Serde_Generator.Lowered_Records.Test_Fixtures.Lower_Wire_Record
+                (Latched_Overlay, Latched_Budget, Latched_Diagnostic);
+         begin
+            Assert_Default_Empty (Rejected);
+            pragma Assert
+              (Flyology_Serde_Generator.Requests.Current_Usage (Latched_Budget) = Poisoned_Before);
+            pragma Assert
+              (Flyology_Serde_Generator.Diagnostics.Code (Latched_Diagnostic) =
+                 Flyology_Serde_Generator.Diagnostics.Unsupported_Overlay);
+         end;
+      end;
+   end;
+
+   declare
+      Bad_Budget : aliased Flyology_Serde_Generator.Requests.Operation_Budget;
+      Bad_Overlay : Flyology_Serde_Generator.Overlays.Overlay_Document;
+      Bad_Diagnostic : Flyology_Serde_Generator.Diagnostics.Diagnostic;
+      Source : constant String := Read_Exact (Ada.Command_Line.Argument (5));
+      Bad_Source : constant String :=
+        Replace_Once (Source, "enabled#public", "enabled#publix");
+   begin
+      Flyology_Serde_Generator.Requests.Start_Budget (Limits, Bad_Budget);
+      Flyology_Serde_Generator.Overlays.Decode_Checked
+        (Bad_Source, Bad_Budget, Bad_Overlay, Bad_Diagnostic);
+      pragma Assert
+        (Flyology_Serde_Generator.Diagnostics.Code (Bad_Diagnostic) =
+           Flyology_Serde_Generator.Diagnostics.No_Error);
+      declare
+         Rejected : constant Flyology_Serde_Generator.Lowered_Records.Model :=
+           Flyology_Serde_Generator.Lowered_Records.Test_Fixtures.Lower_Wire_Record
+             (Bad_Overlay, Bad_Budget, Bad_Diagnostic);
+      begin
+         Assert_Default_Empty (Rejected);
+         pragma Assert
+           (Flyology_Serde_Generator.Diagnostics.Code (Bad_Diagnostic) =
+              Flyology_Serde_Generator.Diagnostics.Unsupported_Lowered_Model);
+         pragma Assert (not Flyology_Serde_Generator.Requests.Is_Poisoned (Bad_Budget));
+      end;
+   end;
+
+   declare
+      Long_Budget : aliased Flyology_Serde_Generator.Requests.Operation_Budget;
+      Long_Overlay : Flyology_Serde_Generator.Overlays.Overlay_Document;
+      Long_Diagnostic : Flyology_Serde_Generator.Diagnostics.Diagnostic;
+      Source : constant String := Read_Exact (Ada.Command_Line.Argument (5));
+      Original_ID : constant String := "decl:wire_shape.public_record.enabled#public";
+      Long_ID : constant String := "decl:" & String'(1 .. 125 => 'x');
+      Long_Source : constant String := Replace_One_Variable (Source, Original_ID, Long_ID);
+   begin
+      Flyology_Serde_Generator.Requests.Start_Budget (Limits, Long_Budget);
+      Flyology_Serde_Generator.Overlays.Decode_Checked
+        (Long_Source, Long_Budget, Long_Overlay, Long_Diagnostic);
+      pragma Assert
+        (Flyology_Serde_Generator.Diagnostics.Code (Long_Diagnostic) =
+           Flyology_Serde_Generator.Diagnostics.No_Error);
+      declare
+         Rejected : constant Flyology_Serde_Generator.Lowered_Records.Model :=
+           Flyology_Serde_Generator.Lowered_Records.Test_Fixtures.Lower_Wire_Record
+             (Long_Overlay, Long_Budget, Long_Diagnostic);
+      begin
+         Assert_Default_Empty (Rejected);
+         pragma Assert
+           (Flyology_Serde_Generator.Diagnostics.Code (Long_Diagnostic) =
+              Flyology_Serde_Generator.Diagnostics.Unsupported_Lowered_Model);
+         pragma Assert (not Flyology_Serde_Generator.Requests.Is_Poisoned (Long_Budget));
+      end;
+   end;
+
+   declare
+      Context_Budget : aliased Flyology_Serde_Generator.Requests.Operation_Budget;
+      Context_Overlay : Flyology_Serde_Generator.Overlays.Overlay_Document;
+      Context_Diagnostic : Flyology_Serde_Generator.Diagnostics.Diagnostic;
+      Source : constant String := Read_Exact (Ada.Command_Line.Argument (5));
+      Context_Source : constant String :=
+        Replace_Once (Source, "Flyology.Generated", "Flyology.Untrusted");
+   begin
+      Flyology_Serde_Generator.Requests.Start_Budget (Limits, Context_Budget);
+      Flyology_Serde_Generator.Overlays.Decode_Checked
+        (Context_Source, Context_Budget, Context_Overlay, Context_Diagnostic);
+      pragma Assert
+        (Flyology_Serde_Generator.Diagnostics.Code (Context_Diagnostic) =
+           Flyology_Serde_Generator.Diagnostics.No_Error);
+      declare
+         Rejected : constant Flyology_Serde_Generator.Lowered_Records.Model :=
+           Flyology_Serde_Generator.Lowered_Records.Test_Fixtures.Lower_Wire_Record
+             (Context_Overlay, Context_Budget, Context_Diagnostic);
+      begin
+         Assert_Default_Empty (Rejected);
+         pragma Assert
+           (Flyology_Serde_Generator.Diagnostics.Code (Context_Diagnostic) =
+              Flyology_Serde_Generator.Diagnostics.Unsupported_Lowered_Model);
+         pragma Assert (not Flyology_Serde_Generator.Requests.Is_Poisoned (Context_Budget));
+      end;
+   end;
+
+   declare
+      Policy_Budget : aliased Flyology_Serde_Generator.Requests.Operation_Budget;
+      Policy_Overlay : Flyology_Serde_Generator.Overlays.Overlay_Document;
+      Policy_Diagnostic : Flyology_Serde_Generator.Diagnostics.Diagnostic;
+   begin
+      Flyology_Serde_Generator.Requests.Start_Budget (Limits, Policy_Budget);
+      Flyology_Serde_Generator.Overlays.Load_Checked
+        (Ada.Command_Line.Argument (6), Policy_Budget, Policy_Overlay, Policy_Diagnostic);
+      pragma Assert
+        (Flyology_Serde_Generator.Diagnostics.Code (Policy_Diagnostic) =
+           Flyology_Serde_Generator.Diagnostics.No_Error);
+      declare
+         Policy_Model : constant Flyology_Serde_Generator.Lowered_Records.Model :=
+           Flyology_Serde_Generator.Lowered_Records.Test_Fixtures.Lower_Wire_Record
+             (Policy_Overlay, Policy_Budget, Policy_Diagnostic);
+         Policy_Rendered : Flyology_Serde_Generator.Rendering.Rendered_Artifacts;
+      begin
+         pragma Assert (Flyology_Serde_Generator.Lowered_Records.Is_Valid (Policy_Model));
+         pragma Assert
+           (Flyology_Serde_Generator.Lowered_Records.Output_Unit (Policy_Model) =
+              "Flyology.Generated");
+         pragma Assert
+           (Flyology_Serde_Generator.Lowered_Records.Logical_Type_Name (Policy_Model) =
+              "policy.record");
+         pragma Assert
+           (Flyology_Serde_Generator.Lowered_Records.Field_Presentation_Name (Policy_Model, 1) =
+              "is_enabled");
+         pragma Assert
+           (Flyology_Serde_Generator.Lowered_Records.Field_Presentation_Name (Policy_Model, 2) =
+              "signed_value");
+         pragma Assert
+           (Flyology_Serde_Generator.Lowered_Records.Field_Presentation_Name (Policy_Model, 3) =
+              "unsigned_value");
+         pragma Assert
+           (Flyology_Serde_Generator.Lowered_Records.Runtime_Limits (Policy_Model) =
+              (Maximum_Nesting_Depth   => 7,
+               Maximum_Container_Items => 15,
+               Maximum_Text_Length     => 62,
+               Maximum_Byte_Length     => 61,
+               Maximum_Logical_Events  => 63));
+         Flyology_Serde_Generator.Rendering.Render_Payload
+           (Policy_Model, Policy_Budget, Policy_Rendered, Policy_Diagnostic);
+         pragma Assert
+           (Flyology_Serde_Generator.Diagnostics.Code (Policy_Diagnostic) =
+              Flyology_Serde_Generator.Diagnostics.No_Error);
+         declare
+            Policy_Spec : constant String :=
+              Copied_Payload
+                (Policy_Rendered, Flyology_Serde_Generator.Rendering.Specification);
+            Policy_Body : constant String :=
+              Copied_Payload
+                (Policy_Rendered, Flyology_Serde_Generator.Rendering.Package_Body);
+         begin
+            pragma Assert
+              (Ada.Strings.Fixed.Index (Policy_Spec, "package Flyology.Generated") /= 0);
+            pragma Assert (Ada.Strings.Fixed.Index (Policy_Body, """policy.record""") /= 0);
+            pragma Assert (Ada.Strings.Fixed.Index (Policy_Body, """is_enabled""") /= 0);
+            pragma Assert (Ada.Strings.Fixed.Index (Policy_Body, """signed_value""") /= 0);
+            pragma Assert (Ada.Strings.Fixed.Index (Policy_Body, """unsigned_value""") /= 0);
+            pragma Assert
+              (Ada.Strings.Fixed.Index (Policy_Body, "Maximum_Nesting_Depth   => 7") /= 0);
+            pragma Assert
+              (Ada.Strings.Fixed.Index (Policy_Body, "Maximum_Container_Items => 15") /= 0);
+            pragma Assert
+              (Ada.Strings.Fixed.Index (Policy_Body, "Maximum_Text_Length     => 62") /= 0);
+            pragma Assert
+              (Ada.Strings.Fixed.Index (Policy_Body, "Maximum_Byte_Length     => 61") /= 0);
+            pragma Assert
+              (Ada.Strings.Fixed.Index (Policy_Body, "Maximum_Logical_Events  => 63") /= 0);
+         end;
+      end;
+   end;
+
    Flyology_Serde_Generator.Rendering.Render_Payload (Model, Budget, Rendered, Diagnostic);
    pragma Assert
      (Flyology_Serde_Generator.Diagnostics.Code (Diagnostic) =
@@ -249,7 +557,8 @@ begin
            Flyology_Serde_Generator.Requests.Used_Value (Spec'Length + Body_Text'Length));
       pragma Assert
         (Usage.Work_Units =
-           Flyology_Serde_Generator.Requests.Used_Value (Spec'Length + Body_Text'Length + 4));
+           Lower_Usage.Work_Units +
+             Flyology_Serde_Generator.Requests.Used_Value (Spec'Length + Body_Text'Length + 4));
 
       Exact.Maximum_Rendered_Bytes_Per_File :=
         Flyology_Serde_Generator.Requests.Limit_Value (Natural'Max (Spec'Length, Body_Text'Length));
@@ -269,19 +578,19 @@ begin
          Attempt : Flyology_Serde_Generator.Requests.Generation_Limits := Exact;
       begin
          Attempt.Maximum_Rendered_Bytes_Per_File := Exact.Maximum_Rendered_Bytes_Per_File - 1;
-         Expect_Exhausted (Attempt, Rendered, Prior);
+         Expect_Exhausted (Model, Attempt, Rendered, Prior);
          Attempt := Exact;
          Attempt.Maximum_Total_Rendered_Bytes := Exact.Maximum_Total_Rendered_Bytes - 1;
-         Expect_Exhausted (Attempt, Rendered, Prior);
+         Expect_Exhausted (Model, Attempt, Rendered, Prior);
          Attempt := Exact;
          Attempt.Maximum_Artifact_Files := 1;
-         Expect_Exhausted (Attempt, Rendered, Prior);
+         Expect_Exhausted (Model, Attempt, Rendered, Prior);
          Attempt := Exact;
          Attempt.Maximum_Work_Units := Exact.Maximum_Work_Units - 1;
-         Expect_Exhausted (Attempt, Rendered, Prior);
+         Expect_Exhausted (Model, Attempt, Rendered, Prior);
          Attempt := Exact;
          Attempt.Maximum_Work_Units := 3;
-         Expect_Exhausted (Attempt, Rendered, Prior);
+         Expect_Exhausted (Model, Attempt, Rendered, Prior);
       end;
    end;
 
