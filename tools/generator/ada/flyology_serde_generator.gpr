@@ -1,0 +1,22 @@
+with "config/flyology_serde_generator_config.gpr";
+with "json";
+with "sha2";
+project Flyology_Serde_Generator is
+
+   for Languages use ("Ada", "C");
+   for Source_Dirs use ("src/", "config/", "native/");
+   for Object_Dir use "obj/" & Flyology_Serde_Generator_Config.Build_Profile;
+   for Create_Missing_Dirs use "True";
+   for Exec_Dir use "bin";
+   for Main use ("flyology_serde_generate.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        Flyology_Serde_Generator_Config.Ada_Compiler_Switches & ("-gnatyM110", "-gnat2022");
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es"); --  Symbolic traceback
+   end Binder;
+
+end Flyology_Serde_Generator;

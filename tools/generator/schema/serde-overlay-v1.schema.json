@@ -11,14 +11,14 @@
         "additionalProperties": false,
         "properties": {
           "ada_type": { "maxLength": 48, "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)*$", "type": "string" },
-          "declaration_id": { "type": "string" },
+          "declaration_id": { "minLength": 1, "pattern": "^[ -~]+$", "type": "string" },
           "fields": {
             "items": {
               "additionalProperties": false,
               "properties": {
                 "ada_component": { "maxLength": 48, "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)*$", "type": "string" },
                 "ada_type": { "maxLength": 48, "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)*$", "type": "string" },
-                "component_id": { "type": "string" },
+                "component_id": { "minLength": 1, "pattern": "^[ -~]+$", "type": "string" },
                 "presentation_name": { "maxLength": 64, "minLength": 1, "pattern": "^[ -~]+$", "type": "string" }
               },
               "required": ["ada_component", "ada_type", "component_id", "presentation_name"],

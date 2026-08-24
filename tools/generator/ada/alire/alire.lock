@@ -1,0 +1,72 @@
+# THIS FILE IS GENERATED. DO NOT EDIT.
+
+[solution]
+[solution.context]
+solved = true
+[[solution.state]]
+crate = "gnat"
+fulfilment = "solved"
+pinned = false
+transitivity = "direct"
+versions = ">=13 & <17"
+[solution.state.release]
+auto-gpr-with = false
+description = "The GNAT Ada compiler - Native"
+licenses = "GPL-3.0-or-later AND GPL-3.0-or-later WITH GCC-exception-3.1"
+maintainers = [
+"Fabien Chouteau <chouteau@adacore.com>",
+"CÃ©sar Sagaert <sagaert@adacore.com>",
+]
+maintainers-logins = [
+"Fabien-Chouteau",
+"AldanTanneo",
+]
+name = "gnat_native"
+provides = [
+"gnat=16.1.0",
+]
+version = "16.1.0"
+website = "https://github.com/alire-project/GNAT-FSF-builds"
+[solution.state.release.configuration]
+auto_gpr_with = true
+disabled = true
+generate_ada = true
+generate_c = true
+generate_gpr = true
+output_dir = "config"
+[solution.state.release.environment]
+[solution.state.release.environment.LD_LIBRARY_PATH]
+prepend = "${CRATE_ROOT}/lib"
+[solution.state.release.environment.LD_RUN_PATH]
+prepend = "${CRATE_ROOT}/lib"
+[solution.state.release.environment.PATH]
+prepend = "${CRATE_ROOT}/bin"
+[solution.state.release.origin]
+binary = true
+hashes = [
+"sha256:657cf254323eb91f79768918e8bd8887d6da7ac6056732a38f21e2848267da18",
+]
+url = "https://github.com/alire-project/GNAT-FSF-builds/releases/download/gnat-16.1.0-1/gnat-aarch64-darwin-16.1.0-1.tar.gz"
+[[solution.state]]
+crate = "json"
+fulfilment = "linked"
+pinned = false
+transitivity = "direct"
+versions = "=6.0.0"
+[solution.state.link]
+commit = "737296c5e378c33ac823af8404f87ebac0eb2fad"
+lockfiled = true
+path = "alire/cache/pins/json_737296c5"
+subdir = "json"
+url = "https://github.com/mosteo/onox-json-ada"
+[[solution.state]]
+crate = "sha2"
+fulfilment = "linked"
+pinned = false
+transitivity = "direct"
+versions = "=2.0.0"
+[solution.state.link]
+commit = "73c2cd73e440b1e36d1b5c8b741fcb0e3fc4046c"
+lockfiled = true
+path = "alire/cache/pins/sha2_73c2cd73"
+url = "https://github.com/AntonMeep/sha2.git"

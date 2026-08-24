@@ -54,6 +54,9 @@ so it discovers the generated skills.
 ```sh
 alr build
 alr -C tests run
+alr -C tools/generator/ada build
+alr -C tools/generator/ada exec -- gprbuild -p -P tests/scaffold_tests.gpr
+sh tools/generator/ada/tests/smoke.sh
 python3 -m unittest discover -s tools/generator/tests -p 'test_*.py'
 python3 tools/generator/check_release_markers.py
 python3 tools/generator/verify_manifest.py --require-fixture tools/generator/tests/golden

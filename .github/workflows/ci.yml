@@ -48,6 +48,14 @@ jobs:
         run: alr run
       - name: Test offline generator boundary
         run: python3 -m unittest discover -s tools/generator/tests -p 'test_*.py'
+      - name: Build offline Ada generator candidate
+        working-directory: tools/generator/ada
+        run: alr build
+      - name: Build offline Ada generator candidate tests
+        working-directory: tools/generator/ada
+        run: alr exec -- gprbuild -p -P tests/scaffold_tests.gpr
+      - name: Smoke-test offline Ada generator candidate
+        run: sh tools/generator/ada/tests/smoke.sh
       - name: Reject fixture-only release sources
         run: python3 tools/generator/check_release_markers.py
       - name: Verify generated fixture manifest

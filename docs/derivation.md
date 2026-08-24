@@ -3,7 +3,8 @@
 Routine public records, enums, arrays, and instantiated generic structures may receive generated adapters. Private,
 limited, controlled, access-bearing, class-wide, task, and protected types require explicit policy or are rejected.
 
-The offline generator consumes the reviewed versioned output of `flyology_type_ir`. It does not link Libadalang
+The offline generator consumes the reviewed versioned output of `flyology_type_ir`. Its supported pipeline is
+moving to the separate Ada executable described in [Ada generator](ada-generator.md). It does not link Libadalang
 into the serde runtime. The implemented fixture-gated v1 lowering accepts exactly one direct public definite record
 with required visible Boolean, exact signed, and exact modular scalar components. Its closed canonical overlay owns
 Ada binding names, logical presentation names, and serialization limits. Rename aliases, skip/default/optional
@@ -33,9 +34,10 @@ Generated record lookup uses bounded name comparisons or package-private ordinal
 ordered adapter metadata. The ordinals may change whenever code is regenerated and must not be serialized, placed
 in Type IR, or treated as schema identity.
 
-The generator materializes one-read, hash-attested Type IR schema/checker and fixture dependency bytes into an
-isolated temporary root retained through the same-read checked document. `strict` is the default. Because reviewed Type IR v1 currently admits no
-production document, successful generation is limited to the explicit `fixture_shape` test profile and produces a
+The transitional Python generator materializes one-read, hash-attested Type IR schema/checker and fixture dependency
+bytes into an isolated temporary root retained through the same-read checked document. `strict` is the default.
+Because reviewed Type IR v1 currently admits no production document, successful generation is limited to the
+explicit `fixture_shape` test profile and produces a
 machine-detectable fixture-only marker. It freezes the checked document, requires exact source, semantic, and
 selected-unit digests, atomically claims a new output directory, writes an attested manifest last, and never
 overwrites an existing directory. A verifier rejects every extra entry and runs as the fixture crate's Alire
@@ -43,7 +45,9 @@ pre-build action, so compilation follows verification of the same trusted-worktr
 that no concurrent process mutates the path; it is not an immutable same-read handoff into GNAT.
 Generated candidate state is private and limited; exact document completion precedes its only publication step.
 
-The wire and serde projects now have concrete duplication in checker/schema digest attestation, isolated import,
-same-read loading, and fixture gating. A future shared implementation should be a small Type-IR-owned offline loader.
+The wire and serde projects found concrete duplication in checker/schema digest attestation, isolated import,
+same-read loading, and fixture gating. The reviewed target replacement is a Type-IR-owned Ada loader and
+offline-support crate rather than a shared consumer-generator abstraction; that Ada replacement is not implemented
+in Type IR commit `460e125`.
 Overlay parsing, lowering, Ada selected-name bindings, diagnostics tied to a consumer policy, and runtime traversal
 remain separate.

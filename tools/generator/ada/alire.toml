@@ -1,0 +1,30 @@
+name = "flyology_serde_generator"
+description = "Offline Ada serializer adapter generator"
+version = "0.1.0-dev"
+
+authors = ["Yurii Rashkovskii"]
+maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+website = "https://github.com/flyology-ada/flyology-serde"
+tags = ["ada", "serialization", "code-generation"]
+
+executables = ["flyology_serde_generate"]
+
+[build-switches]
+"*" = { Compile_Checks = "warnings" }
+
+[[depends-on]]
+gnat = ">=13 & <17"
+
+[[depends-on]]
+json = "=6.0.0"
+
+[[pins]]
+json = { url='https://github.com/mosteo/onox-json-ada', subdir='json', commit='737296c5e378c33ac823af8404f87ebac0eb2fad' }
+
+[[depends-on]]
+sha2 = "=2.0.0"
+
+[[pins]]
+sha2 = { url='https://github.com/AntonMeep/sha2.git', commit='73c2cd73e440b1e36d1b5c8b741fcb0e3fc4046c' }

@@ -1,5 +1,5 @@
 lockfile_version: '1'
-generated_at: '2026-08-23T19:43:50.222668+00:00'
+generated_at: '2026-08-24T04:01:14.049240+00:00'
 apm_version: 0.28.0
 dependencies:
 - repo_url: _local/repository
@@ -9,7 +9,7 @@ dependencies:
   deployed_files:
   - .claude/rules/project.md
   deployed_file_hashes:
-    .claude/rules/project.md: sha256:00c1d6fa19809ba5220d8c9f2e990edeb7e9d67d62d9773d613a599d9bc77045
+    .claude/rules/project.md: sha256:f2a81efcef8270e1824e40c38df35e908523c2c995da31a7aa27b592a0f556d1
   source: local
   local_path: ./agent-packages/repository
 - repo_url: flyology-ada/agents
@@ -485,7 +485,7 @@ deployments:
   owners:
   - ./agent-packages/repository
   active_owner: ./agent-packages/repository
-  content_hash: sha256:00c1d6fa19809ba5220d8c9f2e990edeb7e9d67d62d9773d613a599d9bc77045
+  content_hash: sha256:f2a81efcef8270e1824e40c38df35e908523c2c995da31a7aa27b592a0f556d1
 - kind: project-relative
   target: claude
   value: .claude/rules/repository-workflow.md

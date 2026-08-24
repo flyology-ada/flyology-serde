@@ -1,5 +1,18 @@
 # Offline adapter generator
 
+The supported generator is migrating to the nested Ada executable crate in `ada/`. The Ada candidate currently
+builds and fails closed because the reviewed Type IR Ada checked-document API has not been published. Python remains
+the authoritative fixture implementation until the reviewed cutover; see
+[`docs/ada-generator.md`](../../docs/ada-generator.md).
+
+The offline Ada generator pins the corrected `mosteo/onox-json-ada` JSON 6.0.0 commit already used by Flyology and
+the exact `sha2` 2.0.0 commit. Both dependencies remain confined to the generator crate. The runtime library and its
+JSON and CBOR backends do not depend on either crate. Compiler resolution remains in the separate CI execution
+attestation described by the architecture; the nested crate constrains supported GNAT releases to 13 through 16.
+
+The Ada CLI has no resource defaults. Fixture mode requires `--limits` followed by sixteen positive
+comma-separated values in `Generation_Limits` declaration order; callers select every externally effective bound.
+
 `generate.py` is the first fail-closed consumer of the reviewed Flyology Type IR v1 boundary. It is an offline
 tool; generated packages depend on `flyology_serde`, but neither the serde runtime nor a format backend depends on
 Type IR or Libadalang.
@@ -58,6 +71,9 @@ offline module. Overlay loading, lowering, Ada naming, emitted packages, and run
 Verify with:
 
 ```sh
+alr -C tools/generator/ada build
+alr -C tools/generator/ada exec -- gprbuild -p -P tests/scaffold_tests.gpr
+sh tools/generator/ada/tests/smoke.sh
 python3 -m unittest discover -s tools/generator/tests -p 'test_*.py'
 python3 tools/generator/check_release_markers.py
 python3 tools/generator/verify_manifest.py --require-fixture tools/generator/tests/golden
