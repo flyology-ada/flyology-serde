@@ -45,12 +45,24 @@ package Flyology_Serde_Generator.Requests is
       Units    : Natural;
       Accepted : out Boolean);
 
+   procedure Start_Rendered_Artifact
+     (Value    : in out Operation_Budget;
+      Accepted : out Boolean);
+
+   procedure Charge_Rendered_Chunk
+     (Value    : in out Operation_Budget;
+      File_Bytes : Natural;
+      Bytes    : Natural;
+      Accepted : out Boolean);
+
    type Used_Value is range 0 .. Long_Long_Integer'Last;
 
    type Budget_Usage is record
-      Input_Bytes   : Used_Value;
-      Overlay_Nodes : Used_Value;
-      Work_Units    : Used_Value;
+      Input_Bytes    : Used_Value;
+      Overlay_Nodes  : Used_Value;
+      Rendered_Bytes : Used_Value;
+      Artifact_Files : Used_Value;
+      Work_Units     : Used_Value;
    end record;
 
    function Current_Usage (Value : Operation_Budget) return Budget_Usage;
@@ -85,6 +97,8 @@ private
       Limits        : Generation_Limits := (others => 1);
       Input_Bytes   : Budget_Count := 0;
       Overlay_Nodes : Budget_Count := 0;
+      Rendered_Bytes : Budget_Count := 0;
+      Artifact_Files : Budget_Count := 0;
       Work_Units    : Budget_Count := 0;
       Failed        : Boolean := False;
    end record;

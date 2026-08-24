@@ -6,7 +6,8 @@ package body Flyology_Serde_Generator.Requests is
       Added   : Natural;
       Maximum : Limit_Value) return Boolean
    is
-     (Budget_Count (Added) <= Budget_Count (Maximum) - Current);
+     (Current <= Budget_Count (Maximum)
+      and then Budget_Count (Added) <= Budget_Count (Maximum) - Current);
 
    procedure Start_Budget
      (Limits : Generation_Limits;
@@ -16,6 +17,8 @@ package body Flyology_Serde_Generator.Requests is
       Into.Limits := Limits;
       Into.Input_Bytes := 0;
       Into.Overlay_Nodes := 0;
+      Into.Rendered_Bytes := 0;
+      Into.Artifact_Files := 0;
       Into.Work_Units := 0;
       Into.Failed := False;
    end Start_Budget;
@@ -70,10 +73,50 @@ package body Flyology_Serde_Generator.Requests is
       end if;
    end Charge_Work;
 
+   procedure Start_Rendered_Artifact
+     (Value    : in out Operation_Budget;
+      Accepted : out Boolean)
+   is
+   begin
+      Accepted :=
+        not Value.Failed
+        and then Fits (Value.Artifact_Files, 1, Value.Limits.Maximum_Artifact_Files);
+      if Accepted then
+         Value.Artifact_Files := Value.Artifact_Files + 1;
+      else
+         Value.Failed := True;
+      end if;
+   end Start_Rendered_Artifact;
+
+   procedure Charge_Rendered_Chunk
+     (Value    : in out Operation_Budget;
+      File_Bytes : Natural;
+      Bytes    : Natural;
+      Accepted : out Boolean)
+   is
+   begin
+      Accepted :=
+        not Value.Failed
+        and then Budget_Count (File_Bytes) <=
+          Budget_Count (Value.Limits.Maximum_Rendered_Bytes_Per_File)
+        and then Fits
+          (Budget_Count (File_Bytes), Bytes, Value.Limits.Maximum_Rendered_Bytes_Per_File)
+        and then Fits (Value.Rendered_Bytes, Bytes, Value.Limits.Maximum_Total_Rendered_Bytes)
+        and then Fits (Value.Work_Units, Bytes, Value.Limits.Maximum_Work_Units);
+      if Accepted then
+         Value.Rendered_Bytes := Value.Rendered_Bytes + Budget_Count (Bytes);
+         Value.Work_Units := Value.Work_Units + Budget_Count (Bytes);
+      else
+         Value.Failed := True;
+      end if;
+   end Charge_Rendered_Chunk;
+
    function Current_Usage (Value : Operation_Budget) return Budget_Usage is
-     (Input_Bytes   => Value.Input_Bytes,
-      Overlay_Nodes => Value.Overlay_Nodes,
-      Work_Units    => Value.Work_Units);
+     (Input_Bytes    => Value.Input_Bytes,
+      Overlay_Nodes  => Value.Overlay_Nodes,
+      Rendered_Bytes => Value.Rendered_Bytes,
+      Artifact_Files => Value.Artifact_Files,
+      Work_Units     => Value.Work_Units);
 
    function Is_Poisoned (Value : Operation_Budget) return Boolean is
      (Value.Failed);

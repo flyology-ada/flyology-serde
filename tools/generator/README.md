@@ -5,6 +5,11 @@ builds and fails closed because the reviewed Type IR Ada checked-document API ha
 the authoritative fixture implementation until the reviewed cutover; see
 [`docs/ada-generator.md`](../../docs/ada-generator.md).
 
+The Ada crate also contains a deterministic in-memory payload renderer exercised only through a fixed constructor
+under `ada/tests/src`. It compares the bytes after the legacy seven-line attestation header with fresh Python output
+and the checked-in golden. It does not emit headers, manifests, directories, files, or CLI output, and is not a
+production Type IR input path.
+
 The offline Ada generator pins the corrected `mosteo/onox-json-ada` JSON 6.0.0 commit already used by Flyology and
 the exact `sha2` 2.0.0 commit. Both dependencies remain confined to the generator crate. The runtime library and its
 JSON and CBOR backends do not depend on either crate. Compiler resolution remains in the separate CI execution

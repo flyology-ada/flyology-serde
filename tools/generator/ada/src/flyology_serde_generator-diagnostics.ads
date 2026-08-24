@@ -6,6 +6,7 @@ package Flyology_Serde_Generator.Diagnostics is
       Invalid_Overlay_JSON,
       Noncanonical_Overlay,
       Unsupported_Overlay,
+      Unsupported_Lowered_Model,
       Resource_Exhausted,
       Type_IR_API_Unavailable,
       Internal_Error);

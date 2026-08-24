@@ -17,6 +17,8 @@ package body Flyology_Serde_Generator.Diagnostics is
             return "generator/noncanonical-overlay";
          when Unsupported_Overlay =>
             return "generator/unsupported-overlay";
+         when Unsupported_Lowered_Model =>
+            return "generator/unsupported-lowered-model";
          when Resource_Exhausted =>
             return "generator/resource-exhausted";
          when Type_IR_API_Unavailable =>
@@ -38,6 +40,8 @@ package body Flyology_Serde_Generator.Diagnostics is
            when Invalid_Overlay_JSON    => "overlay is not valid JSON",
            when Noncanonical_Overlay    => "overlay JSON is not in canonical form",
            when Unsupported_Overlay     => "overlay does not satisfy the closed serde v1 contract",
+           when Unsupported_Lowered_Model =>
+             "lowered record does not satisfy the closed renderer contract",
            when Resource_Exhausted      => "configured resource limit exceeded",
            when Type_IR_API_Unavailable =>
              "the reviewed Flyology Type IR Ada checked-document API is not published",

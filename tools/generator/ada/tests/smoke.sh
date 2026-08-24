@@ -4,13 +4,21 @@ set -eu
 generator_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 generator="$generator_root/bin/flyology_serde_generate"
 scaffold_tests="$generator_root/tests/bin/scaffold_tests"
+renderer_tests="$generator_root/tests/bin/renderer_tests"
 overlay_fixture="$generator_root/../tests/fixtures/wire-record-overlay.json"
+type_ir_fixture="$generator_root/../vendor/type_ir/fixtures/wire-record-shape.json"
+golden_root="$generator_root/../tests/golden"
 test_root=$(mktemp -d)
 trap 'rm -rf -- "$test_root"' EXIT HUP INT TERM
 limits=4096,1048576,2097152,4096,32,8,64,4096,100000,10000,1048576,2097152,3,64,256,4194304
 
 test "$("$generator" --version)" = "serde-generator-v2"
 "$scaffold_tests" "$overlay_fixture"
+python3 "$generator_root/../generate.py" --type-ir "$type_ir_fixture" \
+  --overlay "$overlay_fixture" --output "$test_root/python" --test-fixture-shape
+"$renderer_tests" \
+  "$golden_root/flyology-generated.ads" "$golden_root/flyology-generated.adb" \
+  "$test_root/python/flyology-generated.ads" "$test_root/python/flyology-generated.adb"
 "$generator" --help >/dev/null
 
 if "$generator" >"$test_root/stdout" 2>"$test_root/stderr"; then

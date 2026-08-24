@@ -14,8 +14,12 @@ src/flyology_serde_generator-generation.adb
 src/flyology_serde_generator-generation.ads
 src/flyology_serde_generator-hashing.adb
 src/flyology_serde_generator-hashing.ads
+src/flyology_serde_generator-lowered_records.adb
+src/flyology_serde_generator-lowered_records.ads
 src/flyology_serde_generator-overlays.adb
 src/flyology_serde_generator-overlays.ads
+src/flyology_serde_generator-rendering.adb
+src/flyology_serde_generator-rendering.ads
 src/flyology_serde_generator-requests.adb
 src/flyology_serde_generator-requests.ads
 src/flyology_serde_generator.ads

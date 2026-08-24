@@ -154,6 +154,27 @@ and compare runtime behavior exactly. After cutover, Ada is authoritative and Py
 Python leaves supported and installed paths after the Ada loader, verifier, negative cases, generated-package
 compilation, and macOS/Linux fixture runs are authoritative.
 
+The first Ada rendering milestone is deliberately narrower than generation. A serde-private, immutable lowered
+record owner can be constructed only by trusted child units; the only constructor currently present is a fixed
+fixture child compiled from the nested test source directory and absent from the executable project. The
+deterministic renderer accepts that owner and produces exactly two unpublished in-memory Ada payloads beginning at
+the first `with` clause. It emits no attestation header, manifest, directory, or file. Tests remove exactly the
+legacy seven-line fixture header and compare every remaining byte with both a fresh Python generation and the
+checked-in golden. The production entry point does not call the fixture constructor or renderer and continues to
+return `generator/type-ir-ada-api-unavailable` without publishing output.
+
+Rendering owns two artifact-file charges, each artifact's complete payload bytes, aggregate rendered bytes, and
+one work unit per output byte. The renderer separately charges one work unit per observed with-unit and field. It
+validates the complete model, reserves both file slots, then charges each deterministic output chunk against the
+current file, aggregate output, and work limits before scanning or appending it to a private candidate. The
+candidate replaces an earlier result only through a nonallocating owner-pointer swap. Denial poisons the operation
+budget, retains all earlier charges, and leaves an earlier rendered result unchanged. The payload grammar uses
+explicit LF bytes, printable ASCII, a required final LF, derived portable filenames, and the repository's 110-column
+ceiling. Payload observation is length plus caller-buffer copy; it does not allocate another complete result. These
+test payloads are not Type IR authority and do not make Python an oracle yet; Python stays
+authoritative until the complete checked-owner, attestation-header, verifier, manifest, publication, and platform
+cutover gates close.
+
 ## Resource limits and errors
 
 Offline operation is allocating but bounded. Each operation receives one immutable `Generation_Limits` value and
