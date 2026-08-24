@@ -63,3 +63,10 @@ requires the host `EINVAL` macro value returned only by the leaf's structural va
 then found nullable output access formals and matching unchecked C dereferences. Required Ada output access values
 are now `not null`, both C leaves validate their output pointer before any effect, and a native negative probe covers
 both gates. The final live-diff re-review reports P0 none, P1 none, and P2 none.
+
+The first published CI run then found a Linux feature-test failure before the new ABI tests: strict `-std=c11`
+correctly applied to the existing `open_regular.c` leaf but hid `O_CLOEXEC` and `O_NOFOLLOW` on glibc. The reviewed
+fix declares guarded `_GNU_SOURCE` at the top of that translation unit before every header, matching the new process
+leaf, rather than weakening the project to `gnu11`. Its narrow proposal review reports P0 none, P1 none, and P2 none;
+the implementation review also reports P0 none, P1 none, and P2 none. The strict macOS production/test build and
+smoke suite pass; Linux verification remains the next published CI gate.
