@@ -204,10 +204,13 @@ linking cached Alire objects after separately hashing dependency sources. The re
 dependency-free, build-time snapshot stage: it same-read copies and hashes the closed generator and exact Git-blob
 source set, then permits a final generator build only from that private snapshot and fresh output directories. The
 temporary implementation remains Serde-private and replaceable by the future Type IR offline-support crate; it
-does not freeze a shared lock, checkout, Git, retained-resource, or digest-query API. The complete pre-implementation
-contract and its closed P0/P1/P2 review are recorded in the
-[Ada build snapshot attestation proposal](reviews/2026-08-24-ada-build-attestation-proposal.md). No proposal action
-has production limits or authority yet.
+does not freeze a shared lock, checkout, Git, retained-resource, or digest-query API. The private request owner,
+lexical validation, exact caller-ledger charges, controlled candidates, abort-safe ownership transfers, and
+fail-closed stage boundary are implemented under the
+[Ada build attestation cost model](reviews/2026-08-24-ada-build-attestation-cost-v1.md). The complete snapshot-stage
+contract and its closed proposal review remain recorded in the
+[Ada build snapshot attestation proposal](reviews/2026-08-24-ada-build-attestation-proposal.md). Neither the request
+owner nor the unimplemented stage selects production limits or establishes extraction/build authority.
 
 ## Resource limits and errors
 

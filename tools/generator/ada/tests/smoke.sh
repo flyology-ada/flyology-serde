@@ -7,6 +7,8 @@ scaffold_tests="$generator_root/tests/bin/scaffold_tests"
 renderer_tests="$generator_root/tests/bin/renderer_tests"
 build_sha_256_tests="$generator_root/tests/bin/build_sha_256_tests"
 build_budgets_tests="$generator_root/tests/bin/build_budgets_tests"
+build_attestations_tests="$generator_root/tests/bin/build_attestations_tests"
+build_attestations_abort_test="$generator_root/tests/bin/flyology_serde_generator-build_attestations-abort_test"
 build_budget_session_test="$generator_root/tests/bin/flyology_serde_generator-build_budgets-session_exhaustion_test"
 build_processes_tests="$generator_root/tests/bin/build_processes_tests"
 build_process_exception_test="$generator_root/tests/bin/flyology_serde_generator-build_processes-exceptional_release_test"
@@ -28,6 +30,8 @@ build_process_abi_tests="$generator_root/tests/bin/build_process_abi_tests"
 build_process_signal_child="$generator_root/tests/bin/build_process_signal_child"
 hook_elision_project="$generator_root/tests/build_process_hook_elision.gpr"
 hook_elision_object="$generator_root/tests/obj/hook_elision/flyology_serde_generator-build_processes.o"
+attestation_hook_project="$generator_root/tests/build_attestation_hook_elision.gpr"
+attestation_hook_object="$generator_root/tests/obj/attestation_hook_elision/flyology_serde_generator-build_attestations.o"
 overlay_fixture="$generator_root/../tests/fixtures/wire-record-overlay.json"
 policy_overlay_fixture="$generator_root/../tests/fixtures/wire-record-overlay-policy.json"
 type_ir_fixture="$generator_root/../vendor/type_ir/fixtures/wire-record-shape.json"
@@ -52,6 +56,8 @@ done
 test "$("$generator" --version)" = "serde-generator-v2"
 "$build_sha_256_tests"
 "$build_budgets_tests"
+"$build_attestations_tests"
+"$build_attestations_abort_test"
 "$build_budget_session_test"
 "$build_processes_tests"
 "$build_process_exception_test"
@@ -76,6 +82,15 @@ for hook_optimization in -O0 -O2; do
      flyology_serde_generator-build_processes.adb >/dev/null
    if nm "$hook_elision_object" | grep -qi flyology_serde_disabled_process; then
       echo "disabled build-process test hook survived $hook_optimization compilation" >&2
+      exit 1
+   fi
+done
+for hook_optimization in -O0 -O2; do
+   alr -C "$generator_root" exec -- gprbuild -f -p -u -P "$attestation_hook_project" \
+     -XHOOK_OPT="$hook_optimization" \
+     flyology_serde_generator-build_attestations.adb >/dev/null
+   if nm "$attestation_hook_object" | grep -qi flyology_serde_disabled_attestation; then
+      echo "disabled build-attestation test hook survived $hook_optimization compilation" >&2
       exit 1
    fi
 done

@@ -1,0 +1,6 @@
+with Flyology_Serde_Generator.Build_Attestations_Test_Facade;
+
+procedure Build_Attestations_Tests is
+begin
+   Flyology_Serde_Generator.Build_Attestations_Test_Facade.Run;
+end Build_Attestations_Tests;
