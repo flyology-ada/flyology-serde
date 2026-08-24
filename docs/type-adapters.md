@@ -78,7 +78,10 @@ the configured decode limits before growing them.
 The general array combinator preserves whether the backend supplied a known length and independently enforces its
 instance maximum and the operation's container-item limit. `Constrained_Arrays` stages a complete local candidate,
 requires exact cardinality, and assigns only after `End_Sequence`; controlled or resource-owning elements use the
-general builder seam. The map combinator bounds entry count and checks the backend's map-key capability before the
+general builder seam. `Allocating_Sequences` supplies a standard-heap vector candidate for definite nonlimited,
+copy-safe elements. It bounds and stages the full sequence before moving it into unpublished state; limited,
+move-only, or identity-owning elements remain on the builder seam. The map combinator bounds entry count and checks
+the backend's map-key capability before the
 first event or builder callback. Its `Deserialize_Entry` callback owns duplicate-key detection and replacement,
 because logical key equality is application policy rather than a format-parser decision.
 

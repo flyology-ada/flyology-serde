@@ -1,6 +1,7 @@
 with Ada.Unchecked_Conversion;
 with Adapter_Conformance_Tests;
 with Allocating_Decode_Tests;
+with Allocating_Sequence_Tests;
 with CBOR_Reader_Conformance_Tests;
 with CBOR_Reader_Tests;
 with CBOR_Writer_Tests;
@@ -185,6 +186,7 @@ procedure Tests is
 begin
    Adapter_Conformance_Tests;
    Allocating_Decode_Tests;
+   Allocating_Sequence_Tests;
    CBOR_Reader_Conformance_Tests;
    CBOR_Reader_Tests;
    CBOR_Writer_Tests;

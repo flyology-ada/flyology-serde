@@ -27,6 +27,18 @@ the target untouched. The facade copies its input; it does not take ownership or
 candidate operations, not publication operations. They must be called inside an application root builder whose
 rollback releases or resets the candidate after every status or exception.
 
+`Adapters.Allocating_Sequences` is a generic standard-heap vector candidate. It stages a complete local vector,
+checks known and observed lengths against the operation's container-item limit and target index capacity, completes
+`End_Sequence`, and then moves the vector into the unpublished target. A trusted known length may reserve
+proportional storage up to the caller's decode limit. `Storage_Error` propagates for root abort and rollback.
+
+Each decoded element is a fresh local value. Standard-vector reserve or growth may initialize and finalize retained
+spare capacity and copy existing elements; `Append` copies the local value, which then finalizes. The adapter
+therefore accepts definite, nonlimited elements whose `Initialize`, `Adjust`, and `Finalize` are nonraising and keep
+ownership correct for every container copy and spare value. Limited, move-only, identity-owning, or otherwise
+non-copy-safe resources use `Adapters.Arrays` with an application builder or a handwritten adapter. The target must
+have no outstanding container cursor, reference, or iterator during replacement.
+
 The first implementation deliberately layers over the bounded single-copy reader call. It eagerly allocates one
 scratch buffer of `Maximum_Text_Length` or `Maximum_Byte_Length`, including a legal null range when the maximum is
 zero. After a successful read it constructs a candidate containing exactly the decoded value or elements and frees

@@ -11,7 +11,8 @@ names and aliases. The bounded record combinator adds exact name/alias metadata,
 policy, missing-field hooks, and final candidate validation. Bounded finite and nullary variant combinators preserve
 alternative identity, selected field membership, transactional construction, and the logical variant envelope.
 JSON and CBOR provide bounded readers and writers, allocating writers, copied-input root facades, and standard-heap
-text and byte candidates. Application builders still own allocating records, maps, and arrays. The first offline
+text, byte, and copy-safe vector candidates. Application builders still own allocating records, maps, custom
+collections, and limited or move-only sequences. The first offline
 Type IR consumer generates one fixture-gated direct public record profile; production strict generation remains
 closed until the separately reviewed Type IR extractor publishes an admissible document.
 
