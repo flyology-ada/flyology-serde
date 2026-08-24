@@ -13,6 +13,7 @@ project Scaffold_Tests is
       "renderer_tests.adb",
       "build_sha_256_tests.adb",
       "build_budgets_tests.adb",
+      "flyology_serde_generator-build_budgets-session_exhaustion_test.adb",
       "build_process_abi_tests.adb",
       "build_process_signal_child.c");
 
