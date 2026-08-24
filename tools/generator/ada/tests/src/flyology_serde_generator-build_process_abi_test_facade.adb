@@ -18,6 +18,14 @@ package body Flyology_Serde_Generator.Build_Process_ABI_Test_Facade is
      Import, Convention => C, External_Name => "flyology_serde_test_deviate_sigpipe";
    function Restore_Sigpipe return ABI.C_Int with
      Import, Convention => C, External_Name => "flyology_serde_test_restore_sigpipe";
+   function Deviate_Sigchld_Ignored return ABI.C_Int with
+     Import, Convention => C, External_Name => "flyology_serde_test_deviate_sigchld_ignored";
+   function Deviate_Sigchld_No_Child_Wait return ABI.C_Int with
+     Import,
+     Convention    => C,
+     External_Name => "flyology_serde_test_deviate_sigchld_no_child_wait";
+   function Restore_Sigchld return ABI.C_Int with
+     Import, Convention => C, External_Name => "flyology_serde_test_restore_sigchld";
    function Null_Build_Outputs return ABI.C_Int with
      Import, Convention => C, External_Name => "flyology_serde_test_null_build_outputs";
 
@@ -449,7 +457,9 @@ package body Flyology_Serde_Generator.Build_Process_ABI_Test_Facade is
          Result,
          Cleanup);
       Active := Result = 0;
-      Check (Result = 0 and then Cleanup = 0, "signal child did not spawn");
+      Check
+        (Result = 0 and then Cleanup = 0,
+         "signal child did not spawn:" & ABI.C_Int'Image (Result));
       Close_Child_Sides (Pipes);
       Wait_Finite (Child, Status);
       Active := False;
@@ -471,6 +481,100 @@ package body Flyology_Serde_Generator.Build_Process_ABI_Test_Facade is
          raise;
    end Test_Signal_Reset;
 
+   procedure Test_Parent_Sigchld_Ownership_Facts is
+      Result   : ABI.C_Int;
+      Ignored  : aliased ABI.C_Int := 0;
+      No_Wait  : aliased ABI.C_Int := 0;
+      Deviated : Boolean := False;
+      Restored : Boolean := False;
+   begin
+      Check (Deviate_Sigchld_Ignored = 0, "ignored SIGCHLD setup failed");
+      Deviated := True;
+      Result := ABI.Sigchld_Disposition (Ignored'Access, No_Wait'Access);
+      Check
+        (Result = 0 and then Ignored = 1,
+         "ignored SIGCHLD disposition was not reported");
+      Check (Restore_Sigchld = 0, "SIGCHLD restoration failed");
+      Restored := True;
+
+      Result := Deviate_Sigchld_No_Child_Wait;
+      if Result = 0 then
+         Deviated := True;
+         Restored := False;
+         Ignored := 0;
+         No_Wait := 0;
+         Result := ABI.Sigchld_Disposition (Ignored'Access, No_Wait'Access);
+         Check
+           (Result = 0 and then No_Wait = 1,
+            "automatic child discard was not reported");
+         Check (Restore_Sigchld = 0, "automatic child-discard restoration failed");
+         Restored := True;
+      else
+         Check (Result = -1, "automatic child-discard setup failed unexpectedly");
+      end if;
+   exception
+      when others =>
+         if Deviated and then not Restored then
+            Check (Restore_Sigchld = 0, "SIGCHLD restoration failed during cleanup");
+         end if;
+         raise;
+   end Test_Parent_Sigchld_Ownership_Facts;
+
+   procedure Test_Nonreaping_Child_Observation is
+      Pipes        : Child_Pipes;
+      Child        : aliased ABI.Process_ID := -1;
+      Result       : ABI.C_Int;
+      Cleanup      : ABI.C_Int;
+      Ready        : aliased ABI.C_Int := 0;
+      Exited       : aliased ABI.C_Int := 0;
+      Signaled     : aliased ABI.C_Int := 0;
+      Code         : aliased ABI.C_Int := 0;
+      Wait_Status  : aliased ABI.C_Int := 0;
+      Active       : Boolean := False;
+   begin
+      Open_Child_Pipes (Pipes);
+      Spawn
+        ("/bin/sh",
+         "-c",
+         "exit 7",
+         "peek-test",
+         "EXACT_ENV=value",
+         Pipes,
+         Child,
+         Result,
+         Cleanup);
+      Active := Result = 0;
+      Check (Result = 0 and then Cleanup = 0, "peek child did not spawn");
+      Close_Child_Sides (Pipes);
+      for Attempt in 1 .. 500 loop
+         Result := ABI.Peek_Child
+           (Child, Ready'Access, Exited'Access, Signaled'Access, Code'Access);
+         exit when Result = 0 and then Ready = 1;
+         Check
+           (Result = 0 or else Result = ABI.Errno_Interrupted,
+            "nonreaping child observation failed");
+         delay 0.01;
+      end loop;
+      Check
+        (Ready = 1 and then Exited = 1 and then Signaled = 0 and then Code = 7,
+         "nonreaping child observation changed terminal facts");
+      Result := ABI.Wait_Pid (Child, Wait_Status'Access, 0);
+      Check
+        (Result = Child
+         and then ABI.Status_Exited (Wait_Status) /= 0
+         and then ABI.Status_Exit_Code (Wait_Status) = 7,
+         "nonreaping observation released or changed child ownership");
+      Active := False;
+      Close_Child_Pipes (Pipes);
+   exception
+      when others =>
+         if Active then
+            Kill_And_Reap (Child);
+         end if;
+         Close_Child_Pipes (Pipes);
+         raise;
+   end Test_Nonreaping_Child_Observation;
+
    procedure Test_Process_Group_Cleanup is
       Pipes   : Child_Pipes;
       Child   : aliased ABI.Process_ID := -1;
@@ -488,7 +592,7 @@ package body Flyology_Serde_Generator.Build_Process_ABI_Test_Facade is
       Spawn
         ("/bin/sh",
          "-c",
-         "sleep 30 & child=$!; printf ready; wait ""$child""",
+         "/bin/sleep 30 & child=$!; printf ready; wait ""$child""",
          "group-test",
          "EXACT_ENV=value",
          Pipes,
@@ -558,6 +662,8 @@ package body Flyology_Serde_Generator.Build_Process_ABI_Test_Facade is
       Test_Spawn_Failure_Preservation;
       Test_Cloexec_No_Leak;
       Test_Signal_Reset (Signal_Child_Path);
+      Test_Parent_Sigchld_Ownership_Facts;
+      Test_Nonreaping_Child_Observation;
       Test_Process_Group_Cleanup;
    end Run;
 end Flyology_Serde_Generator.Build_Process_ABI_Test_Facade;

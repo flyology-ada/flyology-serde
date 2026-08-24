@@ -19,14 +19,16 @@ PID is always published even when cleanup reports damage, so the caller cannot l
 The raw portable `pipe` call cannot atomically set CLOEXEC. Its private Ada contract therefore requires exclusion of
 concurrent process creation until both descriptors have been replaced by CLOEXEC duplicates. The later runner must
 either retain that exclusion or add a separately reviewed platform binding. A failed `close` is raw and has the
-platform's EINTR ambiguity; callers must never retry it blindly. Wait exit-code and signal classifiers are used only
-after their corresponding predicates.
+platform's EINTR ambiguity; callers must never retry it blindly. The `waitid` leaf performs a same-PID terminal
+observation with `WNOHANG | WNOWAIT`, validates its closed result shape, and fails compilation when those host macros
+are unavailable. Wait exit-code and signal classifiers are used only after their corresponding predicates.
 
 ## Native-admission and SPARK audit
 
 No retry, deadline, bounded-capture, budget, status mapping, process or descriptor ownership, process cleanup, or
-publication policy is implemented in C. Those mechanisms are expressible in Ada and remain there. The C spawn leaf
-necessarily owns the local initialization and fixed attribute-then-action destruction of its opaque `posix_spawn`
+publication policy is implemented in C. Those mechanisms are expressible in Ada and remain there. The C
+`SIGCHLD` leaf reports only the host-header disposition facts; Ada decides whether they permit exact ownership. The
+C spawn leaf necessarily owns the local initialization and fixed attribute-then-action destruction of its opaque `posix_spawn`
 objects; both destruction results are returned as one deterministic secondary error. `fcntl` is variadic and its
 commands are header macros; `errno` is a thread-local macro; and wait, signal, and poll constants or classifiers are
 host macros. These retained leaves cannot be represented as stable direct Ada imports without recreating C-header
@@ -75,3 +77,17 @@ That Linux gate then passed the production generator build and reached the new A
 translation units lacked a feature profile, so strict C11 hid `struct sigaction`, `sigset_t`, and `sigprocmask` on
 glibc. The second reviewed fix adds the same guarded `_GNU_SOURCE` definition before every header in both test files;
 it changes no production source or signal semantics. Its proposal review reports P0 none, P1 none, and P2 none.
+
+The later bounded-runner review found one additional exact-wait prerequisite. An ignored parent `SIGCHLD` or
+`SA_NOCLDWAIT` can discard the leader before the Ada owner reaps it. The native leaf now reports both
+header-dependent facts, while the gate-held Ada runner rejects either before C-string materialization or spawn.
+The generator permits no ambient handler to wait for runner-owned children; GNAT's nonreaping runtime disposition
+remains valid. Focused native tests observe `SIG_IGN` and, where supported, `SA_NOCLDWAIT`; runner tests prove the
+Ada policy returns exact `EINVAL`, spawns no child, and remains reusable after restoration. This small signal-ABI
+extension remains under the runner's final review cycle.
+
+The ownership fix review then replaced reaping observation with a `waitid(WNOWAIT)` leaf. It zeroes `siginfo_t`,
+distinguishes no event, verifies `si_pid`, accepts only `CLD_EXITED`, `CLD_KILLED`, or `CLD_DUMPED`, and returns exact
+errno including `EINTR`. Ada retains all retry, status, PID-pin, group-signal, cleanup, and fail-stop policy and later
+requires the final blocking `waitpid` result to match an earlier observation. The native boundary therefore remains
+a header/opaque-layout mechanism rather than a process-lifetime policy layer.

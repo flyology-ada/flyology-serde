@@ -10,6 +10,8 @@ src/flyology_serde_generate.adb
 src/flyology_serde_generator-build_budgets.adb
 src/flyology_serde_generator-build_budgets.ads
 src/flyology_serde_generator-build_process_abi.ads
+src/flyology_serde_generator-build_processes.adb
+src/flyology_serde_generator-build_processes.ads
 src/flyology_serde_generator-build_sha_256.adb
 src/flyology_serde_generator-build_sha_256.ads
 src/flyology_serde_generator-cli.adb
@@ -29,3 +31,4 @@ src/flyology_serde_generator-rendering.ads
 src/flyology_serde_generator-requests.adb
 src/flyology_serde_generator-requests.ads
 src/flyology_serde_generator.ads
+src/test_hooks_disabled/flyology_serde_generator-build_process_test_hooks.ads

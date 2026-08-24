@@ -1,0 +1,3 @@
+package Flyology_Serde_Generator.Build_Processes_Test_Facade is
+   procedure Run;
+end Flyology_Serde_Generator.Build_Processes_Test_Facade;

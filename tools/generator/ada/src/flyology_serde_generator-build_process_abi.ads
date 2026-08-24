@@ -42,6 +42,25 @@ private package Flyology_Serde_Generator.Build_Process_ABI is
    function Set_Nonblocking (Target : Descriptor) return C_Int with
      Import, Convention => C, External_Name => "flyology_serde_build_set_nonblocking";
 
+   function Sigchld_Disposition
+     (Ignored       : not null access C_Int;
+      No_Child_Wait : not null access C_Int) return C_Int with
+     Import, Convention => C, External_Name => "flyology_serde_build_sigchld_disposition";
+   --  Reports host-header-dependent SIGCHLD disposition facts only.  The Ada runner
+   --  owns their process-ownership meaning and status mapping.
+
+   function Peek_Child
+     (Child    : Process_ID;
+      Ready    : not null access C_Int;
+      Exited   : not null access C_Int;
+      Signaled : not null access C_Int;
+      Code     : not null access C_Int) return C_Int with
+     Import, Convention => C, External_Name => "flyology_serde_build_peek_child";
+   --  Observes one exact child through waitid WNOWAIT.  Success with Ready zero
+   --  leaves every other output zero.  Success with Ready nonzero reports exactly
+   --  one of Exited or Signaled and leaves the child unreaped so its PID and process
+   --  group identity remain owned by the caller.
+
    function Spawn_Exact
      (Into          : not null access Process_ID;
       Executable    : Interfaces.C.Strings.chars_ptr;
@@ -54,9 +73,9 @@ private package Flyology_Serde_Generator.Build_Process_ABI is
      Import, Convention => C, External_Name => "flyology_serde_build_posix_spawn_exact";
    --  Arguments and Environment are nonnull, null-terminated pointer arrays.  The three
    --  descriptors are distinct and greater than 2.  Every unrelated parent descriptor
-   --  must be CLOEXEC.  Executable must begin with '/', which the C leaf validates before
-   --  initializing spawn state.  A successful spawn publishes Into even if Cleanup_Error
-   --  is nonzero.
+   --  must be CLOEXEC.  No ambient handler may reap this runner's child.
+   --  Executable must begin with '/', which the C leaf validates before initializing
+   --  spawn state.  A successful spawn publishes Into even if Cleanup_Error is nonzero.
 
    function Signal_Kill return C_Int with
      Import, Convention => C, External_Name => "flyology_serde_build_signal_kill";

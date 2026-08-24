@@ -1,0 +1,6 @@
+with Flyology_Serde_Generator.Build_Processes_Test_Facade;
+
+procedure Build_Processes_Tests is
+begin
+   Flyology_Serde_Generator.Build_Processes_Test_Facade.Run;
+end Build_Processes_Tests;

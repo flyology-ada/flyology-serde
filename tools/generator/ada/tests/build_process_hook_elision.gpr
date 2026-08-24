@@ -1,0 +1,14 @@
+with "../config/flyology_serde_generator_config.gpr";
+project Build_Process_Hook_Elision is
+   Hook_Optimization := External ("HOOK_OPT", "-O0");
+   for Languages use ("Ada");
+   for Source_Dirs use ("../src", "../src/test_hooks_disabled", "../config");
+   for Object_Dir use "obj/hook_elision";
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        Flyology_Serde_Generator_Config.Ada_Compiler_Switches &
+          ("-gnatyM110", "-gnat2022", Hook_Optimization);
+   end Compiler;
+end Build_Process_Hook_Elision;

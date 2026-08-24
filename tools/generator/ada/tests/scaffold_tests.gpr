@@ -4,7 +4,7 @@ with "sha2";
 project Scaffold_Tests is
 
    for Languages use ("Ada", "C");
-   for Source_Dirs use ("src", "../src", "../config", "../native");
+   for Source_Dirs use ("src", "src/test_hooks_enabled", "../src", "../config", "../native");
    for Object_Dir use "obj";
    for Create_Missing_Dirs use "True";
    for Exec_Dir use "bin";
@@ -14,6 +14,22 @@ project Scaffold_Tests is
       "build_sha_256_tests.adb",
       "build_budgets_tests.adb",
       "flyology_serde_generator-build_budgets-session_exhaustion_test.adb",
+      "build_processes_tests.adb",
+      "flyology_serde_generator-build_processes-exceptional_release_test.adb",
+      "flyology_serde_generator-build_processes-spawned_release_test.adb",
+      "flyology_serde_generator-build_processes-raw_pipe_abort_test.adb",
+      "flyology_serde_generator-build_processes-materialization_abort_test.adb",
+      "flyology_serde_generator-build_processes-spawn_abort_test.adb",
+      "flyology_serde_generator-build_processes-gate_abort_test.adb",
+      "flyology_serde_generator-build_processes-pipe_transfer_abort_test.adb",
+      "flyology_serde_generator-build_processes-commit_abort_test.adb",
+      "flyology_serde_generator-build_processes-close_abort_test.adb",
+      "flyology_serde_generator-build_processes-duplicate_transfer_abort_test.adb",
+      "flyology_serde_generator-build_processes-spawn_cleanup_test.adb",
+      "flyology_serde_generator-build_processes-failed_spawn_cleanup_test.adb",
+      "flyology_serde_generator-build_processes-post_primary_test.adb",
+      "flyology_serde_generator-build_processes-setup_failure_test.adb",
+      "flyology_serde_generator-build_processes-close_failure_test.adb",
       "build_process_abi_tests.adb",
       "build_process_signal_child.c");
 

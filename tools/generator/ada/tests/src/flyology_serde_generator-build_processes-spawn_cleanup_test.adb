@@ -1,0 +1,66 @@
+with Interfaces.C;
+
+with Flyology_Serde_Generator.Build_Process_ABI;
+with Flyology_Serde_Generator.Build_Process_Test_Hooks;
+
+procedure Flyology_Serde_Generator.Build_Processes.Spawn_Cleanup_Test is
+   package ABI renames Flyology_Serde_Generator.Build_Process_ABI;
+   package Test_Hooks renames Flyology_Serde_Generator.Build_Process_Test_Hooks;
+   use type Budgets.Budget_State;
+   use type Interfaces.C.int;
+
+   Limits : constant Process_Limits :=
+     (Maximum_Argument_Count            => 8,
+      Maximum_Argument_Bytes            => 1_024,
+      Maximum_Environment_Count         => 1,
+      Maximum_Environment_Bytes         => 64,
+      Maximum_Standard_Output_Bytes     => 16,
+      Maximum_Standard_Error_Bytes      => 16,
+      Timeout_Milliseconds              => 2_000,
+      Observation_Interval_Milliseconds => 1,
+      Maximum_Read_Chunk_Bytes          => 16);
+   Budget_Limits : constant Budgets.Limits :=
+     (Maximum_Input_Bytes => 1_024, Maximum_Work_Units => 100_000);
+
+   procedure Require (Condition : Boolean; Message : String) is
+   begin
+      if not Condition then
+         raise Program_Error with Message;
+      end if;
+   end Require;
+
+   Budget      : aliased Budgets.Budget;
+   Initialized : Boolean := False;
+   Session     : Budgets.Session_Tag;
+   Command     : Build_Processes.Command (Budget'Access);
+   Value       : Build_Processes.Result (Budget'Access);
+   Status      : Run_Status := Ready_To_Run;
+   System_Code : Interfaces.C.int := 0;
+   Build_State : Build_Status := Build_Succeeded;
+   Child       : Integer := -1;
+begin
+   Budgets.Initialize (Budget_Limits, Budget, Initialized);
+   Require (Initialized, "spawn-cleanup budget did not initialize");
+   Session := Budgets.Current_Session (Budget);
+   Initialize (Command, Session, Limits, "/bin/sh", Build_State);
+   Add_Argument (Command, Session, "-c", Build_State);
+   Add_Argument (Command, Session, "/bin/sleep 30", Build_State);
+   Add_Argument (Command, Session, "arg-zero", Build_State);
+   Seal (Command, Session, Build_State);
+   Require (Build_State = Build_Succeeded, "spawn-cleanup command did not build");
+
+   Test_Hooks.Arm_Spawn_Cleanup_Failure;
+   Run (Command, Session, Value, Status, System_Code);
+   Test_Hooks.Last_Spawned_Child (Child);
+   Require
+     (Status = Run_Cleanup_Failed
+      and then System_Code = ABI.Errno_Invalid
+      and then Budgets.Current_State (Budget) = Budgets.Failed
+      and then Value.Data.Value = null,
+      "spawn cleanup damage did not fail, poison, and suppress publication");
+   Require (Child > 0, "spawn cleanup test did not publish its child identity");
+   Require
+     (ABI.Kill (ABI.Process_ID (Child), 0) = -1
+      and then ABI.Current_Errno = ABI.Errno_No_Process,
+      "spawn cleanup damage left the successful child alive");
+end Flyology_Serde_Generator.Build_Processes.Spawn_Cleanup_Test;

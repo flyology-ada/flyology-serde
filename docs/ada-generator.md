@@ -190,6 +190,12 @@ test payloads are not Type IR authority and do not make Python an oracle yet; Py
 authoritative until the complete checked-owner, attestation-header, verifier, manifest, publication, and platform
 cutover gates close.
 
+The private `Build_Processes` foundation is implemented for the forthcoming dependency-attestation layer. It owns
+bounded explicit argv/environment construction, serialized CLOEXEC-safe spawn setup, alternating stdout/stderr
+capture, process-group cleanup, exact-leader reaping, session-bound results, and the caller-supplied build budget.
+It is not called by the executable yet and selects no public action limit. Its exact charge, timeout, and fail-stop
+contract is recorded in the [Ada build process runner review](reviews/2026-08-24-ada-build-process-runner.md).
+
 ## Resource limits and errors
 
 Offline operation is allocating but bounded. Each operation receives one immutable `Generation_Limits` value and

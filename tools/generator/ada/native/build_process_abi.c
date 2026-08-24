@@ -17,9 +17,15 @@
 #include <signal.h>
 #include <spawn.h>
 #include <stddef.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+#if !defined(WNOWAIT) || !defined(CLD_EXITED) || !defined(CLD_KILLED) || \
+  !defined(CLD_DUMPED)
+#error "waitid WNOWAIT terminal observation is required"
+#endif
 
 _Static_assert(_Generic((pid_t)0, int: 1, default: 0),
                "pid_t must be exactly C int");
@@ -76,6 +82,59 @@ int flyology_serde_build_set_nonblocking(int descriptor)
     return 0;
 }
 
+int flyology_serde_build_sigchld_disposition(int *ignored_output,
+                                              int *no_child_wait_output)
+{
+    struct sigaction disposition;
+
+    if (ignored_output == NULL || no_child_wait_output == NULL) return EINVAL;
+    if (sigaction(SIGCHLD, NULL, &disposition) != 0) return errno;
+    *ignored_output = disposition.sa_handler == SIG_IGN ? 1 : 0;
+#if defined(SA_NOCLDWAIT)
+    *no_child_wait_output =
+      (disposition.sa_flags & SA_NOCLDWAIT) != 0 ? 1 : 0;
+#else
+    *no_child_wait_output = 0;
+#endif
+    return 0;
+}
+
+int flyology_serde_build_peek_child(int child,
+                                    int *ready_output,
+                                    int *exited_output,
+                                    int *signaled_output,
+                                    int *code_output)
+{
+    siginfo_t information;
+
+    if (child <= 0 || ready_output == NULL || exited_output == NULL ||
+        signaled_output == NULL || code_output == NULL) {
+        return EINVAL;
+    }
+    (void)memset(&information, 0, sizeof(information));
+    if (waitid(P_PID, (id_t)child, &information,
+               WEXITED | WNOHANG | WNOWAIT) != 0) {
+        return errno;
+    }
+    if (information.si_pid == 0) {
+        *ready_output = 0;
+        *exited_output = 0;
+        *signaled_output = 0;
+        *code_output = 0;
+        return 0;
+    }
+    if (information.si_pid != (pid_t)child) return EINVAL;
+    *ready_output = 1;
+    *exited_output = information.si_code == CLD_EXITED ? 1 : 0;
+    *signaled_output =
+      information.si_code == CLD_KILLED || information.si_code == CLD_DUMPED
+        ? 1
+        : 0;
+    if (*exited_output == *signaled_output) return EINVAL;
+    *code_output = information.si_status;
+    return 0;
+}
+
 static void flyology_serde_build_record_cleanup(int result,
                                                 int *cleanup_error)
 {
@@ -115,7 +174,6 @@ int flyology_serde_build_posix_spawn_exact(
         stdout_source == stderr_source) {
         return EINVAL;
     }
-
     result = posix_spawn_file_actions_init(&actions);
     if (result != 0) {
         primary = result;
