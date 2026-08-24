@@ -15,12 +15,16 @@ is
       Invalid_Text,
       Missing_Field,
       Duplicate_Field,
+      Duplicate_Key,
       Unknown_Field,
       Capacity_Exceeded,
       Depth_Exceeded,
       Unsupported_Value,
       Invalid_State,
       Application_Error);
+
+   --  Error_Code literals are semantic names. Their Pos values and default
+   --  representations are not persistent identities or a stable ABI.
 
    type Path_Element_Kind is
      (Field_Element, Index_Element, Alternative_Element);

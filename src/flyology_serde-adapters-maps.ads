@@ -37,7 +37,10 @@ generic
        (Target : in out Builder_Type; Error : in out Errors.Error_Info);
 package Flyology_Serde.Adapters.Maps is
    --  Deserialize_Entry owns duplicate-key detection and replacement for its
-   --  unpublished candidate. The generic adds no implicit duplicate policy.
+   --  unpublished candidate. When it rejects a decoded logical key as equal
+   --  to an earlier key, it reports Duplicate_Key. Accepted or replacement
+   --  duplicates do not report that status. The generic adds no implicit
+   --  equality or duplicate policy.
    procedure Serialize_Value
      (Item  : Source_Type;
       Into  : in out Serialization.Serializer'Class;

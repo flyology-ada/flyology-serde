@@ -83,7 +83,9 @@ copy-safe elements. It bounds and stages the full sequence before moving it into
 move-only, or identity-owning elements remain on the builder seam. The map combinator bounds entry count and checks
 the backend's map-key capability before the
 first event or builder callback. Its `Deserialize_Entry` callback owns duplicate-key detection and replacement,
-because logical key equality is application policy rather than a format-parser decision.
+because logical key equality is application policy rather than a format-parser decision. A callback that rejects a
+key equal to an earlier logical key reports `Duplicate_Key`; accepted or replacement duplicates do not. Record and
+variant presentation-name duplicates remain `Duplicate_Field`.
 
 ## Records, discriminants, and variants
 

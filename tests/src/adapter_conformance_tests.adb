@@ -38,6 +38,7 @@ procedure Adapter_Conformance_Tests is
    use type Ada.Streams.Stream_Element_Array;
    use type Data_Model.Float_64_Category;
    use type Errors.Error_Code;
+   use type Errors.Path_Element_Kind;
    use type Flyology_Serde.Serialization.Serializer_State;
    use type Interfaces.IEEE_Float_64;
 
@@ -258,7 +259,7 @@ procedure Adapter_Conformance_Tests is
       if Error.Code = Errors.No_Error and then Target.Count > 0 then
          for Index in 1 .. Target.Count loop
             if Target.Items (Index).Key = Text (1) then
-               Errors.Fail (Error, Errors.Duplicate_Field);
+               Errors.Fail (Error, Errors.Duplicate_Key);
                exit;
             end if;
          end loop;
@@ -795,6 +796,26 @@ begin
    end;
 
    declare
+      Input  : aliased constant String := "[[""a"",1],[""a"",2]]";
+      Reader : JSON_Readers.Reader (Input'Access);
+      Target : Map_Root_Builder;
+      Error  : Errors.Error_Info;
+   begin
+      Target.Published.Count := 1;
+      Target.Published.Items (1) := ('z', 9);
+      Reader.Initialize (Default_Policy);
+      Map_Decode_Root.Deserialize (Reader, Target, Error);
+      pragma Assert (Error.Code = Errors.Duplicate_Key);
+      pragma Assert (Error.Path_Length = 1);
+      pragma Assert (Error.Path (1).Kind = Errors.Index_Element);
+      pragma Assert (Error.Path (1).Index = 1);
+      pragma Assert
+        (Target.Published.Count = 1
+         and then Target.Published.Items (1) = ('z', 9)
+         and then Target.Rollbacks = 1);
+   end;
+
+   declare
       Input  : aliased constant Byte_Array :=
         [16#BF#, 16#61#, Character'Pos ('a'), 1,
          16#61#, Character'Pos ('b'), 2,
@@ -827,7 +848,10 @@ begin
       Target.Published.Items (1) := ('z', 9);
       Reader.Initialize (Default_Policy);
       Map_Decode_Root.Deserialize (Reader, Target, Error);
-      pragma Assert (Error.Code = Errors.Duplicate_Field);
+      pragma Assert (Error.Code = Errors.Duplicate_Key);
+      pragma Assert (Error.Path_Length = 1);
+      pragma Assert (Error.Path (1).Kind = Errors.Index_Element);
+      pragma Assert (Error.Path (1).Index = 1);
       pragma Assert
         (Target.Published.Count = 1
          and then Target.Published.Items (1) = ('z', 9)

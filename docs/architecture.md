@@ -87,6 +87,10 @@ Adapter-generated semantic errors do not claim a token-start offset that the pul
 mandatory root transaction's `Abort_Document` attaches the backend's current next-unread position and unit when the
 error has no offset. JSON and CBOR therefore attach a byte position after the typed name or constructor read.
 
+`Error_Code` literals are semantic names, not persisted numbers or ABI identifiers. Their Ada positions and default
+representations may change while this experimental crate evolves. Client exhaustive `case` statements intentionally
+require review when a new semantic status is added.
+
 ## Event grammar
 
 A serialization call emits exactly one value. Scalars and enumerations are complete values. A sequence is
