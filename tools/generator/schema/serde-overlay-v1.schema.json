@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Documentary shape only. generate.py load_overlay is authoritative for canonical bytes, Ada reserved words and underscores, printable ASCII names, case-insensitive uniqueness, and cross-field context closure.",
+  "additionalProperties": false,
+  "properties": {
+    "fixture_only": { "type": "boolean" },
+    "output_unit": { "maxLength": 48, "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)*$", "type": "string" },
+    "overlay_version": { "const": 1 },
+    "records": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "ada_type": { "maxLength": 48, "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)*$", "type": "string" },
+          "declaration_id": { "type": "string" },
+          "fields": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "ada_component": { "maxLength": 48, "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)*$", "type": "string" },
+                "ada_type": { "maxLength": 48, "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)*$", "type": "string" },
+                "component_id": { "type": "string" },
+                "presentation_name": { "maxLength": 64, "minLength": 1, "pattern": "^[ -~]+$", "type": "string" }
+              },
+              "required": ["ada_component", "ada_type", "component_id", "presentation_name"],
+              "type": "object"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "logical_type_name": { "maxLength": 64, "minLength": 1, "pattern": "^[ -~]+$", "type": "string" }
+        },
+        "required": ["ada_type", "declaration_id", "fields", "logical_type_name"],
+        "type": "object"
+      },
+      "maxItems": 1,
+      "minItems": 1,
+      "type": "array"
+    },
+    "serialization_limits": {
+      "additionalProperties": false,
+      "properties": {
+        "maximum_byte_length": { "maximum": 2147483647, "minimum": 0, "type": "integer" },
+        "maximum_container_items": { "maximum": 2147483647, "minimum": 0, "type": "integer" },
+        "maximum_logical_events": { "maximum": 2147483647, "minimum": 0, "type": "integer" },
+        "maximum_nesting_depth": { "maximum": 256, "minimum": 0, "type": "integer" },
+        "maximum_text_length": { "maximum": 2147483647, "minimum": 0, "type": "integer" }
+      },
+      "required": [
+        "maximum_byte_length",
+        "maximum_container_items",
+        "maximum_logical_events",
+        "maximum_nesting_depth",
+        "maximum_text_length"
+      ],
+      "type": "object"
+    },
+    "type_ir_commit": { "const": "78e6726a80d02b22f573fed3f65538cafd89fc0d" },
+    "type_ir_semantic_fingerprint": { "pattern": "^[0-9a-f]{64}$", "type": "string" },
+    "type_ir_source_sha256": { "pattern": "^[0-9a-f]{64}$", "type": "string" },
+    "with_units": {
+      "items": { "maxLength": 48, "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)*$", "type": "string" },
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "fixture_only",
+    "output_unit",
+    "overlay_version",
+    "records",
+    "serialization_limits",
+    "type_ir_commit",
+    "type_ir_semantic_fingerprint",
+    "type_ir_source_sha256",
+    "with_units"
+  ],
+  "type": "object"
+}

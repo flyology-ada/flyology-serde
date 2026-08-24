@@ -1,0 +1,15 @@
+name = "flyology_serde_generator_tests"
+description = "Generated Flyology serde adapter integration tests"
+version = "0.1.0-dev"
+licenses = "MIT OR Apache-2.0"
+executables = ["flyology_serde_generator_tests"]
+
+[[actions]]
+type = "pre-build"
+command = ["python3", "../verify_manifest.py", "--require-fixture", "golden"]
+
+[[depends-on]]
+flyology_serde = "*"
+
+[[pins]]
+flyology_serde = { path = "../../.." }

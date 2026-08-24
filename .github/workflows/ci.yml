@@ -46,3 +46,14 @@ jobs:
       - name: Run assertion-enabled tests
         working-directory: tests
         run: alr run
+      - name: Test offline generator boundary
+        run: python3 -m unittest discover -s tools/generator/tests -p 'test_*.py'
+      - name: Reject fixture-only release sources
+        run: python3 tools/generator/check_release_markers.py
+      - name: Verify generated fixture manifest
+        run: >-
+          python3 tools/generator/verify_manifest.py
+          --require-fixture tools/generator/tests/golden
+      - name: Run generated Ada round trips
+        working-directory: tools/generator/tests
+        run: alr run

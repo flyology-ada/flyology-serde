@@ -1,7 +1,8 @@
-/obj/
-/lib/
-/alire/
-/config/
+**/obj/
+**/lib/
+**/alire/
+**/config/
+**/bin/
 .agents/
 .claude/rules/
 .claude/skills/
