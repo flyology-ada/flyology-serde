@@ -71,7 +71,8 @@ test "$("$generator" --version)" = "serde-generator-v2"
 "$build_process_close_failure_test"
 "$build_process_abi_tests" "$build_process_signal_child"
 for hook_optimization in -O0 -O2; do
-   gprbuild -f -p -u -P "$hook_elision_project" -XHOOK_OPT="$hook_optimization" \
+   alr -C "$generator_root" exec -- gprbuild -f -p -u -P "$hook_elision_project" \
+     -XHOOK_OPT="$hook_optimization" \
      flyology_serde_generator-build_processes.adb >/dev/null
    if nm "$hook_elision_object" | grep -qi flyology_serde_disabled_process; then
       echo "disabled build-process test hook survived $hook_optimization compilation" >&2
