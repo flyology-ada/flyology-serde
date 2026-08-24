@@ -6,6 +6,7 @@ generator="$generator_root/bin/flyology_serde_generate"
 scaffold_tests="$generator_root/tests/bin/scaffold_tests"
 renderer_tests="$generator_root/tests/bin/renderer_tests"
 build_sha_256_tests="$generator_root/tests/bin/build_sha_256_tests"
+build_budgets_tests="$generator_root/tests/bin/build_budgets_tests"
 overlay_fixture="$generator_root/../tests/fixtures/wire-record-overlay.json"
 policy_overlay_fixture="$generator_root/../tests/fixtures/wire-record-overlay-policy.json"
 type_ir_fixture="$generator_root/../vendor/type_ir/fixtures/wire-record-shape.json"
@@ -29,6 +30,7 @@ done
 
 test "$("$generator" --version)" = "serde-generator-v2"
 "$build_sha_256_tests"
+"$build_budgets_tests"
 "$scaffold_tests" "$overlay_fixture"
 python3 "$generator_root/../generate.py" --type-ir "$type_ir_fixture" \
   --overlay "$overlay_fixture" --output "$test_root/python" --test-fixture-shape
