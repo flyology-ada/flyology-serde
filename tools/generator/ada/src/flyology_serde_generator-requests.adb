@@ -1,5 +1,6 @@
 package body Flyology_Serde_Generator.Requests is
    use Ada.Strings.Unbounded;
+   use Flyology_Serde_Generator.Diagnostics;
 
    function Fits
      (Current : Budget_Count;
@@ -145,7 +146,6 @@ package body Flyology_Serde_Generator.Requests is
       Into         : out Generation_Request;
       Diagnostic   : out Flyology_Serde_Generator.Diagnostics.Diagnostic)
    is
-      use Flyology_Serde_Generator.Diagnostics;
    begin
       Into.Valid := False;
       Into.Type_IR := Null_Unbounded_String;
@@ -206,12 +206,133 @@ package body Flyology_Serde_Generator.Requests is
    function Is_Fixture_Request (Value : Generation_Request) return Boolean is
      (Value.Test_Fixture);
 
-   function Type_IR_Path (Value : Generation_Request) return String is
-     (To_String (Value.Type_IR));
+   function Reserve_Query_Work
+     (Budget     : in out Operation_Budget;
+      Units      : Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic) return Boolean
+   is
+      Accepted : Boolean;
+   begin
+      if Code (Diagnostic) /= No_Error then
+         return False;
+      elsif Is_Poisoned (Budget) then
+         Set (Diagnostic, Resource_Exhausted);
+         return False;
+      end if;
 
-   function Overlay_Path (Value : Generation_Request) return String is
-     (To_String (Value.Overlay));
+      Charge_Work (Budget, Units, Accepted);
+      if not Accepted then
+         Set (Diagnostic, Resource_Exhausted);
+      end if;
+      return Accepted;
+   end Reserve_Query_Work;
 
-   function Output_Path (Value : Generation_Request) return String is
-     (To_String (Value.Output));
+   procedure Read_Text_Length
+     (Source     : Unbounded_String;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+      Candidate : Natural;
+   begin
+      if Reserve_Query_Work (Budget, 1, Diagnostic) then
+         Candidate := Ada.Strings.Unbounded.Length (Source);
+         Length := Candidate;
+      end if;
+   end Read_Text_Length;
+
+   procedure Copy_Text
+     (Source     : Unbounded_String;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+      Count : Natural;
+   begin
+      if not Reserve_Query_Work (Budget, 1, Diagnostic) then
+         return;
+      end if;
+
+      Count := Ada.Strings.Unbounded.Length (Source);
+      if Into'Length < Count then
+         Copied := False;
+         return;
+      elsif not Reserve_Query_Work (Budget, Count, Diagnostic) then
+         return;
+      end if;
+
+      for Position in 1 .. Count loop
+         Into (Into'First - 1 + Position) := Element (Source, Position);
+      end loop;
+      Written := Count;
+      Copied := True;
+   end Copy_Text;
+
+   procedure Read_Type_IR_Path_Length
+     (Value      : Generation_Request;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Read_Text_Length (Value.Type_IR, Budget, Length, Diagnostic);
+   end Read_Type_IR_Path_Length;
+
+   procedure Copy_Type_IR_Path
+     (Value      : Generation_Request;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Copy_Text (Value.Type_IR, Budget, Into, Written, Copied, Diagnostic);
+   end Copy_Type_IR_Path;
+
+   procedure Read_Overlay_Path_Length
+     (Value      : Generation_Request;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Read_Text_Length (Value.Overlay, Budget, Length, Diagnostic);
+   end Read_Overlay_Path_Length;
+
+   procedure Copy_Overlay_Path
+     (Value      : Generation_Request;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Copy_Text (Value.Overlay, Budget, Into, Written, Copied, Diagnostic);
+   end Copy_Overlay_Path;
+
+   procedure Read_Output_Path_Length
+     (Value      : Generation_Request;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Read_Text_Length (Value.Output, Budget, Length, Diagnostic);
+   end Read_Output_Path_Length;
+
+   procedure Copy_Output_Path
+     (Value      : Generation_Request;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Copy_Text (Value.Output, Budget, Into, Written, Copied, Diagnostic);
+   end Copy_Output_Path;
 end Flyology_Serde_Generator.Requests;

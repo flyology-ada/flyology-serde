@@ -12,6 +12,19 @@ test_root=$(mktemp -d)
 trap 'rm -rf -- "$test_root"' EXIT HUP INT TERM
 limits=4096,1048576,2097152,4096,32,8,64,4096,100000,10000,1048576,2097152,3,64,256,4194304
 
+for query_spec in \
+  "$generator_root/src/flyology_serde_generator-requests.ads" \
+  "$generator_root/src/flyology_serde_generator-overlays.ads"
+do
+   if awk \
+     'BEGIN { RS = ";"; found = 0 } /function/ && /return[[:space:]]+String/ { found = 1 } END { exit !found }' \
+     "$query_spec"
+   then
+      echo "allocating String getter remains in a production query API: $query_spec" >&2
+      exit 1
+   fi
+done
+
 test "$("$generator" --version)" = "serde-generator-v2"
 "$scaffold_tests" "$overlay_fixture"
 python3 "$generator_root/../generate.py" --type-ir "$type_ir_fixture" \

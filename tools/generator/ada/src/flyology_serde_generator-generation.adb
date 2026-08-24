@@ -17,21 +17,51 @@ package body Flyology_Serde_Generator.Generation is
       else
          Flyology_Serde_Generator.Requests.Start_Budget
            (Flyology_Serde_Generator.Requests.Operation_Limits (Request), Budget);
-         Flyology_Serde_Generator.Overlays.Load_Checked
-           (Flyology_Serde_Generator.Requests.Overlay_Path (Request),
-            Budget,
-            Overlay,
-            Diagnostic);
-         if Code (Diagnostic) = No_Error then
-            if not Flyology_Serde_Generator.Overlays.Is_Fixture_Only (Overlay) then
-               Set (Diagnostic, Unsupported_Overlay);
-            else
-               Set (Diagnostic, Type_IR_API_Unavailable);
+         declare
+            Path_Length : Natural := 0;
+         begin
+            Flyology_Serde_Generator.Requests.Read_Overlay_Path_Length
+              (Request, Budget, Path_Length, Diagnostic);
+            if Code (Diagnostic) = No_Error then
+               declare
+                  Path    : String (1 .. Path_Length);
+                  Written : Natural := 0;
+                  Copied  : Boolean := False;
+               begin
+                  Flyology_Serde_Generator.Requests.Copy_Overlay_Path
+                    (Request, Budget, Path, Written, Copied, Diagnostic);
+                  if Code (Diagnostic) = No_Error and then Copied and then Written = Path_Length then
+                     Flyology_Serde_Generator.Overlays.Load_Checked
+                       (Path, Budget, Overlay, Diagnostic);
+                  elsif Code (Diagnostic) = No_Error then
+                     Flyology_Serde_Generator.Requests.Poison (Budget);
+                     Set (Diagnostic, Internal_Error);
+                  end if;
+               end;
             end if;
+         end;
+         if Code (Diagnostic) = No_Error then
+            declare
+               Fixture_Only : Boolean := False;
+            begin
+               Flyology_Serde_Generator.Overlays.Read_Fixture_Only
+                 (Overlay, Budget, Fixture_Only, Diagnostic);
+               if Code (Diagnostic) = No_Error and then not Fixture_Only then
+                  Set (Diagnostic, Unsupported_Overlay);
+               elsif Code (Diagnostic) = No_Error then
+                  Set (Diagnostic, Type_IR_API_Unavailable);
+               end if;
+            end;
          end if;
       end if;
    exception
+      when Storage_Error =>
+         Flyology_Serde_Generator.Requests.Poison (Budget);
+         if Code (Diagnostic) = No_Error then
+            Set (Diagnostic, Resource_Exhausted);
+         end if;
       when others =>
+         Flyology_Serde_Generator.Requests.Poison (Budget);
          if Code (Diagnostic) = No_Error then
             Set (Diagnostic, Internal_Error);
          end if;

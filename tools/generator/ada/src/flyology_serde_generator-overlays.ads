@@ -26,25 +26,264 @@ package Flyology_Serde_Generator.Overlays is
       Diagnostic : out Flyology_Serde_Generator.Diagnostics.Diagnostic);
 
    function Is_Valid (Value : Overlay_Document) return Boolean;
-   function Is_Fixture_Only (Value : Overlay_Document) return Boolean;
-   function Output_Unit (Value : Overlay_Document) return String;
-   function Type_IR_Commit (Value : Overlay_Document) return String;
-   function Type_IR_Semantic_Fingerprint (Value : Overlay_Document) return String;
-   function Type_IR_Source_SHA256 (Value : Overlay_Document) return String;
-   function Source_SHA256 (Value : Overlay_Document) return String;
-   function Runtime_Limits (Value : Overlay_Document) return Serialization_Limits;
 
-   function With_Unit_Count (Value : Overlay_Document) return Natural;
-   function With_Unit (Value : Overlay_Document; Index : Positive) return String;
+   procedure Read_Fixture_Only
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Result     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
 
-   function Record_Ada_Type (Value : Overlay_Document) return String;
-   function Record_Declaration_ID (Value : Overlay_Document) return String;
-   function Record_Logical_Type_Name (Value : Overlay_Document) return String;
-   function Field_Count (Value : Overlay_Document) return Natural;
-   function Field_Ada_Component (Value : Overlay_Document; Index : Positive) return String;
-   function Field_Ada_Type (Value : Overlay_Document; Index : Positive) return String;
-   function Field_Component_ID (Value : Overlay_Document; Index : Positive) return String;
-   function Field_Presentation_Name (Value : Overlay_Document; Index : Positive) return String;
+   procedure Read_Runtime_Limits
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Result     : in out Serialization_Limits;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Read_With_Unit_Count
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Result     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Read_Field_Count
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Result     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Read_Output_Unit_Length
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Copy_Output_Unit
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Read_Type_IR_Commit_Length
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Copy_Type_IR_Commit
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Read_Type_IR_Semantic_Fingerprint_Length
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Copy_Type_IR_Semantic_Fingerprint
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Read_Type_IR_Source_SHA256_Length
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Copy_Type_IR_Source_SHA256
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Read_Source_SHA256_Length
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Copy_Source_SHA256
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Read_With_Unit_Length
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Copy_With_Unit
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Read_Record_Ada_Type_Length
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Copy_Record_Ada_Type
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Read_Record_Declaration_ID_Length
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Copy_Record_Declaration_ID
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Read_Record_Logical_Type_Name_Length
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Copy_Record_Logical_Type_Name
+     (Value      : Overlay_Document;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Read_Field_Ada_Component_Length
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Copy_Field_Ada_Component
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Read_Field_Ada_Type_Length
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Copy_Field_Ada_Type
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Read_Field_Component_ID_Length
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Copy_Field_Component_ID
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Read_Field_Presentation_Name_Length
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Copy_Field_Presentation_Name
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Flyology_Serde_Generator.Requests.Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   --  Every checked v1 overlay text is printable ASCII, so each reported
+   --  length is both String elements and UTF-8 octets. Scalar, count, and
+   --  length queries charge one work unit. Copy charges one probe unit and,
+   --  when Into is large enough, exactly the text length before copying at
+   --  Into'First. A latched diagnostic causes no budget, diagnostic, or result
+   --  mutation; selecting a retained immutable component is not an observable
+   --  query result. A clean poisoned or denied budget latches
+   --  Resource_Exhausted and preserves every result. Undersize changes only
+   --  Copied to False. Indexed range checks are uncharged programming checks
+   --  after diagnostic and poison precedence; an invalid index latches
+   --  Internal_Error without changing results.
 
 private
    type Overlay_Data;

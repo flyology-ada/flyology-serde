@@ -10,6 +10,11 @@ under `ada/tests/src`. It compares the bytes after the legacy seven-line attesta
 and the checked-in golden. It does not emit headers, manifests, directories, files, or CLI output, and is not a
 production Type IR input path.
 
+The retained request and checked-overlay owners use budgeted length and caller-buffer copy queries. Production
+source contains no unconstrained `String` getter for a request path or overlay text. Query work remains in the same
+operation budget used by overlay loading and future lowering; a prelatched diagnostic is a strict no-op and budget
+denial preserves caller output.
+
 The offline Ada generator pins the corrected `mosteo/onox-json-ada` JSON 6.0.0 commit already used by Flyology and
 the exact `sha2` 2.0.0 commit. Both dependencies remain confined to the generator crate. The runtime library and its
 JSON and CBOR backends do not depend on either crate. Compiler resolution remains in the separate CI execution

@@ -86,9 +86,62 @@ package Flyology_Serde_Generator.Requests is
    --  This flag records a fixture request. It is not extraction or production authority.
    function Is_Fixture_Request (Value : Generation_Request) return Boolean;
 
-   function Type_IR_Path (Value : Generation_Request) return String;
-   function Overlay_Path (Value : Generation_Request) return String;
-   function Output_Path (Value : Generation_Request) return String;
+   procedure Read_Type_IR_Path_Length
+     (Value      : Generation_Request;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Copy_Type_IR_Path
+     (Value      : Generation_Request;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Read_Overlay_Path_Length
+     (Value      : Generation_Request;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Copy_Overlay_Path
+     (Value      : Generation_Request;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Read_Output_Path_Length
+     (Value      : Generation_Request;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   procedure Copy_Output_Path
+     (Value      : Generation_Request;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   with Pre => Is_Valid (Value);
+
+   --  Request paths are opaque non-NUL pathname octets stored in String.
+   --  Length charges one work unit. Copy charges one probe unit and, only
+   --  when Into is large enough, exactly Length additional work units before
+   --  copying at Into'First. A latched diagnostic causes no budget,
+   --  diagnostic, or result mutation; selecting its retained immutable path
+   --  component is not an observable query result. Denial preserves all
+   --  result actuals and latches Resource_Exhausted; undersize leaves Into and
+   --  Written unchanged and changes only Copied to False.
 
 private
    subtype Budget_Count is Used_Value;

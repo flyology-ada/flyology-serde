@@ -1078,56 +1078,513 @@ package body Flyology_Serde_Generator.Overlays is
    function Is_Valid (Value : Overlay_Document) return Boolean is
      (Value.Data /= null);
 
-   function Is_Fixture_Only (Value : Overlay_Document) return Boolean is
-     (Value.Data.Fixture_Only);
+   function Ready_For_Query
+     (Budget     : in out Operation_Budget;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic) return Boolean
+   is
+   begin
+      if Code (Diagnostic) /= No_Error then
+         return False;
+      elsif Is_Poisoned (Budget) then
+         Set (Diagnostic, Resource_Exhausted);
+         return False;
+      end if;
+      return True;
+   end Ready_For_Query;
 
-   function Output_Unit (Value : Overlay_Document) return String is
-     (To_String (Value.Data.Output_Unit));
+   function Reserve_Query_Work
+     (Budget     : in out Operation_Budget;
+      Units      : Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic) return Boolean
+   is
+      Accepted : Boolean;
+   begin
+      if not Ready_For_Query (Budget, Diagnostic) then
+         return False;
+      end if;
+      Charge_Work (Budget, Units, Accepted);
+      if not Accepted then
+         Set (Diagnostic, Resource_Exhausted);
+      end if;
+      return Accepted;
+   end Reserve_Query_Work;
 
-   function Type_IR_Commit (Value : Overlay_Document) return String is
-     (To_String (Value.Data.Type_IR_Commit));
+   procedure Read_Text_Length
+     (Source     : Unbounded_String;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      if Reserve_Query_Work (Budget, 1, Diagnostic) then
+         Length := Ada.Strings.Unbounded.Length (Source);
+      end if;
+   end Read_Text_Length;
 
-   function Type_IR_Semantic_Fingerprint (Value : Overlay_Document) return String is
-     (To_String (Value.Data.Type_IR_Semantic_Fingerprint));
+   procedure Copy_Text
+     (Source     : Unbounded_String;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+      Count : Natural;
+   begin
+      if not Reserve_Query_Work (Budget, 1, Diagnostic) then
+         return;
+      end if;
+      Count := Ada.Strings.Unbounded.Length (Source);
+      if Into'Length < Count then
+         Copied := False;
+         return;
+      elsif not Reserve_Query_Work (Budget, Count, Diagnostic) then
+         return;
+      end if;
+      for Position in 1 .. Count loop
+         Into (Into'First - 1 + Position) := Element (Source, Position);
+      end loop;
+      Written := Count;
+      Copied := True;
+   end Copy_Text;
 
-   function Type_IR_Source_SHA256 (Value : Overlay_Document) return String is
-     (To_String (Value.Data.Type_IR_Source_SHA256));
+   procedure Read_Fixture_Only
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Result     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      if Reserve_Query_Work (Budget, 1, Diagnostic) then
+         Result := Value.Data.Fixture_Only;
+      end if;
+   end Read_Fixture_Only;
 
-   function Source_SHA256 (Value : Overlay_Document) return String is
-     (To_String (Value.Data.Source_SHA256));
+   procedure Read_Runtime_Limits
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Result     : in out Serialization_Limits;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      if Reserve_Query_Work (Budget, 1, Diagnostic) then
+         Result := Value.Data.Limits;
+      end if;
+   end Read_Runtime_Limits;
 
-   function Runtime_Limits (Value : Overlay_Document) return Serialization_Limits is
-     (Value.Data.Limits);
+   procedure Read_With_Unit_Count
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Result     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      if Reserve_Query_Work (Budget, 1, Diagnostic) then
+         Result := Natural (Value.Data.With_Units.Length);
+      end if;
+   end Read_With_Unit_Count;
 
-   function With_Unit_Count (Value : Overlay_Document) return Natural is
-     (Natural (Value.Data.With_Units.Length));
+   procedure Read_Field_Count
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Result     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      if Reserve_Query_Work (Budget, 1, Diagnostic) then
+         Result := Natural (Value.Data.Fields.Length);
+      end if;
+   end Read_Field_Count;
 
-   function With_Unit (Value : Overlay_Document; Index : Positive) return String is
-     (To_String (Value.Data.With_Units.Element (Index)));
+   procedure Read_Output_Unit_Length
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Read_Text_Length (Value.Data.Output_Unit, Budget, Length, Diagnostic);
+   end Read_Output_Unit_Length;
 
-   function Record_Ada_Type (Value : Overlay_Document) return String is
-     (To_String (Value.Data.Record_Ada_Type));
+   procedure Copy_Output_Unit
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Copy_Text (Value.Data.Output_Unit, Budget, Into, Written, Copied, Diagnostic);
+   end Copy_Output_Unit;
 
-   function Record_Declaration_ID (Value : Overlay_Document) return String is
-     (To_String (Value.Data.Record_Declaration_ID));
+   procedure Read_Type_IR_Commit_Length
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Read_Text_Length (Value.Data.Type_IR_Commit, Budget, Length, Diagnostic);
+   end Read_Type_IR_Commit_Length;
 
-   function Record_Logical_Type_Name (Value : Overlay_Document) return String is
-     (To_String (Value.Data.Record_Logical_Type_Name));
+   procedure Copy_Type_IR_Commit
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Copy_Text (Value.Data.Type_IR_Commit, Budget, Into, Written, Copied, Diagnostic);
+   end Copy_Type_IR_Commit;
 
-   function Field_Count (Value : Overlay_Document) return Natural is
-     (Natural (Value.Data.Fields.Length));
+   procedure Read_Type_IR_Semantic_Fingerprint_Length
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Read_Text_Length (Value.Data.Type_IR_Semantic_Fingerprint, Budget, Length, Diagnostic);
+   end Read_Type_IR_Semantic_Fingerprint_Length;
 
-   function Field_Ada_Component (Value : Overlay_Document; Index : Positive) return String is
-     (To_String (Value.Data.Fields.Element (Index).Ada_Component));
+   procedure Copy_Type_IR_Semantic_Fingerprint
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Copy_Text (Value.Data.Type_IR_Semantic_Fingerprint, Budget, Into, Written, Copied, Diagnostic);
+   end Copy_Type_IR_Semantic_Fingerprint;
 
-   function Field_Ada_Type (Value : Overlay_Document; Index : Positive) return String is
-     (To_String (Value.Data.Fields.Element (Index).Ada_Type));
+   procedure Read_Type_IR_Source_SHA256_Length
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Read_Text_Length (Value.Data.Type_IR_Source_SHA256, Budget, Length, Diagnostic);
+   end Read_Type_IR_Source_SHA256_Length;
 
-   function Field_Component_ID (Value : Overlay_Document; Index : Positive) return String is
-     (To_String (Value.Data.Fields.Element (Index).Component_ID));
+   procedure Copy_Type_IR_Source_SHA256
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Copy_Text (Value.Data.Type_IR_Source_SHA256, Budget, Into, Written, Copied, Diagnostic);
+   end Copy_Type_IR_Source_SHA256;
 
-   function Field_Presentation_Name (Value : Overlay_Document; Index : Positive) return String is
-     (To_String (Value.Data.Fields.Element (Index).Presentation_Name));
+   procedure Read_Source_SHA256_Length
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Read_Text_Length (Value.Data.Source_SHA256, Budget, Length, Diagnostic);
+   end Read_Source_SHA256_Length;
+
+   procedure Copy_Source_SHA256
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Copy_Text (Value.Data.Source_SHA256, Budget, Into, Written, Copied, Diagnostic);
+   end Copy_Source_SHA256;
+
+   procedure Read_With_Unit_Length
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      if not Ready_For_Query (Budget, Diagnostic) then
+         return;
+      elsif Index > Natural (Value.Data.With_Units.Length) then
+         Set (Diagnostic, Internal_Error);
+         return;
+      end if;
+      declare
+         Reference : constant String_Vectors.Constant_Reference_Type :=
+           Value.Data.With_Units.Constant_Reference (Index);
+      begin
+         Read_Text_Length (Reference.Element.all, Budget, Length, Diagnostic);
+      end;
+   end Read_With_Unit_Length;
+
+   procedure Copy_With_Unit
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      if not Ready_For_Query (Budget, Diagnostic) then
+         return;
+      elsif Index > Natural (Value.Data.With_Units.Length) then
+         Set (Diagnostic, Internal_Error);
+         return;
+      end if;
+      declare
+         Reference : constant String_Vectors.Constant_Reference_Type :=
+           Value.Data.With_Units.Constant_Reference (Index);
+      begin
+         Copy_Text (Reference.Element.all, Budget, Into, Written, Copied, Diagnostic);
+      end;
+   end Copy_With_Unit;
+
+   procedure Read_Record_Ada_Type_Length
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Read_Text_Length (Value.Data.Record_Ada_Type, Budget, Length, Diagnostic);
+   end Read_Record_Ada_Type_Length;
+
+   procedure Copy_Record_Ada_Type
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Copy_Text (Value.Data.Record_Ada_Type, Budget, Into, Written, Copied, Diagnostic);
+   end Copy_Record_Ada_Type;
+
+   procedure Read_Record_Declaration_ID_Length
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Read_Text_Length (Value.Data.Record_Declaration_ID, Budget, Length, Diagnostic);
+   end Read_Record_Declaration_ID_Length;
+
+   procedure Copy_Record_Declaration_ID
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Copy_Text (Value.Data.Record_Declaration_ID, Budget, Into, Written, Copied, Diagnostic);
+   end Copy_Record_Declaration_ID;
+
+   procedure Read_Record_Logical_Type_Name_Length
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Read_Text_Length (Value.Data.Record_Logical_Type_Name, Budget, Length, Diagnostic);
+   end Read_Record_Logical_Type_Name_Length;
+
+   procedure Copy_Record_Logical_Type_Name
+     (Value      : Overlay_Document;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      Copy_Text (Value.Data.Record_Logical_Type_Name, Budget, Into, Written, Copied, Diagnostic);
+   end Copy_Record_Logical_Type_Name;
+
+   function Valid_Field_Index
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Operation_Budget;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic) return Boolean
+   is
+   begin
+      if not Ready_For_Query (Budget, Diagnostic) then
+         return False;
+      elsif Index > Natural (Value.Data.Fields.Length) then
+         Set (Diagnostic, Internal_Error);
+         return False;
+      end if;
+      return True;
+   end Valid_Field_Index;
+
+   procedure Read_Field_Ada_Component_Length
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      if Valid_Field_Index (Value, Index, Budget, Diagnostic) then
+         declare
+            Reference : constant Field_Vectors.Constant_Reference_Type :=
+              Value.Data.Fields.Constant_Reference (Index);
+         begin
+            Read_Text_Length (Reference.Element.Ada_Component, Budget, Length, Diagnostic);
+         end;
+      end if;
+   end Read_Field_Ada_Component_Length;
+
+   procedure Copy_Field_Ada_Component
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      if Valid_Field_Index (Value, Index, Budget, Diagnostic) then
+         declare
+            Reference : constant Field_Vectors.Constant_Reference_Type :=
+              Value.Data.Fields.Constant_Reference (Index);
+         begin
+            Copy_Text (Reference.Element.Ada_Component, Budget, Into, Written, Copied, Diagnostic);
+         end;
+      end if;
+   end Copy_Field_Ada_Component;
+
+   procedure Read_Field_Ada_Type_Length
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      if Valid_Field_Index (Value, Index, Budget, Diagnostic) then
+         declare
+            Reference : constant Field_Vectors.Constant_Reference_Type :=
+              Value.Data.Fields.Constant_Reference (Index);
+         begin
+            Read_Text_Length (Reference.Element.Ada_Type, Budget, Length, Diagnostic);
+         end;
+      end if;
+   end Read_Field_Ada_Type_Length;
+
+   procedure Copy_Field_Ada_Type
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      if Valid_Field_Index (Value, Index, Budget, Diagnostic) then
+         declare
+            Reference : constant Field_Vectors.Constant_Reference_Type :=
+              Value.Data.Fields.Constant_Reference (Index);
+         begin
+            Copy_Text (Reference.Element.Ada_Type, Budget, Into, Written, Copied, Diagnostic);
+         end;
+      end if;
+   end Copy_Field_Ada_Type;
+
+   procedure Read_Field_Component_ID_Length
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      if Valid_Field_Index (Value, Index, Budget, Diagnostic) then
+         declare
+            Reference : constant Field_Vectors.Constant_Reference_Type :=
+              Value.Data.Fields.Constant_Reference (Index);
+         begin
+            Read_Text_Length (Reference.Element.Component_ID, Budget, Length, Diagnostic);
+         end;
+      end if;
+   end Read_Field_Component_ID_Length;
+
+   procedure Copy_Field_Component_ID
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      if Valid_Field_Index (Value, Index, Budget, Diagnostic) then
+         declare
+            Reference : constant Field_Vectors.Constant_Reference_Type :=
+              Value.Data.Fields.Constant_Reference (Index);
+         begin
+            Copy_Text (Reference.Element.Component_ID, Budget, Into, Written, Copied, Diagnostic);
+         end;
+      end if;
+   end Copy_Field_Component_ID;
+
+   procedure Read_Field_Presentation_Name_Length
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Operation_Budget;
+      Length     : in out Natural;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      if Valid_Field_Index (Value, Index, Budget, Diagnostic) then
+         declare
+            Reference : constant Field_Vectors.Constant_Reference_Type :=
+              Value.Data.Fields.Constant_Reference (Index);
+         begin
+            Read_Text_Length (Reference.Element.Presentation_Name, Budget, Length, Diagnostic);
+         end;
+      end if;
+   end Read_Field_Presentation_Name_Length;
+
+   procedure Copy_Field_Presentation_Name
+     (Value      : Overlay_Document;
+      Index      : Positive;
+      Budget     : in out Operation_Budget;
+      Into       : in out String;
+      Written    : in out Natural;
+      Copied     : in out Boolean;
+      Diagnostic : in out Flyology_Serde_Generator.Diagnostics.Diagnostic)
+   is
+   begin
+      if Valid_Field_Index (Value, Index, Budget, Diagnostic) then
+         declare
+            Reference : constant Field_Vectors.Constant_Reference_Type :=
+              Value.Data.Fields.Constant_Reference (Index);
+         begin
+            Copy_Text (Reference.Element.Presentation_Name, Budget, Into, Written, Copied, Diagnostic);
+         end;
+      end if;
+   end Copy_Field_Presentation_Name;
 
    overriding procedure Finalize (Value : in out Overlay_Document) is
    begin

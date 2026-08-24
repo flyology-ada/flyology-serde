@@ -203,6 +203,16 @@ leaf exists only to expose an open using header-defined `O_NOFOLLOW`, `O_CLOEXEC
 `fstat`/`S_ISREG` query. Ada decides whether the retained descriptor is acceptable and owns reading, bounds, status
 classification, close verification, and cleanup.
 
+Checked request and overlay owners expose no allocating `String` getters to production lowering. Request paths use
+length and caller-buffer copy queries; they remain opaque non-NUL pathname octets and are not reinterpreted as
+Unicode. Checked overlay v1 text is printable ASCII, so its reported length is both Ada `String` elements and UTF-8
+octets. Scalar, count, and length queries charge one work unit before publishing a result. A text copy charges one
+probe unit, then exactly the text length before copying when the caller buffer is large enough. An undersized buffer
+changes only its copied flag, while a denied charge poisons the budget, preserves every result actual, and reports
+resource exhaustion. A latched diagnostic permits only nonallocating selection of an immutable retained component;
+it causes no budget, diagnostic, or result mutation. Indexed range checks are uncharged programming checks after
+diagnostic and poison precedence; they never classify external input.
+
 Checks occur in this order: aggregate and per-input raw byte bounds during read; token/string/nesting and local
 container bounds during parse; the applicable per-codec node and aggregate work bounds on acceptance; semantic
 validation and lowering;
