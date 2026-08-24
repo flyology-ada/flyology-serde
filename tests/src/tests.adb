@@ -24,6 +24,7 @@ with JSON_Reader_Tests;
 with JSON_Writer_Tests;
 with Handwritten_Type_Tests;
 with Record_Adapter_Tests;
+with Scalar_Parity_Tests;
 with Variant_Adapter_Tests;
 
 procedure Tests is
@@ -225,6 +226,7 @@ begin
    JSON_Writer_Tests;
    Handwritten_Type_Tests;
    Record_Adapter_Tests;
+   Scalar_Parity_Tests;
    Variant_Adapter_Tests;
 
    Sample_Serialization.Serialize
