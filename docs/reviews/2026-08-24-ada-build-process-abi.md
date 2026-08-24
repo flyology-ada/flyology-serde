@@ -70,3 +70,8 @@ fix declares guarded `_GNU_SOURCE` at the top of that translation unit before ev
 leaf, rather than weakening the project to `gnu11`. Its narrow proposal review reports P0 none, P1 none, and P2 none;
 the implementation review also reports P0 none, P1 none, and P2 none. The strict macOS production/test build and
 smoke suite pass; Linux verification remains the next published CI gate.
+
+That Linux gate then passed the production generator build and reached the new ABI tests. Their two test-only signal
+translation units lacked a feature profile, so strict C11 hid `struct sigaction`, `sigset_t`, and `sigprocmask` on
+glibc. The second reviewed fix adds the same guarded `_GNU_SOURCE` definition before every header in both test files;
+it changes no production source or signal semantics. Its proposal review reports P0 none, P1 none, and P2 none.
