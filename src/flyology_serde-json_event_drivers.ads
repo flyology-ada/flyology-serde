@@ -21,6 +21,44 @@ private package Flyology_Serde.JSON_Event_Drivers is
 
    subtype Zero_Progress_Count is Natural range 0 .. Zero_Progress_Limit;
 
+   type Event_Kind is
+     (Document_Begin,
+      Document_End,
+      Object_Begin,
+      Object_End,
+      Array_Begin,
+      Array_End,
+      Name_Begin,
+      Name_Fragment,
+      Name_End,
+      String_Begin,
+      String_Fragment,
+      String_End,
+      Number_Begin,
+      Number_Fragment,
+      Number_End,
+      Null_Value,
+      Boolean_Value);
+
+   subtype Scalar_Length is Natural range 0 .. 4;
+   subtype Scalar_Storage is
+     Ada.Streams.Stream_Element_Array
+       (Ada.Streams.Stream_Element_Offset range 1 .. 4);
+
+   type Event_Summary is record
+      Kind            : Event_Kind := Document_Begin;
+      Source_Offset   : Natural := 0;
+      Source_Length   : Natural := 0;
+      Has_Raw_Byte    : Boolean := False;
+      Raw_Byte        : Ada.Streams.Stream_Element := 0;
+      Decoded_Length  : Scalar_Length := 0;
+      Decoded         : Scalar_Storage := [others => 0];
+      Boolean_Payload : Boolean := False;
+   end record;
+
+   Maximum_Event_Summaries : constant Natural := Zero_Progress_Limit + 1;
+   type Event_Summary_Array is array (Natural range <>) of Event_Summary;
+
    --  Closed progress accounting shared by the live driver and the direct
    --  conformance test. Exceeded is true before Count could wrap.
    procedure Account_Progress
@@ -45,8 +83,28 @@ private package Flyology_Serde.JSON_Event_Drivers is
       Consumed : out Boolean;
       Error    : in out Errors.Error_Info);
 
+   --  Event-preserving form used by the parallel pull reader. Every event is
+   --  copied before the next parser Step, so no Flyology JSON borrow escapes.
+   --  Summaries must have at least Maximum_Event_Summaries components. Count
+   --  is zero on failure and otherwise identifies the prefix from First.
+   procedure Consume_One
+     (Self      : in out Driver;
+      Budget    : in out Budgets.Decode_Budget;
+      Consumed  : out Boolean;
+      Summaries : out Event_Summary_Array;
+      Count     : out Natural;
+      Error     : in out Errors.Error_Info);
+
    --  Admit final input and require Flyology JSON's complete-document gate.
    procedure Finish (Self : in out Driver; Error : in out Errors.Error_Info);
+
+   --  Event-preserving final-input form. It copies every zero-source terminal
+   --  event before requiring Document_Complete.
+   procedure Finish
+     (Self      : in out Driver;
+      Summaries : out Event_Summary_Array;
+      Count     : out Natural;
+      Error     : in out Errors.Error_Info);
 
    --  Preserve an unreported parser terminal diagnostic in Error before
    --  ending the parser operation. An already latched Serde error remains

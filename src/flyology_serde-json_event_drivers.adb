@@ -10,7 +10,10 @@ package body Flyology_Serde.JSON_Event_Drivers is
    use type JSON_Errors.Coordinate_Kind;
    use type JSON_Errors.Error_Code;
    use type Errors.Error_Code;
+   use type Parsing.Decoded_Fragment_Kind;
+   use type Parsing.Event_Kind;
    use type Parsing.Parser_State;
+   use type Parsing.Slice_Status;
    use type Parsing.Step_Outcome;
 
    function Profile return Flyology_JSON.Profiles.Parser_Profile
@@ -202,16 +205,163 @@ package body Flyology_Serde.JSON_Event_Drivers is
       end if;
    end Register_Result;
 
+   function Summary_Kind (Kind : Parsing.Event_Kind) return Event_Kind is
+   begin
+      case Kind is
+         when Parsing.Document_Begin  =>
+            return Document_Begin;
+
+         when Parsing.Document_End    =>
+            return Document_End;
+
+         when Parsing.Object_Begin    =>
+            return Object_Begin;
+
+         when Parsing.Object_End      =>
+            return Object_End;
+
+         when Parsing.Array_Begin     =>
+            return Array_Begin;
+
+         when Parsing.Array_End       =>
+            return Array_End;
+
+         when Parsing.Name_Begin      =>
+            return Name_Begin;
+
+         when Parsing.Name_Fragment   =>
+            return Name_Fragment;
+
+         when Parsing.Name_End        =>
+            return Name_End;
+
+         when Parsing.String_Begin    =>
+            return String_Begin;
+
+         when Parsing.String_Fragment =>
+            return String_Fragment;
+
+         when Parsing.String_End      =>
+            return String_End;
+
+         when Parsing.Number_Begin    =>
+            return Number_Begin;
+
+         when Parsing.Number_Fragment =>
+            return Number_Fragment;
+
+         when Parsing.Number_End      =>
+            return Number_End;
+
+         when Parsing.Null_Value      =>
+            return Null_Value;
+
+         when Parsing.Boolean_Value   =>
+            return Boolean_Value;
+      end case;
+   end Summary_Kind;
+
+   procedure Copy_Summary
+     (Self    : in out Driver;
+      Result  : Parsing.Step_Result;
+      Summary : out Event_Summary;
+      Error   : in out Errors.Error_Info)
+   is
+      Item       : constant Parsing.Event := Result.Item;
+      Source     : constant Parsing.Source_Range := Parsing.Source (Item);
+      Raw        : Parsing.Chunk_Range;
+      Raw_Status : Parsing.Slice_Status;
+   begin
+      Summary := (others => <>);
+      if Source.First > Parsing.Byte_Offset (Natural'Last)
+        or else Source.Octet_Length > Parsing.Byte_Offset (Natural'Last)
+      then
+         Fail (Self, Errors.Capacity_Exceeded, Error, Self.Offset);
+         return;
+      end if;
+
+      Summary.Kind := Summary_Kind (Parsing.Kind (Item));
+      Summary.Source_Offset := Natural (Source.First);
+      Summary.Source_Length := Natural (Source.Octet_Length);
+
+      if Parsing.Has_Raw_Slice (Item) then
+         Parsing.Resolve_Raw_Range
+           (Item, Result.Input_Origin, Self.Window'Length, Raw, Raw_Status);
+         if Raw_Status /= Parsing.Slice_Resolved
+           or else Raw.First_Count /= 0
+           or else Raw.Octet_Length /= 1
+           or else not Self.Window_Valid
+         then
+            Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+            return;
+         end if;
+         Summary.Has_Raw_Byte := True;
+         Summary.Raw_Byte := Self.Window (Self.Window'First);
+      end if;
+
+      case Parsing.Decoded_Kind (Item) is
+         when Parsing.No_Decoded_Fragment   =>
+            null;
+
+         when Parsing.Decoded_Is_Raw_Range  =>
+            if not Summary.Has_Raw_Byte then
+               Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+               return;
+            end if;
+            Summary.Decoded_Length := 1;
+            Summary.Decoded (Summary.Decoded'First) := Summary.Raw_Byte;
+
+         when Parsing.Decoded_Inline_Scalar =>
+            declare
+               Scalar : constant Parsing.Inline_Scalar :=
+                 Parsing.Decoded_Scalar (Item);
+            begin
+               Summary.Decoded_Length := Scalar.Length;
+               for Index in 1 .. Scalar.Length loop
+                  Summary.Decoded
+                    (Summary.Decoded'First
+                     + Ada.Streams.Stream_Element_Offset (Index - 1)) :=
+                    Scalar.Octets
+                      (Scalar.Octets'First
+                       + Ada.Streams.Stream_Element_Offset (Index - 1));
+               end loop;
+            end;
+      end case;
+
+      if Parsing.Kind (Item) = Parsing.Boolean_Value then
+         Summary.Boolean_Payload := Parsing.Boolean_Data (Item);
+      end if;
+   end Copy_Summary;
+
    procedure Consume_One
      (Self     : in out Driver;
       Budget   : in out Budgets.Decode_Budget;
       Consumed : out Boolean;
       Error    : in out Errors.Error_Info)
    is
+      Discard : Event_Summary_Array (1 .. Maximum_Event_Summaries);
+      Count   : Natural;
+   begin
+      Consume_One (Self, Budget, Consumed, Discard, Count, Error);
+   end Consume_One;
+
+   procedure Consume_One
+     (Self      : in out Driver;
+      Budget    : in out Budgets.Decode_Budget;
+      Consumed  : out Boolean;
+      Summaries : out Event_Summary_Array;
+      Count     : out Natural;
+      Error     : in out Errors.Error_Info)
+   is
       Result : Parsing.Step_Result;
    begin
       Consumed := False;
+      Count := 0;
+      Summaries := [others => <>];
       if Error.Code /= Errors.No_Error then
+         return;
+      elsif Summaries'Length < Maximum_Event_Summaries then
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
          return;
       elsif not Self.Initialized
         or else Self.Failed
@@ -246,6 +396,18 @@ package body Flyology_Serde.JSON_Event_Drivers is
          if Test_Hooks.Enabled then
             Test_Hooks.Raise_If_Armed (Test_Hooks.After_Step);
          end if;
+         if Result.Outcome = Parsing.Event_Ready then
+            if Count = Summaries'Length then
+               Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+            else
+               Copy_Summary
+                 (Self, Result, Summaries (Summaries'First + Count), Error);
+               if Error.Code = Errors.No_Error then
+                  Count := Count + 1;
+               end if;
+            end if;
+         end if;
+         exit when Error.Code /= Errors.No_Error;
          Register_Result (Self, Result, Consumed, Error);
          exit when Error.Code /= Errors.No_Error;
 
@@ -279,6 +441,9 @@ package body Flyology_Serde.JSON_Event_Drivers is
                exit;
          end case;
       end loop;
+      if Error.Code /= Errors.No_Error then
+         Count := 0;
+      end if;
    exception
       when others =>
          Abort_Document (Self);
@@ -286,11 +451,28 @@ package body Flyology_Serde.JSON_Event_Drivers is
    end Consume_One;
 
    procedure Finish (Self : in out Driver; Error : in out Errors.Error_Info) is
+      Discard : Event_Summary_Array (1 .. Maximum_Event_Summaries);
+      Count   : Natural;
+   begin
+      Finish (Self, Discard, Count, Error);
+   end Finish;
+
+   procedure Finish
+     (Self      : in out Driver;
+      Summaries : out Event_Summary_Array;
+      Count     : out Natural;
+      Error     : in out Errors.Error_Info)
+   is
       Empty            : Ada.Streams.Stream_Element_Array (1 .. 0);
       Result           : Parsing.Step_Result;
       Ignored_Consumed : Boolean;
    begin
+      Count := 0;
+      Summaries := [others => <>];
       if Error.Code /= Errors.No_Error then
+         return;
+      elsif Summaries'Length < Maximum_Event_Summaries then
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
          return;
       elsif not Self.Initialized or else Self.Failed or else Self.Window_Valid
       then
@@ -309,6 +491,18 @@ package body Flyology_Serde.JSON_Event_Drivers is
          if Test_Hooks.Enabled then
             Test_Hooks.Raise_If_Armed (Test_Hooks.After_Finish_Step);
          end if;
+         if Result.Outcome = Parsing.Event_Ready then
+            if Count = Summaries'Length then
+               Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+            else
+               Copy_Summary
+                 (Self, Result, Summaries (Summaries'First + Count), Error);
+               if Error.Code = Errors.No_Error then
+                  Count := Count + 1;
+               end if;
+            end if;
+         end if;
+         exit when Error.Code /= Errors.No_Error;
          Register_Result (Self, Result, Ignored_Consumed, Error);
          exit when Error.Code /= Errors.No_Error;
 
@@ -334,6 +528,9 @@ package body Flyology_Serde.JSON_Event_Drivers is
                exit;
          end case;
       end loop;
+      if Error.Code /= Errors.No_Error then
+         Count := 0;
+      end if;
    exception
       when others =>
          Abort_Document (Self);
