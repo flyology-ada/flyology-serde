@@ -103,6 +103,9 @@ package body Flyology_Serde.JSON_Event_Drivers is
       Self.Failed := True;
       Self.Document_Accepted := False;
       Self.Window_Valid := False;
+      Self.Window_Charged := False;
+      Self.Boundary_Pending := False;
+      Self.Pending_Boundary := (others => <>);
    end Fail;
 
    procedure Fail
@@ -121,6 +124,9 @@ package body Flyology_Serde.JSON_Event_Drivers is
    procedure Reset_Progress (Self : in out Driver) is
    begin
       Self.Window_Valid := False;
+      Self.Window_Charged := False;
+      Self.Boundary_Pending := False;
+      Self.Pending_Boundary := (others => <>);
       Self.Offset := 0;
       Self.Zero_Run := 0;
       Self.Failed := False;
@@ -191,6 +197,7 @@ package body Flyology_Serde.JSON_Event_Drivers is
          end if;
          Self.Offset := Self.Offset + 1;
          Self.Window_Valid := False;
+         Self.Window_Charged := False;
          Consumed := True;
       end if;
 
@@ -333,6 +340,397 @@ package body Flyology_Serde.JSON_Event_Drivers is
       end if;
    end Copy_Summary;
 
+   function Is_JSON_Whitespace (Item : Character) return Boolean
+   is (Item in ' ' | ASCII.HT | ASCII.CR | ASCII.LF);
+
+   procedure Prime_Document_Begin
+     (Self : in out Driver; Error : in out Errors.Error_Info)
+   is
+      Empty    : Ada.Streams.Stream_Element_Array (1 .. 0);
+      Result   : Parsing.Step_Result;
+      Summary  : Event_Summary;
+      Consumed : Boolean;
+   begin
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif not Self.Initialized
+        or else Self.Failed
+        or else Self.Document_Accepted
+        or else Self.Window_Valid
+        or else Self.Boundary_Pending
+        or else Self.Offset /= 0
+        or else Self.Zero_Run /= 0
+      then
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+         return;
+      end if;
+
+      if Test_Hooks.Enabled then
+         Test_Hooks.Raise_If_Armed (Test_Hooks.Before_Step);
+      end if;
+      Parsing.Step
+        (Self.Parser, Empty, End_Of_Input => False, Result => Result);
+      if Test_Hooks.Enabled then
+         Test_Hooks.Raise_If_Armed (Test_Hooks.After_Step);
+      end if;
+      if Result.Outcome /= Parsing.Event_Ready
+        or else Result.Consumed /= 0
+        or else Parsing.Kind (Result.Item) /= Parsing.Document_Begin
+      then
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+         return;
+      end if;
+
+      Copy_Summary (Self, Result, Summary, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Register_Result (Self, Result, Consumed, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Consumed then
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+         return;
+      end if;
+
+      Self.Pending_Boundary := Summary;
+      Self.Boundary_Pending := True;
+   exception
+      when others =>
+         Abort_Document (Self);
+         raise;
+   end Prime_Document_Begin;
+
+   procedure Claim_Document_Begin
+     (Self    : in out Driver;
+      Summary : out Event_Summary;
+      Error   : in out Errors.Error_Info) is
+   begin
+      Summary := (others => <>);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif not Self.Initialized
+        or else Self.Failed
+        or else Self.Document_Accepted
+        or else not Self.Boundary_Pending
+      then
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+         return;
+      end if;
+
+      Summary := Self.Pending_Boundary;
+      Self.Boundary_Pending := False;
+      Self.Pending_Boundary := (others => <>);
+   end Claim_Document_Begin;
+
+   procedure Consume_Leading_Whitespace
+     (Self   : in out Driver;
+      Budget : in out Budgets.Decode_Budget;
+      Error  : in out Errors.Error_Info)
+   is
+      Result   : Parsing.Step_Result;
+      Consumed : Boolean;
+   begin
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif not Self.Initialized
+        or else Self.Failed
+        or else Self.Document_Accepted
+        or else not Self.Boundary_Pending
+        or else Self.Window_Valid
+        or else Self.Offset >= Self.Source'Length
+      then
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+         return;
+      end if;
+
+      if Budgets.Input_Remaining (Budget) = 0 then
+         Budgets.Consume_Input (Budget, 1, Error);
+         if Error.Code = Errors.No_Error then
+            Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+         else
+            Self.Failed := True;
+         end if;
+         return;
+      elsif not Is_JSON_Whitespace
+                  (Self.Source (Self.Source'First + Self.Offset))
+      then
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+         return;
+      end if;
+
+      Budgets.Consume_Input (Budget, 1, Error);
+      if Error.Code /= Errors.No_Error then
+         Self.Failed := True;
+         return;
+      end if;
+      if Test_Hooks.Enabled then
+         Test_Hooks.Raise_If_Armed (Test_Hooks.Before_Source_Copy);
+      end if;
+      Self.Window (Self.Window'First) :=
+        Ada.Streams.Stream_Element
+          (Character'Pos (Self.Source (Self.Source'First + Self.Offset)));
+      Self.Window_Valid := True;
+      Self.Window_Charged := True;
+
+      if Test_Hooks.Enabled then
+         Test_Hooks.Raise_If_Armed (Test_Hooks.Before_Step);
+      end if;
+      Parsing.Step
+        (Self.Parser, Self.Window, End_Of_Input => False, Result => Result);
+      if Test_Hooks.Enabled then
+         Test_Hooks.Raise_If_Armed (Test_Hooks.After_Step);
+      end if;
+      Register_Result (Self, Result, Consumed, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Result.Outcome /= Parsing.Need_Input or else not Consumed then
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+      end if;
+   exception
+      when others =>
+         Abort_Document (Self);
+         raise;
+   end Consume_Leading_Whitespace;
+
+   procedure Step_Source
+     (Self     : in out Driver;
+      Budget   : in out Budgets.Decode_Budget;
+      Outcome  : out Driver_Outcome;
+      Consumed : out Boolean;
+      Summary  : out Event_Summary;
+      Error    : in out Errors.Error_Info)
+   is
+      Result : Parsing.Step_Result;
+   begin
+      Outcome := Need_Source;
+      Consumed := False;
+      Summary := (others => <>);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif not Self.Initialized
+        or else Self.Failed
+        or else Self.Document_Accepted
+        or else Self.Boundary_Pending
+      then
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+         return;
+      end if;
+
+      if not Self.Window_Valid then
+         if Self.Offset >= Self.Source'Length then
+            Fail (Self, Errors.Syntax_Error, Error, Self.Offset);
+            return;
+         end if;
+         Budgets.Consume_Input (Budget, 1, Error);
+         if Error.Code /= Errors.No_Error then
+            Self.Failed := True;
+            return;
+         end if;
+         if Test_Hooks.Enabled then
+            Test_Hooks.Raise_If_Armed (Test_Hooks.Before_Source_Copy);
+         end if;
+         Self.Window (Self.Window'First) :=
+           Ada.Streams.Stream_Element
+             (Character'Pos (Self.Source (Self.Source'First + Self.Offset)));
+         Self.Window_Valid := True;
+         Self.Window_Charged := True;
+      elsif not Self.Window_Charged then
+         Budgets.Consume_Input (Budget, 1, Error);
+         if Error.Code /= Errors.No_Error then
+            Self.Window_Valid := False;
+            Self.Failed := True;
+            return;
+         end if;
+         Self.Window_Charged := True;
+      end if;
+
+      if Test_Hooks.Enabled then
+         Test_Hooks.Raise_If_Armed (Test_Hooks.Before_Step);
+      end if;
+      Parsing.Step
+        (Self.Parser, Self.Window, End_Of_Input => False, Result => Result);
+      if Test_Hooks.Enabled then
+         Test_Hooks.Raise_If_Armed (Test_Hooks.After_Step);
+      end if;
+      if Result.Outcome = Parsing.Event_Ready then
+         Copy_Summary (Self, Result, Summary, Error);
+      end if;
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+
+      Register_Result (Self, Result, Consumed, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+
+      case Result.Outcome is
+         when Parsing.Event_Ready       =>
+            Outcome := Event_Available;
+
+         when Parsing.Need_Input        =>
+            if not Consumed then
+               Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+            end if;
+
+         when Parsing.Document_Complete =>
+            Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+
+         when Parsing.Step_Failed       =>
+            Fail (Self, Result.Diagnostic, Error);
+
+         when Parsing.Call_Rejected     =>
+            Fail
+              (Self,
+               Errors.Invalid_State,
+               Error,
+               Serde_Offset (Self, Result.Diagnostic));
+      end case;
+   exception
+      when others =>
+         Abort_Document (Self);
+         raise;
+   end Step_Source;
+
+   procedure Step_Final
+     (Self    : in out Driver;
+      Outcome : out Driver_Outcome;
+      Summary : out Event_Summary;
+      Error   : in out Errors.Error_Info)
+   is
+      Empty    : Ada.Streams.Stream_Element_Array (1 .. 0);
+      Result   : Parsing.Step_Result;
+      Consumed : Boolean;
+   begin
+      Outcome := Need_Source;
+      Summary := (others => <>);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif not Self.Initialized
+        or else Self.Failed
+        or else Self.Document_Accepted
+        or else Self.Boundary_Pending
+        or else Self.Window_Valid
+        or else Self.Offset /= Self.Source'Length
+      then
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+         return;
+      end if;
+
+      if Test_Hooks.Enabled then
+         Test_Hooks.Raise_If_Armed (Test_Hooks.Before_Finish_Step);
+      end if;
+      Parsing.Step
+        (Self.Parser, Empty, End_Of_Input => True, Result => Result);
+      if Test_Hooks.Enabled then
+         Test_Hooks.Raise_If_Armed (Test_Hooks.After_Finish_Step);
+      end if;
+      if Result.Outcome = Parsing.Event_Ready then
+         Copy_Summary (Self, Result, Summary, Error);
+      end if;
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+
+      Register_Result (Self, Result, Consumed, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Consumed then
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+         return;
+      end if;
+
+      case Result.Outcome is
+         when Parsing.Event_Ready                        =>
+            Outcome := Event_Available;
+
+         when Parsing.Document_Complete                  =>
+            Self.Document_Accepted := True;
+            Outcome := Document_Accepted;
+
+         when Parsing.Step_Failed                        =>
+            Fail (Self, Result.Diagnostic, Error);
+
+         when Parsing.Need_Input | Parsing.Call_Rejected =>
+            Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+      end case;
+   exception
+      when others =>
+         Abort_Document (Self);
+         raise;
+   end Step_Final;
+
+   function Is_Number_Delimiter (Item : Character) return Boolean
+   is (Item in ' ' | ASCII.HT | ASCII.CR | ASCII.LF | ',' | ']' | '}');
+
+   procedure Observe_Number_End
+     (Self    : in out Driver;
+      Summary : out Event_Summary;
+      Error   : in out Errors.Error_Info)
+   is
+      Result   : Parsing.Step_Result;
+      Consumed : Boolean;
+   begin
+      Summary := (others => <>);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif not Self.Initialized
+        or else Self.Failed
+        or else Self.Document_Accepted
+        or else Self.Boundary_Pending
+        or else Self.Window_Valid
+      then
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+         return;
+      elsif Self.Offset >= Self.Source'Length then
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+         return;
+      elsif not Is_Number_Delimiter
+                  (Self.Source (Self.Source'First + Self.Offset))
+      then
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+         return;
+      end if;
+
+      Self.Window (Self.Window'First) :=
+        Ada.Streams.Stream_Element
+          (Character'Pos (Self.Source (Self.Source'First + Self.Offset)));
+      Self.Window_Valid := True;
+      Self.Window_Charged := False;
+
+      if Test_Hooks.Enabled then
+         Test_Hooks.Raise_If_Armed (Test_Hooks.Before_Step);
+      end if;
+      Parsing.Step
+        (Self.Parser, Self.Window, End_Of_Input => False, Result => Result);
+      if Test_Hooks.Enabled then
+         Test_Hooks.Raise_If_Armed (Test_Hooks.After_Step);
+      end if;
+
+      if Result.Consumed /= 0
+        or else Result.Outcome /= Parsing.Event_Ready
+        or else Parsing.Kind (Result.Item) /= Parsing.Number_End
+      then
+         Parsing.Abort_Document (Self.Parser);
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+         return;
+      end if;
+
+      Copy_Summary (Self, Result, Summary, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Register_Result (Self, Result, Consumed, Error);
+      if Error.Code = Errors.No_Error and then Consumed then
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+      end if;
+   exception
+      when others =>
+         Abort_Document (Self);
+         raise;
+   end Observe_Number_End;
+
    procedure Consume_One
      (Self     : in out Driver;
       Budget   : in out Budgets.Decode_Budget;
@@ -366,6 +764,7 @@ package body Flyology_Serde.JSON_Event_Drivers is
       elsif not Self.Initialized
         or else Self.Failed
         or else Self.Document_Accepted
+        or else Self.Boundary_Pending
       then
          Fail (Self, Errors.Invalid_State, Error, Self.Offset);
          return;
@@ -385,6 +784,15 @@ package body Flyology_Serde.JSON_Event_Drivers is
            Ada.Streams.Stream_Element
              (Character'Pos (Self.Source (Self.Source'First + Self.Offset)));
          Self.Window_Valid := True;
+         Self.Window_Charged := True;
+      elsif not Self.Window_Charged then
+         Budgets.Consume_Input (Budget, 1, Error);
+         if Error.Code /= Errors.No_Error then
+            Self.Window_Valid := False;
+            Self.Failed := True;
+            return;
+         end if;
+         Self.Window_Charged := True;
       end if;
 
       loop
@@ -478,6 +886,9 @@ package body Flyology_Serde.JSON_Event_Drivers is
       then
          Fail (Self, Errors.Invalid_State, Error, Self.Offset);
          return;
+      elsif Self.Boundary_Pending then
+         Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+         return;
       elsif Self.Document_Accepted then
          return;
       end if;
@@ -555,11 +966,17 @@ package body Flyology_Serde.JSON_Event_Drivers is
          Parsing.Abort_Document (Self.Parser);
       end if;
       Self.Window_Valid := False;
+      Self.Window_Charged := False;
+      Self.Boundary_Pending := False;
+      Self.Pending_Boundary := (others => <>);
       Self.Failed := True;
       Self.Document_Accepted := False;
    exception
       when others =>
          Self.Window_Valid := False;
+         Self.Window_Charged := False;
+         Self.Boundary_Pending := False;
+         Self.Pending_Boundary := (others => <>);
          Self.Failed := True;
          Self.Document_Accepted := False;
    end Abort_Document;
@@ -572,6 +989,9 @@ package body Flyology_Serde.JSON_Event_Drivers is
    exception
       when others =>
          Self.Window_Valid := False;
+         Self.Window_Charged := False;
+         Self.Boundary_Pending := False;
+         Self.Pending_Boundary := (others => <>);
          Self.Failed := True;
          Self.Document_Accepted := False;
    end Abort_Document;

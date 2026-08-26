@@ -36,6 +36,7 @@ procedure JSON_Reader_Tests is
 begin
    JSON_Testing.Assert_JSON_Event_Contract;
    JSON_Testing.Assert_JSON_Event_Summaries;
+   JSON_Testing.Assert_JSON_Single_Step_Driver;
    JSON_Testing.Assert_JSON_Driver_Lifecycle;
 
    --  Flyology JSON sees each source byte only after the one shared Serde

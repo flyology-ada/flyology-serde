@@ -59,6 +59,8 @@ private package Flyology_Serde.JSON_Event_Drivers is
    Maximum_Event_Summaries : constant Natural := Zero_Progress_Limit + 1;
    type Event_Summary_Array is array (Natural range <>) of Event_Summary;
 
+   type Driver_Outcome is (Event_Available, Need_Source, Document_Accepted);
+
    --  Closed progress accounting shared by the live driver and the direct
    --  conformance test. Exceeded is true before Count could wrap.
    procedure Account_Progress
@@ -73,6 +75,28 @@ private package Flyology_Serde.JSON_Event_Drivers is
      (Self : in out Driver; Error : in out Errors.Error_Info);
 
    procedure Reset (Self : in out Driver; Error : in out Errors.Error_Info);
+
+   --  Obtain and retain the sole zero-source Document_Begin boundary without
+   --  touching a decode budget or source frontier. The event reader calls
+   --  this once immediately after Initialize; legacy syntax-gate callers do
+   --  not call it.
+   procedure Prime_Document_Begin
+     (Self : in out Driver; Error : in out Errors.Error_Info);
+
+   --  Publish the retained boundary only after the caller's value preflight
+   --  succeeds. A prelatched error leaves it pending.
+   procedure Claim_Document_Begin
+     (Self    : in out Driver;
+      Summary : out Event_Summary;
+      Error   : in out Errors.Error_Info);
+
+   --  Consume one strict JSON whitespace byte while Document_Begin remains
+   --  pending. This is the only parser-advancing operation allowed before
+   --  Claim_Document_Begin and can produce no event.
+   procedure Consume_Leading_Whitespace
+     (Self   : in out Driver;
+      Budget : in out Budgets.Decode_Budget;
+      Error  : in out Errors.Error_Info);
 
    --  Consume exactly one source byte or fail. The byte is charged through
    --  Budget before Flyology JSON can inspect it. Zero-consumption events
@@ -94,6 +118,36 @@ private package Flyology_Serde.JSON_Event_Drivers is
       Summaries : out Event_Summary_Array;
       Count     : out Natural;
       Error     : in out Errors.Error_Info);
+
+   --  Perform exactly one nonfinal parser Step. A new source byte is charged
+   --  before inspection; an uncharged retained number terminator is charged
+   --  immediately before replay. Summary is eligible only for
+   --  Event_Available. Consumed reports parser consumption of the source byte.
+   procedure Step_Source
+     (Self     : in out Driver;
+      Budget   : in out Budgets.Decode_Budget;
+      Outcome  : out Driver_Outcome;
+      Consumed : out Boolean;
+      Summary  : out Event_Summary;
+      Error    : in out Errors.Error_Info);
+
+   --  Perform exactly one final-input parser Step without source bytes. This
+   --  is the physical-EOF counterpart of Step_Source: it can expose
+   --  Number_End or Document_End before a later call observes
+   --  Document_Accepted. A retained source window is invalid here.
+   procedure Step_Final
+     (Self    : in out Driver;
+      Outcome : out Driver_Outcome;
+      Summary : out Event_Summary;
+      Error   : in out Errors.Error_Info);
+
+   --  Offer the exact current source byte without charging it and require a
+   --  zero-consumption Number_End. The byte remains retained and uncharged;
+   --  Step_Source later charges and replays that identical window.
+   procedure Observe_Number_End
+     (Self    : in out Driver;
+      Summary : out Event_Summary;
+      Error   : in out Errors.Error_Info);
 
    --  Admit final input and require Flyology JSON's complete-document gate.
    procedure Finish (Self : in out Driver; Error : in out Errors.Error_Info);
@@ -135,6 +189,9 @@ private
            Name_Capacity => 0);
       Window              : One_Byte_Input := [others => 0];
       Window_Valid        : Boolean := False;
+      Window_Charged      : Boolean := False;
+      Boundary_Pending    : Boolean := False;
+      Pending_Boundary    : Event_Summary := (others => <>);
       Offset              : Natural := 0;
       Zero_Run            : Zero_Progress_Count := 0;
       Initialized         : Boolean := False;

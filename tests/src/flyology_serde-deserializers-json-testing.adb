@@ -12,6 +12,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
    use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Array;
    use type Errors.Error_Code;
+   use type JSON_Event_Drivers.Driver_Outcome;
    use type JSON_Errors.Error_Code;
    use type JSON_Event_Drivers.Event_Kind;
    use type Parsing.Parser_State;
@@ -412,6 +413,697 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       end;
    end Assert_JSON_Event_Summaries;
 
+   procedure Assert_JSON_Single_Step_Driver is
+      Policy : Policies.Decode_Policy := (others => <>);
+
+      procedure Advance_Number_Byte
+        (Driver : in out JSON_Event_Drivers.Driver;
+         Budget : in out Budgets.Decode_Budget;
+         Error  : in out Errors.Error_Info)
+      is
+         Outcome  : JSON_Event_Drivers.Driver_Outcome;
+         Summary  : JSON_Event_Drivers.Event_Summary;
+         Consumed : Boolean;
+      begin
+         JSON_Event_Drivers.Step_Source
+           (Driver, Budget, Outcome, Consumed, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Outcome = JSON_Event_Drivers.Event_Available
+                and then not Consumed
+                and then Summary.Kind = JSON_Event_Drivers.Document_Begin);
+         JSON_Event_Drivers.Step_Source
+           (Driver, Budget, Outcome, Consumed, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Outcome = JSON_Event_Drivers.Event_Available
+                and then not Consumed
+                and then Summary.Kind = JSON_Event_Drivers.Number_Begin);
+         JSON_Event_Drivers.Step_Source
+           (Driver, Budget, Outcome, Consumed, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Outcome = JSON_Event_Drivers.Event_Available
+                and then Consumed
+                and then Summary.Kind = JSON_Event_Drivers.Number_Fragment
+                and then Summary.Has_Raw_Byte
+                and then Summary.Raw_Byte = Character'Pos ('1'));
+      end Advance_Number_Byte;
+   begin
+      --  The event-reader path primes Document_Begin without reading or
+      --  charging source, and a prelatched claim leaves it pending.
+      declare
+         Input    : aliased constant String :=
+           [' ', ASCII.HT, ASCII.CR, ASCII.LF, 'n', 'u', 'l', 'l'];
+         Driver   : JSON_Event_Drivers.Driver (Input'Access);
+         Budget   : Budgets.Decode_Budget;
+         Error    : Errors.Error_Info;
+         Outcome  : JSON_Event_Drivers.Driver_Outcome;
+         Summary  : JSON_Event_Drivers.Event_Summary;
+         Consumed : Boolean;
+      begin
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         JSON_Event_Drivers.Prime_Document_Begin (Driver, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 0
+                and then Budgets.Input_Consumed (Budget) = 0);
+
+         for Expected in 1 .. 4 loop
+            JSON_Event_Drivers.Consume_Leading_Whitespace
+              (Driver, Budget, Error);
+            pragma
+              Assert
+                (Error.Code = Errors.No_Error
+                   and then JSON_Event_Drivers.Input_Offset (Driver) = Expected
+                   and then Budgets.Input_Consumed (Budget) = Expected);
+         end loop;
+
+         Errors.Fail (Error, Errors.Invalid_State, 0, Errors.Byte_Offset);
+         JSON_Event_Drivers.Claim_Document_Begin (Driver, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then Summary.Kind = JSON_Event_Drivers.Document_Begin
+                and then Summary.Source_Length = 0);
+         Errors.Reset (Error);
+         JSON_Event_Drivers.Claim_Document_Begin (Driver, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Summary.Kind = JSON_Event_Drivers.Document_Begin
+                and then Summary.Source_Offset = 0
+                and then Summary.Source_Length = 0);
+         while JSON_Event_Drivers.Input_Offset (Driver) < Input'Length loop
+            JSON_Event_Drivers.Step_Source
+              (Driver, Budget, Outcome, Consumed, Summary, Error);
+            pragma Assert (Error.Code = Errors.No_Error);
+         end loop;
+         loop
+            JSON_Event_Drivers.Step_Final (Driver, Outcome, Summary, Error);
+            exit when
+              Error.Code /= Errors.No_Error
+              or else Outcome = JSON_Event_Drivers.Document_Accepted;
+         end loop;
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then JSON_Event_Drivers.Input_Offset (Driver)
+                         = Input'Length
+                and then Budgets.Input_Consumed (Budget) = Input'Length);
+      end;
+
+      --  Non-whitespace is rejected without admission while the provisional
+      --  boundary remains the only parser event observed.
+      declare
+         Input  : aliased constant String := "n";
+         Driver : JSON_Event_Drivers.Driver (Input'Access);
+         Budget : Budgets.Decode_Budget;
+         Error  : Errors.Error_Info;
+      begin
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         JSON_Event_Drivers.Prime_Document_Begin (Driver, Error);
+         JSON_Event_Drivers.Consume_Leading_Whitespace (Driver, Budget, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 0
+                and then Budgets.Input_Consumed (Budget) = 0);
+      end;
+
+      --  Capacity denial precedes source classification and copying. The
+      --  armed copy hook survives until a later operation has capacity.
+      declare
+         Input  : aliased constant String := " ";
+         Driver : JSON_Event_Drivers.Driver (Input'Access);
+         Budget : Budgets.Decode_Budget;
+         Error  : Errors.Error_Info;
+         Raised : Boolean := False;
+      begin
+         Policy.Limits.Maximum_Input_Units := 0;
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         JSON_Event_Drivers.Prime_Document_Begin (Driver, Error);
+         Test_Hooks.Arm (Test_Hooks.Before_Source_Copy);
+         JSON_Event_Drivers.Consume_Leading_Whitespace (Driver, Budget, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Capacity_Exceeded
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 0
+                and then Budgets.Input_Consumed (Budget) = 0);
+
+         Policy := (others => <>);
+         Errors.Reset (Error);
+         JSON_Event_Drivers.Reset (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         JSON_Event_Drivers.Prime_Document_Begin (Driver, Error);
+         begin
+            JSON_Event_Drivers.Consume_Leading_Whitespace
+              (Driver, Budget, Error);
+         exception
+            when Constraint_Error =>
+               Raised := True;
+         end;
+         pragma Assert (Raised and then Budgets.Input_Consumed (Budget) = 1);
+      end;
+
+      --  A prelatched call is a no-op; relative source indexing still works
+      --  when the sole whitespace byte ends at Positive'Last.
+      declare
+         Input  : aliased constant String := [Positive'Last => ASCII.LF];
+         Driver : JSON_Event_Drivers.Driver (Input'Access);
+         Budget : Budgets.Decode_Budget;
+         Error  : Errors.Error_Info;
+      begin
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         JSON_Event_Drivers.Prime_Document_Begin (Driver, Error);
+         Errors.Fail (Error, Errors.Invalid_State, 0, Errors.Byte_Offset);
+         JSON_Event_Drivers.Consume_Leading_Whitespace (Driver, Budget, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 0
+                and then Budgets.Input_Consumed (Budget) = 0);
+         Errors.Reset (Error);
+         JSON_Event_Drivers.Consume_Leading_Whitespace (Driver, Budget, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 1
+                and then Budgets.Input_Consumed (Budget) = 1);
+      end;
+
+      --  Legacy batch entry points cannot bypass an unclaimed provisional
+      --  boundary; only leading-whitespace consumption and Claim may proceed.
+      declare
+         Input    : aliased constant String := "n";
+         Driver   : JSON_Event_Drivers.Driver (Input'Access);
+         Budget   : Budgets.Decode_Budget;
+         Error    : Errors.Error_Info;
+         Consumed : Boolean;
+      begin
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         JSON_Event_Drivers.Prime_Document_Begin (Driver, Error);
+         JSON_Event_Drivers.Consume_One (Driver, Budget, Consumed, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then not Consumed
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 0
+                and then Budgets.Input_Consumed (Budget) = 0);
+      end;
+
+      declare
+         Input  : aliased constant String := "n";
+         Driver : JSON_Event_Drivers.Driver (Input'Access);
+         Error  : Errors.Error_Info;
+      begin
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         JSON_Event_Drivers.Prime_Document_Begin (Driver, Error);
+         JSON_Event_Drivers.Finish (Driver, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 0);
+      end;
+
+      --  A legal terminator is observed without admission or consumption,
+      --  then the exact retained byte is admitted and replayed once.
+      declare
+         Input    : aliased constant String := [17 => '1', 18 => ' '];
+         Driver   : JSON_Event_Drivers.Driver (Input'Access);
+         Budget   : Budgets.Decode_Budget;
+         Error    : Errors.Error_Info;
+         Outcome  : JSON_Event_Drivers.Driver_Outcome;
+         Summary  : JSON_Event_Drivers.Event_Summary;
+         Consumed : Boolean;
+      begin
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         Advance_Number_Byte (Driver, Budget, Error);
+         pragma
+           Assert
+             (JSON_Event_Drivers.Input_Offset (Driver) = 1
+                and then Budgets.Input_Consumed (Budget) = 1);
+
+         JSON_Event_Drivers.Observe_Number_End (Driver, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Summary.Kind = JSON_Event_Drivers.Number_End
+                and then Summary.Source_Offset = 1
+                and then Summary.Source_Length = 0
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 1
+                and then Budgets.Input_Consumed (Budget) = 1);
+
+         JSON_Event_Drivers.Step_Source
+           (Driver, Budget, Outcome, Consumed, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Outcome = JSON_Event_Drivers.Event_Available
+                and then not Consumed
+                and then Summary.Kind = JSON_Event_Drivers.Document_End
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 1
+                and then Budgets.Input_Consumed (Budget) = 2);
+         JSON_Event_Drivers.Step_Source
+           (Driver, Budget, Outcome, Consumed, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Outcome = JSON_Event_Drivers.Need_Source
+                and then Consumed
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 2
+                and then Budgets.Input_Consumed (Budget) = 2);
+         JSON_Event_Drivers.Finish (Driver, Error);
+         pragma Assert (Error.Code = Errors.No_Error);
+      end;
+
+      --  Number-end observation admits exactly the strict JSON delimiter set
+      --  and no alphabetic, control, or other structural follower.
+      declare
+         Legal_Delimiters  : constant String :=
+           [' ', ASCII.HT, ASCII.CR, ASCII.LF, ',', ']', '}'];
+         Invalid_Followers : constant String :=
+           ['x', ASCII.NUL, '[', '{', ':', '"'];
+      begin
+         for Delimiter of Legal_Delimiters loop
+            declare
+               Input    : aliased constant String := "1" & Delimiter;
+               Driver   : JSON_Event_Drivers.Driver (Input'Access);
+               Budget   : Budgets.Decode_Budget;
+               Error    : Errors.Error_Info;
+               Outcome  : JSON_Event_Drivers.Driver_Outcome;
+               Summary  : JSON_Event_Drivers.Event_Summary;
+               Consumed : Boolean;
+            begin
+               JSON_Event_Drivers.Initialize (Driver, Error);
+               Budgets.Initialize (Budget, Policy.Limits);
+               Advance_Number_Byte (Driver, Budget, Error);
+               JSON_Event_Drivers.Observe_Number_End (Driver, Summary, Error);
+               pragma
+                 Assert
+                   (Error.Code = Errors.No_Error
+                      and then Summary.Kind = JSON_Event_Drivers.Number_End
+                      and then JSON_Event_Drivers.Input_Offset (Driver) = 1
+                      and then Budgets.Input_Consumed (Budget) = 1);
+               loop
+                  JSON_Event_Drivers.Step_Source
+                    (Driver, Budget, Outcome, Consumed, Summary, Error);
+                  exit when Consumed or else Error.Code /= Errors.No_Error;
+               end loop;
+               if Delimiter in ' ' | ASCII.HT | ASCII.CR | ASCII.LF then
+                  pragma
+                    Assert (Error.Code = Errors.No_Error and then Consumed);
+               else
+                  pragma
+                    Assert
+                      (Error.Code = Errors.Syntax_Error and then Consumed);
+               end if;
+               pragma
+                 Assert
+                   (JSON_Event_Drivers.Input_Offset (Driver) = 2
+                      and then Budgets.Input_Consumed (Budget) = 2);
+               JSON_Event_Drivers.Abort_Document (Driver, Error);
+            end;
+         end loop;
+
+         for Follower of Invalid_Followers loop
+            declare
+               Input   : aliased constant String := "1" & Follower;
+               Driver  : JSON_Event_Drivers.Driver (Input'Access);
+               Budget  : Budgets.Decode_Budget;
+               Error   : Errors.Error_Info;
+               Summary : JSON_Event_Drivers.Event_Summary;
+            begin
+               JSON_Event_Drivers.Initialize (Driver, Error);
+               Budgets.Initialize (Budget, Policy.Limits);
+               Advance_Number_Byte (Driver, Budget, Error);
+               JSON_Event_Drivers.Observe_Number_End (Driver, Summary, Error);
+               pragma
+                 Assert
+                   (Error.Code = Errors.Invalid_State
+                      and then JSON_Event_Drivers.Input_Offset (Driver) = 1
+                      and then Budgets.Input_Consumed (Budget) = 1);
+            end;
+
+            declare
+               Input    : aliased constant String := "1" & Follower;
+               Driver   : JSON_Event_Drivers.Driver (Input'Access);
+               Budget   : Budgets.Decode_Budget;
+               Error    : Errors.Error_Info;
+               Outcome  : JSON_Event_Drivers.Driver_Outcome;
+               Summary  : JSON_Event_Drivers.Event_Summary;
+               Consumed : Boolean;
+            begin
+               JSON_Event_Drivers.Initialize (Driver, Error);
+               Budgets.Initialize (Budget, Policy.Limits);
+               Advance_Number_Byte (Driver, Budget, Error);
+               loop
+                  JSON_Event_Drivers.Step_Source
+                    (Driver, Budget, Outcome, Consumed, Summary, Error);
+                  exit when Consumed or else Error.Code /= Errors.No_Error;
+               end loop;
+               pragma
+                 Assert
+                   (Error.Code = Errors.Syntax_Error
+                      and then Consumed
+                      and then JSON_Event_Drivers.Input_Offset (Driver) = 2
+                      and then Budgets.Input_Consumed (Budget) = 2);
+            end;
+         end loop;
+      end;
+
+      --  A prelatched observation leaves the delimiter unoffered. Abort then
+      --  clears a retained uncharged delimiter, and Reset permits full reuse.
+      declare
+         Input    : aliased constant String := "1 ";
+         Driver   : JSON_Event_Drivers.Driver (Input'Access);
+         Budget   : Budgets.Decode_Budget;
+         Error    : Errors.Error_Info;
+         Summary  : JSON_Event_Drivers.Event_Summary;
+         Consumed : Boolean;
+      begin
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         Advance_Number_Byte (Driver, Budget, Error);
+         Errors.Fail (Error, Errors.Invalid_State, 0, Errors.Byte_Offset);
+         JSON_Event_Drivers.Observe_Number_End (Driver, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then Summary.Kind = JSON_Event_Drivers.Document_Begin
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 1
+                and then Budgets.Input_Consumed (Budget) = 1);
+         Errors.Reset (Error);
+         JSON_Event_Drivers.Observe_Number_End (Driver, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Summary.Kind = JSON_Event_Drivers.Number_End);
+         JSON_Event_Drivers.Abort_Document (Driver, Error);
+         Errors.Reset (Error);
+         JSON_Event_Drivers.Reset (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         while JSON_Event_Drivers.Input_Offset (Driver) < Input'Length loop
+            JSON_Event_Drivers.Consume_One (Driver, Budget, Consumed, Error);
+            pragma Assert (Error.Code = Errors.No_Error and then Consumed);
+         end loop;
+         JSON_Event_Drivers.Finish (Driver, Error);
+         pragma Assert (Error.Code = Errors.No_Error);
+      end;
+
+      --  Denial before replay consumes neither the retained terminator nor a
+      --  second budget unit and poisons the operation until reset.
+      declare
+         Input    : aliased constant String := "1 ";
+         Driver   : JSON_Event_Drivers.Driver (Input'Access);
+         Budget   : Budgets.Decode_Budget;
+         Error    : Errors.Error_Info;
+         Outcome  : JSON_Event_Drivers.Driver_Outcome;
+         Summary  : JSON_Event_Drivers.Event_Summary;
+         Consumed : Boolean;
+      begin
+         Policy.Limits.Maximum_Input_Units := 1;
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         Advance_Number_Byte (Driver, Budget, Error);
+         JSON_Event_Drivers.Observe_Number_End (Driver, Summary, Error);
+         JSON_Event_Drivers.Step_Source
+           (Driver, Budget, Outcome, Consumed, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Capacity_Exceeded
+                and then not Consumed
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 1
+                and then Budgets.Input_Consumed (Budget) = 1);
+         Errors.Reset (Error);
+         JSON_Event_Drivers.Step_Source
+           (Driver, Budget, Outcome, Consumed, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then not Consumed
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 1
+                and then Budgets.Input_Consumed (Budget) = 1);
+
+         Policy := (others => <>);
+         Errors.Reset (Error);
+         JSON_Event_Drivers.Reset (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         while JSON_Event_Drivers.Input_Offset (Driver) < Input'Length loop
+            JSON_Event_Drivers.Consume_One (Driver, Budget, Consumed, Error);
+            pragma Assert (Error.Code = Errors.No_Error and then Consumed);
+         end loop;
+         JSON_Event_Drivers.Finish (Driver, Error);
+         pragma Assert (Error.Code = Errors.No_Error);
+      end;
+
+      --  A first-byte denial occurs before the source-copy hook. The armed
+      --  hook remains pending and fires only after a later successful charge.
+      declare
+         Input    : aliased constant String := "n";
+         Driver   : JSON_Event_Drivers.Driver (Input'Access);
+         Budget   : Budgets.Decode_Budget;
+         Error    : Errors.Error_Info;
+         Outcome  : JSON_Event_Drivers.Driver_Outcome;
+         Summary  : JSON_Event_Drivers.Event_Summary;
+         Consumed : Boolean;
+         Raised   : Boolean := False;
+      begin
+         Policy.Limits.Maximum_Input_Units := 0;
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         Test_Hooks.Arm (Test_Hooks.Before_Source_Copy);
+         JSON_Event_Drivers.Step_Source
+           (Driver, Budget, Outcome, Consumed, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Capacity_Exceeded
+                and then not Consumed
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 0
+                and then Budgets.Input_Consumed (Budget) = 0);
+
+         Errors.Reset (Error);
+         Policy := (others => <>);
+         JSON_Event_Drivers.Reset (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         begin
+            JSON_Event_Drivers.Step_Source
+              (Driver, Budget, Outcome, Consumed, Summary, Error);
+         exception
+            when Constraint_Error =>
+               Raised := True;
+         end;
+         pragma Assert (Raised and then Budgets.Input_Consumed (Budget) = 1);
+      end;
+
+      --  Physical EOF exposes Number_End, Document_End, and final acceptance
+      --  as three separate caller-driven final steps.
+      declare
+         Input   : aliased constant String := "1";
+         Driver  : JSON_Event_Drivers.Driver (Input'Access);
+         Budget  : Budgets.Decode_Budget;
+         Error   : Errors.Error_Info;
+         Outcome : JSON_Event_Drivers.Driver_Outcome;
+         Summary : JSON_Event_Drivers.Event_Summary;
+      begin
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         Advance_Number_Byte (Driver, Budget, Error);
+
+         JSON_Event_Drivers.Step_Final (Driver, Outcome, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Outcome = JSON_Event_Drivers.Event_Available
+                and then Summary.Kind = JSON_Event_Drivers.Number_End);
+         JSON_Event_Drivers.Step_Final (Driver, Outcome, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Outcome = JSON_Event_Drivers.Event_Available
+                and then Summary.Kind = JSON_Event_Drivers.Document_End);
+         JSON_Event_Drivers.Step_Final (Driver, Outcome, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Outcome = JSON_Event_Drivers.Document_Accepted
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 1
+                and then Budgets.Input_Consumed (Budget) = 1);
+
+         Errors.Reset (Error);
+         JSON_Event_Drivers.Step_Final (Driver, Outcome, Summary, Error);
+         pragma Assert (Error.Code = Errors.Invalid_State);
+      end;
+
+      --  Relative indexing remains valid at the top of Positive, both at EOF
+      --  and while retaining and replaying a two-byte delimiter window.
+      declare
+         Input   : aliased constant String := [Positive'Last => '1'];
+         Driver  : JSON_Event_Drivers.Driver (Input'Access);
+         Budget  : Budgets.Decode_Budget;
+         Error   : Errors.Error_Info;
+         Outcome : JSON_Event_Drivers.Driver_Outcome;
+         Summary : JSON_Event_Drivers.Event_Summary;
+      begin
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         Advance_Number_Byte (Driver, Budget, Error);
+         JSON_Event_Drivers.Step_Final (Driver, Outcome, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Summary.Kind = JSON_Event_Drivers.Number_End);
+      end;
+
+      declare
+         Input    : aliased constant String :=
+           [Positive'Last - 1 => '1', Positive'Last => ASCII.HT];
+         Driver   : JSON_Event_Drivers.Driver (Input'Access);
+         Budget   : Budgets.Decode_Budget;
+         Error    : Errors.Error_Info;
+         Outcome  : JSON_Event_Drivers.Driver_Outcome;
+         Summary  : JSON_Event_Drivers.Event_Summary;
+         Consumed : Boolean;
+      begin
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         Advance_Number_Byte (Driver, Budget, Error);
+         JSON_Event_Drivers.Observe_Number_End (Driver, Summary, Error);
+         pragma Assert (Error.Code = Errors.No_Error);
+         loop
+            JSON_Event_Drivers.Step_Source
+              (Driver, Budget, Outcome, Consumed, Summary, Error);
+            exit when Consumed or else Error.Code /= Errors.No_Error;
+         end loop;
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Consumed
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 2
+                and then Budgets.Input_Consumed (Budget) = 2);
+      end;
+
+      --  Final input is rejected before physical EOF and while an uncharged
+      --  delimiter is retained.
+      declare
+         Input   : aliased constant String := "n";
+         Driver  : JSON_Event_Drivers.Driver (Input'Access);
+         Error   : Errors.Error_Info;
+         Outcome : JSON_Event_Drivers.Driver_Outcome;
+         Summary : JSON_Event_Drivers.Event_Summary;
+      begin
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         JSON_Event_Drivers.Step_Final (Driver, Outcome, Summary, Error);
+         pragma Assert (Error.Code = Errors.Invalid_State);
+      end;
+
+      declare
+         Input   : aliased constant String := "1 ";
+         Driver  : JSON_Event_Drivers.Driver (Input'Access);
+         Budget  : Budgets.Decode_Budget;
+         Error   : Errors.Error_Info;
+         Outcome : JSON_Event_Drivers.Driver_Outcome;
+         Summary : JSON_Event_Drivers.Event_Summary;
+      begin
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         Advance_Number_Byte (Driver, Budget, Error);
+         JSON_Event_Drivers.Observe_Number_End (Driver, Summary, Error);
+         JSON_Event_Drivers.Step_Final (Driver, Outcome, Summary, Error);
+         pragma Assert (Error.Code = Errors.Invalid_State);
+      end;
+
+      declare
+         Input    : aliased constant String := "[";
+         Driver   : JSON_Event_Drivers.Driver (Input'Access);
+         Budget   : Budgets.Decode_Budget;
+         Error    : Errors.Error_Info;
+         Outcome  : JSON_Event_Drivers.Driver_Outcome;
+         Summary  : JSON_Event_Drivers.Event_Summary;
+         Consumed : Boolean;
+      begin
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         while JSON_Event_Drivers.Input_Offset (Driver) < Input'Length loop
+            JSON_Event_Drivers.Step_Source
+              (Driver, Budget, Outcome, Consumed, Summary, Error);
+            pragma Assert (Error.Code = Errors.No_Error);
+         end loop;
+         JSON_Event_Drivers.Step_Final (Driver, Outcome, Summary, Error);
+         pragma Assert (Error.Code = Errors.Syntax_Error);
+      end;
+
+      --  A prelatched error prevents every single-step primitive from
+      --  inspecting, charging, or advancing its input.
+      declare
+         Input    : aliased constant String := "1";
+         Driver   : JSON_Event_Drivers.Driver (Input'Access);
+         Budget   : Budgets.Decode_Budget;
+         Error    : Errors.Error_Info;
+         Outcome  : JSON_Event_Drivers.Driver_Outcome;
+         Summary  : JSON_Event_Drivers.Event_Summary;
+         Consumed : Boolean;
+      begin
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         Errors.Fail (Error, Errors.Invalid_State, 0, Errors.Byte_Offset);
+         JSON_Event_Drivers.Step_Source
+           (Driver, Budget, Outcome, Consumed, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then Outcome = JSON_Event_Drivers.Need_Source
+                and then not Consumed
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 0
+                and then Budgets.Input_Consumed (Budget) = 0);
+
+         Errors.Reset (Error);
+         Advance_Number_Byte (Driver, Budget, Error);
+         Errors.Fail (Error, Errors.Invalid_State, 0, Errors.Byte_Offset);
+         JSON_Event_Drivers.Step_Final (Driver, Outcome, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then Outcome = JSON_Event_Drivers.Need_Source
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 1
+                and then Budgets.Input_Consumed (Budget) = 1);
+      end;
+
+      --  A non-delimiter follower is admitted only by the later normal step
+      --  and is then reported as the parser's syntax primary.
+      declare
+         Input    : aliased constant String := "1x";
+         Driver   : JSON_Event_Drivers.Driver (Input'Access);
+         Budget   : Budgets.Decode_Budget;
+         Error    : Errors.Error_Info;
+         Outcome  : JSON_Event_Drivers.Driver_Outcome;
+         Summary  : JSON_Event_Drivers.Event_Summary;
+         Consumed : Boolean;
+      begin
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         Advance_Number_Byte (Driver, Budget, Error);
+         JSON_Event_Drivers.Step_Source
+           (Driver, Budget, Outcome, Consumed, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Syntax_Error
+                and then Consumed
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 2
+                and then Budgets.Input_Consumed (Budget) = 2);
+      end;
+   end Assert_JSON_Single_Step_Driver;
+
    procedure Assert_JSON_Driver_Lifecycle is
       Input    : aliased constant String := "truX";
       Driver   : JSON_Event_Drivers.Driver (Input'Access);
@@ -426,6 +1118,28 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             JSON_Event_Drivers.Consume_One (Driver, Budget, Consumed, Error);
          end loop;
       end Run_To_Failure;
+
+      procedure Reset_And_Complete
+        (Item          : in out JSON_Event_Drivers.Driver;
+         Item_Budget   : in out Budgets.Decode_Budget;
+         Source_Length : Natural;
+         Item_Error    : in out Errors.Error_Info)
+      is
+         Item_Consumed : Boolean;
+      begin
+         Errors.Reset (Item_Error);
+         JSON_Event_Drivers.Reset (Item, Item_Error);
+         Budgets.Initialize (Item_Budget, Policy.Limits);
+         while JSON_Event_Drivers.Input_Offset (Item) < Source_Length loop
+            JSON_Event_Drivers.Consume_One
+              (Item, Item_Budget, Item_Consumed, Item_Error);
+            pragma
+              Assert
+                (Item_Error.Code = Errors.No_Error and then Item_Consumed);
+         end loop;
+         JSON_Event_Drivers.Finish (Item, Item_Error);
+         pragma Assert (Item_Error.Code = Errors.No_Error);
+      end Reset_And_Complete;
    begin
       JSON_Event_Drivers.Initialize (Driver, Error);
       pragma Assert (Error.Code = Errors.No_Error);
@@ -572,6 +1286,192 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Exercise (Test_Hooks.After_Finish_Step, True, Keep_Summaries);
          end loop;
       end;
+
+      --  Every new one-step and provisional-boundary call cleans up an
+      --  injected exception before Reset starts a complete new document.
+      for Point in Test_Hooks.Before_Source_Copy .. Test_Hooks.After_Step loop
+         declare
+            Valid_Input  : aliased constant String := "null";
+            Valid_Driver : JSON_Event_Drivers.Driver (Valid_Input'Access);
+            Valid_Budget : Budgets.Decode_Budget;
+            Outcome      : JSON_Event_Drivers.Driver_Outcome;
+            Summary      : JSON_Event_Drivers.Event_Summary;
+            Raised       : Boolean := False;
+         begin
+            Errors.Reset (Error);
+            JSON_Event_Drivers.Initialize (Valid_Driver, Error);
+            Budgets.Initialize (Valid_Budget, Policy.Limits);
+            Test_Hooks.Arm (Point);
+            begin
+               JSON_Event_Drivers.Step_Source
+                 (Valid_Driver,
+                  Valid_Budget,
+                  Outcome,
+                  Consumed,
+                  Summary,
+                  Error);
+            exception
+               when Constraint_Error =>
+                  Raised := True;
+            end;
+            pragma Assert (Raised);
+            Reset_And_Complete
+              (Valid_Driver, Valid_Budget, Valid_Input'Length, Error);
+         end;
+      end loop;
+
+      for Point in Test_Hooks.Before_Step .. Test_Hooks.After_Step loop
+         declare
+            Valid_Input  : aliased constant String := "null";
+            Valid_Driver : JSON_Event_Drivers.Driver (Valid_Input'Access);
+            Valid_Budget : Budgets.Decode_Budget;
+            Raised       : Boolean := False;
+         begin
+            Errors.Reset (Error);
+            JSON_Event_Drivers.Initialize (Valid_Driver, Error);
+            Budgets.Initialize (Valid_Budget, Policy.Limits);
+            Test_Hooks.Arm (Point);
+            begin
+               JSON_Event_Drivers.Prime_Document_Begin (Valid_Driver, Error);
+            exception
+               when Constraint_Error =>
+                  Raised := True;
+            end;
+            pragma Assert (Raised);
+            Reset_And_Complete
+              (Valid_Driver, Valid_Budget, Valid_Input'Length, Error);
+         end;
+      end loop;
+
+      for Point in Test_Hooks.Before_Source_Copy .. Test_Hooks.After_Step loop
+         declare
+            Valid_Input  : aliased constant String := " null";
+            Valid_Driver : JSON_Event_Drivers.Driver (Valid_Input'Access);
+            Valid_Budget : Budgets.Decode_Budget;
+            Raised       : Boolean := False;
+         begin
+            Errors.Reset (Error);
+            JSON_Event_Drivers.Initialize (Valid_Driver, Error);
+            Budgets.Initialize (Valid_Budget, Policy.Limits);
+            JSON_Event_Drivers.Prime_Document_Begin (Valid_Driver, Error);
+            Test_Hooks.Arm (Point);
+            begin
+               JSON_Event_Drivers.Consume_Leading_Whitespace
+                 (Valid_Driver, Valid_Budget, Error);
+            exception
+               when Constraint_Error =>
+                  Raised := True;
+            end;
+            pragma Assert (Raised);
+            Reset_And_Complete
+              (Valid_Driver, Valid_Budget, Valid_Input'Length, Error);
+         end;
+      end loop;
+
+      for Point in
+        Test_Hooks.Before_Finish_Step .. Test_Hooks.After_Finish_Step
+      loop
+         declare
+            Valid_Input  : aliased constant String := "null";
+            Valid_Driver : JSON_Event_Drivers.Driver (Valid_Input'Access);
+            Valid_Budget : Budgets.Decode_Budget;
+            Outcome      : JSON_Event_Drivers.Driver_Outcome;
+            Summary      : JSON_Event_Drivers.Event_Summary;
+            Raised       : Boolean := False;
+         begin
+            Errors.Reset (Error);
+            JSON_Event_Drivers.Initialize (Valid_Driver, Error);
+            Budgets.Initialize (Valid_Budget, Policy.Limits);
+            while JSON_Event_Drivers.Input_Offset (Valid_Driver)
+              < Valid_Input'Length
+            loop
+               JSON_Event_Drivers.Consume_One
+                 (Valid_Driver, Valid_Budget, Consumed, Error);
+            end loop;
+            Test_Hooks.Arm (Point);
+            begin
+               JSON_Event_Drivers.Step_Final
+                 (Valid_Driver, Outcome, Summary, Error);
+            exception
+               when Constraint_Error =>
+                  Raised := True;
+            end;
+            pragma Assert (Raised);
+            Reset_And_Complete
+              (Valid_Driver, Valid_Budget, Valid_Input'Length, Error);
+         end;
+      end loop;
+
+      for Point in Test_Hooks.Before_Step .. Test_Hooks.After_Step loop
+         declare
+            Valid_Input  : aliased constant String := "1 ";
+            Valid_Driver : JSON_Event_Drivers.Driver (Valid_Input'Access);
+            Valid_Budget : Budgets.Decode_Budget;
+            Summary      : JSON_Event_Drivers.Event_Summary;
+            Raised       : Boolean := False;
+         begin
+            Errors.Reset (Error);
+            JSON_Event_Drivers.Initialize (Valid_Driver, Error);
+            Budgets.Initialize (Valid_Budget, Policy.Limits);
+            JSON_Event_Drivers.Consume_One
+              (Valid_Driver, Valid_Budget, Consumed, Error);
+            pragma
+              Assert
+                (Error.Code = Errors.No_Error
+                   and then Consumed
+                   and then JSON_Event_Drivers.Input_Offset (Valid_Driver)
+                            = 1);
+            Test_Hooks.Arm (Point);
+            begin
+               JSON_Event_Drivers.Observe_Number_End
+                 (Valid_Driver, Summary, Error);
+            exception
+               when Constraint_Error =>
+                  Raised := True;
+            end;
+            pragma Assert (Raised);
+            Reset_And_Complete
+              (Valid_Driver, Valid_Budget, Valid_Input'Length, Error);
+         end;
+      end loop;
+
+      for Point in Test_Hooks.Before_Step .. Test_Hooks.After_Step loop
+         declare
+            Valid_Input  : aliased constant String := "1 ";
+            Valid_Driver : JSON_Event_Drivers.Driver (Valid_Input'Access);
+            Valid_Budget : Budgets.Decode_Budget;
+            Outcome      : JSON_Event_Drivers.Driver_Outcome;
+            Summary      : JSON_Event_Drivers.Event_Summary;
+            Raised       : Boolean := False;
+         begin
+            Errors.Reset (Error);
+            JSON_Event_Drivers.Initialize (Valid_Driver, Error);
+            Budgets.Initialize (Valid_Budget, Policy.Limits);
+            JSON_Event_Drivers.Consume_One
+              (Valid_Driver, Valid_Budget, Consumed, Error);
+            JSON_Event_Drivers.Observe_Number_End
+              (Valid_Driver, Summary, Error);
+            pragma Assert (Error.Code = Errors.No_Error);
+            Test_Hooks.Arm (Point);
+            begin
+               JSON_Event_Drivers.Step_Source
+                 (Valid_Driver,
+                  Valid_Budget,
+                  Outcome,
+                  Consumed,
+                  Summary,
+                  Error);
+            exception
+               when Constraint_Error =>
+                  Raised := True;
+            end;
+            pragma
+              Assert
+                (Raised and then Budgets.Input_Consumed (Valid_Budget) = 2);
+            Reset_And_Complete
+              (Valid_Driver, Valid_Budget, Valid_Input'Length, Error);
+         end;
+      end loop;
    end Assert_JSON_Driver_Lifecycle;
 
 end Flyology_Serde.Deserializers.JSON.Testing;
