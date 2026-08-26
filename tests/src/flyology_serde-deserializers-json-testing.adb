@@ -2,10 +2,12 @@ with Ada.Streams;
 with Flyology_JSON.Errors;
 with Flyology_JSON.Profiles;
 with Flyology_Serde.JSON_Event_Driver_Test_Hooks;
+with Flyology_Serde.JSON_Preflights;
 
 package body Flyology_Serde.Deserializers.JSON.Testing is
    package Parsing renames JSON_Event_Drivers.Parsing;
    package JSON_Errors renames Flyology_JSON.Errors;
+   package Preflights renames Flyology_Serde.JSON_Preflights;
    package Test_Hooks renames Flyology_Serde.JSON_Event_Driver_Test_Hooks;
 
    use type Ada.Streams.Stream_Element_Count;
@@ -17,6 +19,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
    use type JSON_Event_Drivers.Event_Kind;
    use type Parsing.Parser_State;
    use type Parsing.Step_Outcome;
+   use type Preflights.Number_Summary;
+   use type Preflights.String_Summary;
 
    function Syntax_Input_Offset (Self : Reader) return Natural
    is (JSON_Event_Drivers.Input_Offset (Self.Syntax));
@@ -1473,5 +1477,468 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          end;
       end loop;
    end Assert_JSON_Driver_Lifecycle;
+
+   procedure Assert_JSON_Preflights is
+      Error          : Errors.Error_Info;
+      String_Result  : Preflights.String_Summary;
+      Number_Result  : Preflights.Number_Summary;
+      type Short_Number_Array is array (Positive range <>) of String (1 .. 2);
+      Bad_Numbers    : constant Short_Number_Array := ["01", "1e"];
+      Simple_Escapes : constant String :=
+        ['"', '\', '/', 'b', 'f', 'n', 'r', 't'];
+
+      procedure Check_String
+        (Input : String; Expected_Raw : Natural; Expected_Decoded : Natural) is
+      begin
+         Errors.Reset (Error);
+         Preflights.Scan_String (Input, 0, Input'Length, String_Result, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then String_Result.Raw_Length = Expected_Raw
+                and then String_Result.Decoded_Length = Expected_Decoded);
+      end Check_String;
+
+      procedure Check_Number
+        (Input             : String;
+         Expected_Raw      : Natural;
+         Expected_Integer  : Boolean;
+         Expected_Negative : Boolean) is
+      begin
+         Errors.Reset (Error);
+         Preflights.Scan_Number (Input, 0, Input'Length, Number_Result, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Number_Result.Raw_Length = Expected_Raw
+                and then Number_Result.Is_Integer = Expected_Integer
+                and then Number_Result.Negative = Expected_Negative);
+      end Check_Number;
+
+      procedure Reject_String
+        (Input           : String;
+         Limit           : Natural;
+         Expected_Code   : Errors.Error_Code;
+         Expected_Offset : Natural) is
+      begin
+         Errors.Reset (Error);
+         Preflights.Scan_String (Input, 0, Limit, String_Result, Error);
+         pragma
+           Assert
+             (Error.Code = Expected_Code
+                and then Error.Input_Offset = Expected_Offset
+                and then String_Result = (others => <>),
+              "string reject:"
+                & Error.Code'Image
+                & Error.Input_Offset'Image
+                & Expected_Code'Image
+                & Expected_Offset'Image
+                & Input'Length'Image
+                & Limit'Image);
+      end Reject_String;
+
+      procedure Reject_Number
+        (Input           : String;
+         Limit           : Natural;
+         Expected_Code   : Errors.Error_Code;
+         Expected_Offset : Natural) is
+      begin
+         Errors.Reset (Error);
+         Preflights.Scan_Number (Input, 0, Limit, Number_Result, Error);
+         pragma
+           Assert
+             (Error.Code = Expected_Code
+                and then Error.Input_Offset = Expected_Offset
+                and then Number_Result = (others => <>));
+      end Reject_Number;
+   begin
+      Check_String ("""abc""", 5, 3);
+      Check_String ("""\u20AC""", 8, 3);
+      Check_String ("""\uD834\uDD1E""", 14, 4);
+      Check_String
+        ([1 => '"',
+          2 => Character'Val (16#E2#),
+          3 => Character'Val (16#82#),
+          4 => Character'Val (16#AC#),
+          5 => '"'],
+         5,
+         3);
+      Check_String
+        ([1 => '"',
+          2 => Character'Val (16#F0#),
+          3 => Character'Val (16#9F#),
+          4 => Character'Val (16#98#),
+          5 => Character'Val (16#80#),
+          6 => '"'],
+         6,
+         4);
+      for Escape of Simple_Escapes loop
+         Check_String ([1 => '"', 2 => '\', 3 => Escape, 4 => '"'], 4, 1);
+      end loop;
+
+      Reject_String ([1 => '"', 2 => '\'], 2, Errors.Syntax_Error, 2);
+      Reject_String
+        ([1 => '"', 2 => '\', 3 => 'u', 4 => '1'], 4, Errors.Syntax_Error, 3);
+      Reject_String
+        ([1 => '"', 2 => '\', 3 => 'u'], 3, Errors.Syntax_Error, 3);
+      Reject_String
+        ([1 => '"', 2 => '\', 3 => 'u', 4 => '1', 5 => '2'],
+         5,
+         Errors.Syntax_Error,
+         3);
+      Reject_String
+        ([1 => '"', 2 => '\', 3 => 'u', 4 => '1', 5 => '2', 6 => '3'],
+         6,
+         Errors.Syntax_Error,
+         3);
+      Reject_String ("""\uG234""", 8, Errors.Syntax_Error, 3);
+      Reject_String ("""\u1G34""", 8, Errors.Syntax_Error, 4);
+      Reject_String ("""\u12G4""", 8, Errors.Syntax_Error, 5);
+      Reject_String ("""\u123G""", 8, Errors.Syntax_Error, 6);
+      Reject_String ("""\q""", 4, Errors.Syntax_Error, 2);
+      Reject_String
+        ([1 => '"', 2 => ASCII.NUL, 3 => '"'], 3, Errors.Syntax_Error, 1);
+      Reject_String ("""\uDC00""", 8, Errors.Invalid_Text, 3);
+      Reject_String ("""\uD800x""", 9, Errors.Invalid_Text, 7);
+      Reject_String
+        ([1 => '"',
+          2 => '\',
+          3 => 'u',
+          4 => 'D',
+          5 => '8',
+          6 => '0',
+          7 => '0'],
+         7,
+         Errors.Invalid_Text,
+         7);
+      Reject_String
+        ([1 => '"',
+          2 => '\',
+          3 => 'u',
+          4 => 'D',
+          5 => '8',
+          6 => '0',
+          7 => '0',
+          8 => '\'],
+         8,
+         Errors.Invalid_Text,
+         7);
+      for Low_Digits in 0 .. 3 loop
+         declare
+            Complete : constant String := """\uD800\uDC00""";
+            Last     : constant Positive := 9 + Low_Digits;
+         begin
+            Reject_String
+              (Complete (Complete'First .. Last),
+               Last,
+               Errors.Syntax_Error,
+               9);
+         end;
+      end loop;
+      Reject_String ("""\uD800\u0041""", 14, Errors.Invalid_Text, 9);
+
+      declare
+         Pair : constant String := """\uD834\uDD1E""";
+      begin
+         for Limit in 0 .. Pair'Length - 1 loop
+            Reject_String (Pair, Limit, Errors.Capacity_Exceeded, Limit);
+         end loop;
+      end;
+
+      declare
+         Input : constant String := """a""";
+      begin
+         for Limit in 0 .. Input'Length - 1 loop
+            Errors.Reset (Error);
+            Preflights.Scan_String (Input, 0, Limit, String_Result, Error);
+            pragma
+              Assert
+                (Error.Code = Errors.Capacity_Exceeded
+                   and then Error.Input_Offset = Limit
+                   and then String_Result = (others => <>));
+         end loop;
+      end;
+
+      declare
+         Input : constant String :=
+           [1 => '"', 2 => Character'Val (16#C3#), 3 => '"'];
+      begin
+         Errors.Reset (Error);
+         Preflights.Scan_String (Input, 0, Input'Length, String_Result, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_Text
+                and then Error.Input_Offset = 1
+                and then String_Result.Raw_Length = 0);
+      end;
+
+      Reject_String
+        ([1 => '"',
+          2 => Character'Val (16#C0#),
+          3 => Character'Val (16#AF#),
+          4 => '"'],
+         4,
+         Errors.Invalid_Text,
+         1);
+      Reject_String
+        ([1 => '"',
+          2 => Character'Val (16#E2#),
+          3 => '(',
+          4 => Character'Val (16#A1#),
+          5 => '"'],
+         5,
+         Errors.Invalid_Text,
+         2);
+      Reject_String
+        ([1 => '"',
+          2 => Character'Val (16#ED#),
+          3 => Character'Val (16#A0#),
+          4 => Character'Val (16#80#),
+          5 => '"'],
+         5,
+         Errors.Invalid_Text,
+         2);
+      Reject_String
+        ([1 => '"',
+          2 => Character'Val (16#E2#),
+          3 => Character'Val (16#82#),
+          4 => '"'],
+         4,
+         Errors.Invalid_Text,
+         1);
+      Reject_String
+        ([1 => '"',
+          2 => Character'Val (16#F1#),
+          3 => Character'Val (16#80#),
+          4 => Character'Val (16#80#),
+          5 => '"'],
+         5,
+         Errors.Invalid_Text,
+         1);
+      Reject_String
+        ([1 => '"',
+          2 => Character'Val (16#F4#),
+          3 => Character'Val (16#90#),
+          4 => Character'Val (16#80#),
+          5 => Character'Val (16#80#),
+          6 => '"'],
+         6,
+         Errors.Invalid_Text,
+         2);
+
+      declare
+         Input : constant String :=
+           [Positive'Last - 1 => '"', Positive'Last => '"'];
+      begin
+         Errors.Reset (Error);
+         Preflights.Scan_String (Input, 0, Input'Length, String_Result, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then String_Result.Raw_Length = 2
+                and then String_Result.Decoded_Length = 0);
+      end;
+
+      Check_Number ("0", 1, True, False);
+      Check_Number ("-1", 2, True, True);
+      Check_Number ("1.5", 3, False, False);
+      Check_Number ("1e+2", 4, False, False);
+      Check_Number ("12x", 2, True, False);
+      Check_Number ("-0", 2, True, True);
+      Reject_Number ("", 0, Errors.Syntax_Error, 0);
+      Reject_Number ("-", 1, Errors.Syntax_Error, 1);
+      Reject_Number ("1.", 2, Errors.Syntax_Error, 2);
+      Reject_Number ("1E", 2, Errors.Syntax_Error, 2);
+      Reject_Number ("1e+", 3, Errors.Syntax_Error, 3);
+      Reject_Number ("1e-", 3, Errors.Syntax_Error, 3);
+      Reject_Number ("x", 1, Errors.Syntax_Error, 0);
+
+      declare
+         Input : constant String := "1.2e+3 ";
+      begin
+         for Limit in 0 .. Input'Length - 1 loop
+            Reject_Number (Input, Limit, Errors.Capacity_Exceeded, Limit);
+         end loop;
+      end;
+
+      declare
+         Input : constant String := "12 ";
+      begin
+         Errors.Reset (Error);
+         Preflights.Scan_Number (Input, 0, 2, Number_Result, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Capacity_Exceeded
+                and then Error.Input_Offset = 2
+                and then Number_Result.Raw_Length = 0);
+      end;
+
+      for Input of Bad_Numbers loop
+         Errors.Reset (Error);
+         Preflights.Scan_Number (Input, 0, Input'Length, Number_Result, Error);
+         pragma Assert (Error.Code = Errors.Syntax_Error);
+      end loop;
+
+      declare
+         Input : constant String := [Positive'Last => '7'];
+      begin
+         Errors.Reset (Error);
+         Preflights.Scan_Number (Input, 0, Input'Length, Number_Result, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Number_Result.Raw_Length = 1);
+      end;
+
+      Errors.Reset (Error);
+      Preflights.Match_Literal ("true", 0, 4, "true", Error);
+      pragma Assert (Error.Code = Errors.No_Error);
+
+      Errors.Reset (Error);
+      Preflights.Match_Literal ("truX", 0, 4, "true", Error);
+      pragma
+        Assert
+          (Error.Code = Errors.Syntax_Error and then Error.Input_Offset = 3);
+
+      Errors.Reset (Error);
+      Preflights.Match_Literal ("Xrue", 0, 3, "true", Error);
+      pragma
+        Assert
+          (Error.Code = Errors.Syntax_Error and then Error.Input_Offset = 0);
+
+      Errors.Reset (Error);
+      Preflights.Match_Literal ("tXue", 0, 3, "true", Error);
+      pragma
+        Assert
+          (Error.Code = Errors.Syntax_Error and then Error.Input_Offset = 1);
+
+      Errors.Reset (Error);
+      Preflights.Match_Literal ("tru", 0, 3, "true", Error);
+      pragma
+        Assert
+          (Error.Code = Errors.Syntax_Error and then Error.Input_Offset = 0);
+
+      Errors.Reset (Error);
+      Preflights.Match_Literal ("tX", 0, 2, "true", Error);
+      pragma
+        Assert
+          (Error.Code = Errors.Syntax_Error and then Error.Input_Offset = 0);
+
+      Errors.Reset (Error);
+      Preflights.Match_Literal ("tr", 0, 1, "true", Error);
+      pragma
+        Assert
+          (Error.Code = Errors.Syntax_Error and then Error.Input_Offset = 0);
+
+      Errors.Reset (Error);
+      Preflights.Match_Literal ("true", 0, 3, "true", Error);
+      pragma
+        Assert
+          (Error.Code = Errors.Capacity_Exceeded
+             and then Error.Input_Offset = 3);
+
+      Errors.Reset (Error);
+      Preflights.Match_Literal ("truX", 0, 3, "true", Error);
+      pragma
+        Assert
+          (Error.Code = Errors.Capacity_Exceeded
+             and then Error.Input_Offset = 3);
+
+      declare
+         Input : constant String :=
+           [Positive'Last - 3 => 'n',
+            Positive'Last - 2 => 'u',
+            Positive'Last - 1 => 'l',
+            Positive'Last     => 'l'];
+      begin
+         Errors.Reset (Error);
+         Preflights.Match_Literal (Input, 0, 4, "null", Error);
+         pragma Assert (Error.Code = Errors.No_Error);
+      end;
+
+      declare
+         Source  : constant String := "xx""a""";
+         Literal : constant String :=
+           [17 => 't', 18 => 'r', 19 => 'u', 20 => 'e'];
+      begin
+         Errors.Reset (Error);
+         Preflights.Scan_String (Source, 2, 3, String_Result, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then String_Result.Raw_Length = 3
+                and then String_Result.Decoded_Length = 1);
+
+         Errors.Reset (Error);
+         Preflights.Scan_Number ("xx12 ", 2, 3, Number_Result, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Number_Result.Raw_Length = 2);
+
+         Errors.Reset (Error);
+         Preflights.Scan_Number ("xx12 ", 2, 2, Number_Result, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Capacity_Exceeded
+                and then Error.Input_Offset = 4
+                and then Number_Result = (others => <>));
+
+         Errors.Reset (Error);
+         Preflights.Match_Literal ("xxtrue", 2, 4, Literal, Error);
+         pragma Assert (Error.Code = Errors.No_Error);
+
+         Errors.Reset (Error);
+         Preflights.Match_Literal ("xxtrue", 2, 3, Literal, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Capacity_Exceeded
+                and then Error.Input_Offset = 5);
+      end;
+
+      declare
+         Empty : constant String (1 .. 0) := [];
+      begin
+         Reject_String (Empty, 0, Errors.Syntax_Error, 0);
+         Reject_Number (Empty, 0, Errors.Syntax_Error, 0);
+         Errors.Reset (Error);
+         Preflights.Match_Literal (Empty, 0, 0, "null", Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Syntax_Error
+                and then Error.Input_Offset = 0);
+
+         Errors.Reset (Error);
+         Preflights.Scan_String ("x", 2, 0, String_Result, Error);
+         pragma Assert (Error.Code = Errors.Invalid_State);
+         Errors.Reset (Error);
+         Preflights.Scan_Number ("x", 2, 0, Number_Result, Error);
+         pragma Assert (Error.Code = Errors.Invalid_State);
+         Errors.Reset (Error);
+         Preflights.Match_Literal ("x", 2, 0, "null", Error);
+         pragma Assert (Error.Code = Errors.Invalid_State);
+         Errors.Reset (Error);
+         Preflights.Match_Literal ("x", 0, 1, Empty, Error);
+         pragma Assert (Error.Code = Errors.Invalid_State);
+      end;
+
+      Errors.Reset (Error);
+      Errors.Fail (Error, Errors.Application_Error, 9, Errors.Byte_Offset);
+      String_Result := (Raw_Length => 99, Decoded_Length => 99);
+      Preflights.Scan_String ("""x""", 0, 3, String_Result, Error);
+      pragma
+        Assert
+          (Error.Code = Errors.Application_Error
+             and then String_Result = (others => <>));
+      Number_Result :=
+        (Raw_Length => 99, Is_Integer => False, Negative => True);
+      Preflights.Scan_Number ("1", 0, 1, Number_Result, Error);
+      pragma Assert (Number_Result = (others => <>));
+      Preflights.Match_Literal ("null", 0, 4, "null", Error);
+      pragma
+        Assert
+          (Error.Code = Errors.Application_Error
+             and then Error.Input_Offset = 9);
+   end Assert_JSON_Preflights;
 
 end Flyology_Serde.Deserializers.JSON.Testing;

@@ -38,6 +38,7 @@ begin
    JSON_Testing.Assert_JSON_Event_Summaries;
    JSON_Testing.Assert_JSON_Single_Step_Driver;
    JSON_Testing.Assert_JSON_Driver_Lifecycle;
+   JSON_Testing.Assert_JSON_Preflights;
 
    --  Flyology JSON sees each source byte only after the one shared Serde
    --  budget admits it. Zero-consumption events reuse the charged window.
@@ -206,6 +207,53 @@ begin
                & Character'Val (16#98#)
                & Character'Val (16#80#));
       Finish (Item, Error);
+   end;
+
+   --  Physical truncation wins over an exact input budget in both the
+   --  handwritten oracle and the event-backed token preflight.
+   declare
+      Input  : aliased constant String :=
+        [1 => '"', 2 => '\', 3 => 'u', 4 => '1'];
+      Item   : JSON.Reader (Input'Access);
+      Error  : Errors.Error_Info;
+      Policy : Policies.Decode_Policy := (others => <>);
+      Value  : String (1 .. 8);
+      Length : Natural := 99;
+   begin
+      Policy.Limits.Maximum_Input_Units := Input'Length;
+      Item.Initialize (Policy);
+      Item.Read_Text (Value, Length, Error);
+      pragma
+        Assert
+          (Error.Code = Errors.Syntax_Error
+             and then Error.Input_Offset = 3
+             and then Length = 0);
+   end;
+
+   declare
+      Input  : aliased constant String :=
+        [1 => '"',
+         2 => '\',
+         3 => 'u',
+         4 => 'D',
+         5 => '8',
+         6 => '0',
+         7 => '0',
+         8 => '\'];
+      Item   : JSON.Reader (Input'Access);
+      Error  : Errors.Error_Info;
+      Policy : Policies.Decode_Policy := (others => <>);
+      Value  : String (1 .. 8);
+      Length : Natural := 99;
+   begin
+      Policy.Limits.Maximum_Input_Units := Input'Length;
+      Item.Initialize (Policy);
+      Item.Read_Text (Value, Length, Error);
+      pragma
+        Assert
+          (Error.Code = Errors.Invalid_Text
+             and then Error.Input_Offset = 7
+             and then Length = 0);
    end;
 
    declare
@@ -378,7 +426,57 @@ begin
       Item.Read_Null (Error);
       pragma Assert (Error.Code = Errors.Capacity_Exceeded);
       pragma Assert (Error.Input_Offset = 3);
-      pragma Assert (Item.Input_Offset = 3);
+      pragma Assert (Item.Input_Offset = 0);
+      pragma Assert (JSON_Testing.Budget_Input_Consumed (Item) = 0);
+   end;
+
+   declare
+      Input  : aliased constant String := " null";
+      Item   : JSON.Reader (Input'Access);
+      Error  : Errors.Error_Info;
+      Policy : Policies.Decode_Policy := (others => <>);
+   begin
+      Policy.Limits.Maximum_Input_Units := 4;
+      Item.Initialize (Policy);
+      Item.Read_Null (Error);
+      pragma Assert (Error.Code = Errors.Capacity_Exceeded);
+      pragma Assert (Error.Input_Offset = 4);
+      pragma Assert (Item.Input_Offset = 1);
+      pragma Assert (JSON_Testing.Budget_Input_Consumed (Item) = 1);
+   end;
+
+   declare
+      Input  : aliased constant String := "truX";
+      Item   : JSON.Reader (Input'Access);
+      Error  : Errors.Error_Info;
+      Policy : Policies.Decode_Policy := (others => <>);
+      Value  : Boolean := True;
+   begin
+      Policy.Limits.Maximum_Input_Units := 3;
+      Item.Initialize (Policy);
+      Item.Read_Boolean (Value, Error);
+      pragma Assert (Error.Code = Errors.Capacity_Exceeded);
+      pragma Assert (Error.Input_Offset = 3);
+      pragma Assert (Item.Input_Offset = 0);
+      pragma Assert (JSON_Testing.Budget_Input_Consumed (Item) = 0);
+      pragma Assert (not Value);
+   end;
+
+   declare
+      Input  : aliased constant String := " truX";
+      Item   : JSON.Reader (Input'Access);
+      Error  : Errors.Error_Info;
+      Policy : Policies.Decode_Policy := (others => <>);
+      Value  : Boolean := True;
+   begin
+      Policy.Limits.Maximum_Input_Units := 4;
+      Item.Initialize (Policy);
+      Item.Read_Boolean (Value, Error);
+      pragma Assert (Error.Code = Errors.Capacity_Exceeded);
+      pragma Assert (Error.Input_Offset = 4);
+      pragma Assert (Item.Input_Offset = 1);
+      pragma Assert (JSON_Testing.Budget_Input_Consumed (Item) = 1);
+      pragma Assert (not Value);
    end;
 
    declare

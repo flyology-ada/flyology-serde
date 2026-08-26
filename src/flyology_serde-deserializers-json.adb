@@ -130,15 +130,25 @@ package body Flyology_Serde.Deserializers.JSON is
    procedure Expect_Literal
      (Self : in out Reader; Value : String; Error : in out Errors.Error_Info)
    is
+      Input_Remaining : Natural;
    begin
       Skip_Whitespace (Self, Error);
       if Error.Code /= Errors.No_Error or else Self.Failed then
          return;
-      elsif Value'Length > Self.Source'Length - Self.Cursor then
+      end if;
+      Input_Remaining := Budgets.Input_Remaining (Self.Budget);
+      if Value'Length > Self.Source'Length - Self.Cursor then
          Fail (Self, Errors.Syntax_Error, Error);
       else
          for Index in Value'Range loop
-            if Current (Self, Index - Value'First) /= Value (Index) then
+            if Index - Value'First >= Input_Remaining then
+               Fail
+                 (Self,
+                  Errors.Capacity_Exceeded,
+                  Error,
+                  Self.Cursor + Input_Remaining);
+               return;
+            elsif Current (Self, Index - Value'First) /= Value (Index) then
                Fail
                  (Self,
                   Errors.Syntax_Error,
@@ -383,7 +393,11 @@ package body Flyology_Serde.Deserializers.JSON is
       function Has (Count : Natural := 1) return Boolean is
          Inspected : constant Natural := Position - Self.Cursor;
       begin
-         if Position < Self.Source'Length
+         if Position <= Self.Source'Length
+           and then Count > Self.Source'Length - Position
+         then
+            return False;
+         elsif Position < Self.Source'Length
            and then (Inspected >= Input_Remaining
                      or else Count > Input_Remaining - Inspected)
          then
@@ -977,7 +991,9 @@ package body Flyology_Serde.Deserializers.JSON is
          return;
       elsif Has_Input (Self) and then Current (Self) = 't' then
          Expect_Literal (Self, "true", Error);
-         Value := True;
+         if Error.Code = Errors.No_Error then
+            Value := True;
+         end if;
       else
          Expect_Literal (Self, "false", Error);
       end if;
