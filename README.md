@@ -52,9 +52,29 @@ so it discovers the generated skills.
 
 ## Build and test
 
+`flyology_json=0.1.0-dev` resolves from the Flyology Alire index without a Git
+or path pin. Because the development entry can advance, the maintained lock
+checker rejects any source other than the reviewed commit before a change can
+pass CI. It also attests the exact Flyology JSON release-metadata block
+(`a11cf63220d0244a65efd72d94c25adb09ba9443e5494d51d8487890abca2a3f`)
+and rejects unexpected solution states. Configure the Flyology index ahead of
+the community index once:
+
 ```sh
+alr index --reset-community
+alr index --add=git+https://github.com/flyology-ada/alire-index.git \
+  --name=flyology --before=community
+```
+
+```sh
+alr update
+alr -C tests update
+python3 tools/check_flyology_json_dependency.py alire/alire.lock
+python3 tools/check_flyology_json_dependency.py tests/alire/alire.lock
+python3 -m unittest discover -s tools -p 'test_check_*.py'
 alr build
 alr -C tests run
+scripts/check-test-hook-elision.sh
 alr -C tools/generator/ada build
 alr -C tools/generator/ada exec -- gprbuild -p -P tests/scaffold_tests.gpr
 sh tools/generator/ada/tests/smoke.sh

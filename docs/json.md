@@ -38,6 +38,18 @@ finished writer intentionally revokes publication. `Copy_Output` before finish o
 for the reader's lifetime under Ada accessibility checks. The source owner must also exclude mutation through any
 other alias or task during traversal. The reader returns no borrowed slice: decoded text, bytes, field names, and
 variant names are copied into caller-owned buffers. `Initialize` is required before the first event.
+
+The reader's syntax gate uses the indexed `flyology_json=0.1.0-dev` parser with
+the explicit RFC 8259, Unicode-scalar, no-extension, BOM-rejecting,
+preserve-unchecked profile. The mature Serde logical-envelope scanner remains
+the value translator during migration, but it can advance a source byte only
+through the Flyology JSON gate. The gate charges that byte once through the
+reader's existing `Decode_Budget` before exposing a retained one-byte window;
+zero-consumption parser events reuse that window and are bounded by the closed
+event vocabulary. Complete Reader publication additionally requires Flyology
+JSON's complete-document acceptance. No raw event range escapes the producing
+call, and duplicate/alias policy remains in Serde.
+
 After exactly one root value, `Finish_Document` consumes trailing JSON whitespace and rejects any other trailing
 input; only then does `Is_Complete` become true. Any parse, capacity, budget, or protocol error unwinds all entered
 budget scopes, poisons the reader, and requires `Reset`, which restarts at byte offset zero with a fresh budget.

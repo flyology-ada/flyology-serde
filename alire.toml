@@ -12,5 +12,8 @@ tags = ["ada", "serialization", "deserialization", "json", "cbor"]
 [[depends-on]]
 gnat = ">=13 & <17"
 
+[[depends-on]]
+flyology_json = "=0.1.0-dev"
+
 [build-switches]
 "*" = { Compile_Checks = "warnings" }

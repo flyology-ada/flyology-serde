@@ -2,6 +2,7 @@ with Ada.Streams;
 with Ada.Unchecked_Conversion;
 with Flyology_Serde.Data_Model;
 with Flyology_Serde.Deserializers.JSON;
+with Flyology_Serde.Deserializers.JSON.Testing;
 with Flyology_Serde.Errors;
 with Flyology_Serde.Policies;
 with Interfaces;
@@ -10,6 +11,7 @@ procedure JSON_Reader_Tests is
    package Data_Model renames Flyology_Serde.Data_Model;
    package Errors renames Flyology_Serde.Errors;
    package JSON renames Flyology_Serde.Deserializers.JSON;
+   package JSON_Testing renames Flyology_Serde.Deserializers.JSON.Testing;
    package Policies renames Flyology_Serde.Policies;
    use type Ada.Streams.Stream_Element;
    use type Errors.Error_Code;
@@ -19,8 +21,10 @@ procedure JSON_Reader_Tests is
    use type Interfaces.Unsigned_64;
    use type Data_Model.Value_Kind;
 
-   function Bits is new Ada.Unchecked_Conversion
-     (Interfaces.IEEE_Float_64, Interfaces.Unsigned_64);
+   function Bits is new
+     Ada.Unchecked_Conversion
+       (Interfaces.IEEE_Float_64,
+        Interfaces.Unsigned_64);
 
    procedure Finish
      (Item : in out JSON.Reader; Error : in out Errors.Error_Info) is
@@ -30,6 +34,44 @@ procedure JSON_Reader_Tests is
       pragma Assert (Item.Is_Complete);
    end Finish;
 begin
+   JSON_Testing.Assert_JSON_Event_Contract;
+   JSON_Testing.Assert_JSON_Driver_Lifecycle;
+
+   --  Flyology JSON sees each source byte only after the one shared Serde
+   --  budget admits it. Zero-consumption events reuse the charged window.
+   declare
+      Input : aliased constant String := "null";
+      Item  : JSON.Reader (Input'Access);
+      Error : Errors.Error_Info;
+   begin
+      Item.Initialize;
+      pragma Assert (JSON_Testing.Syntax_Input_Offset (Item) = 0);
+      pragma Assert (JSON_Testing.Budget_Input_Consumed (Item) = 0);
+      Item.Read_Null (Error);
+      pragma Assert (Error.Code = Errors.No_Error);
+      pragma Assert (Item.Input_Offset = Input'Length);
+      pragma Assert (JSON_Testing.Syntax_Input_Offset (Item) = Input'Length);
+      pragma Assert (JSON_Testing.Budget_Input_Consumed (Item) = Input'Length);
+      Finish (Item, Error);
+      pragma Assert (JSON_Testing.Budget_Input_Consumed (Item) = Input'Length);
+   end;
+
+   --  The borrowed source can use any legal positive lower bound; parser
+   --  coordinates and Serde offsets remain zero based.
+   declare
+      Input : aliased constant String :=
+        [17 => 'n', 18 => 'u', 19 => 'l', 20 => 'l'];
+      Item  : JSON.Reader (Input'Access);
+      Error : Errors.Error_Info;
+   begin
+      Item.Initialize;
+      Item.Read_Null (Error);
+      pragma Assert (Error.Code = Errors.No_Error);
+      pragma Assert (Item.Input_Offset = Input'Length);
+      pragma Assert (JSON_Testing.Syntax_Input_Offset (Item) = Input'Length);
+      Finish (Item, Error);
+   end;
+
    declare
       Input       : aliased constant String :=
         "{""identifier"":42,""enabled"":true}";
@@ -46,7 +88,8 @@ begin
       Item.Begin_Record ("Tests.Sample", Length, Error);
       pragma Assert (not Length.Known);
       Item.Next_Field (Name, Name_Length, Has_Field, Error);
-      pragma Assert (Has_Field and then Name (1 .. Name_Length) = "identifier");
+      pragma
+        Assert (Has_Field and then Name (1 .. Name_Length) = "identifier");
       Item.Read_Unsigned (Identifier, Error);
       Item.Next_Field (Name, Name_Length, Has_Field, Error);
       pragma Assert (Has_Field and then Name (1 .. Name_Length) = "enabled");
@@ -83,7 +126,8 @@ begin
    begin
       Item.Initialize;
       Item.Read_Bytes (Value, Length, Error);
-      pragma Assert (Length = 2 and then Value (1) = 0 and then Value (2) = 255);
+      pragma
+        Assert (Length = 2 and then Value (1) = 0 and then Value (2) = 255);
       Finish (Item, Error);
    end;
 
@@ -113,7 +157,8 @@ begin
    end;
 
    declare
-      Input       : aliased constant String := "[ ""Circle"" , {""radius"":3} ]";
+      Input       : aliased constant String :=
+        "[ ""Circle"" , {""radius"":3} ]";
       Item        : JSON.Reader (Input'Access);
       Error       : Errors.Error_Info;
       Alternative : String (1 .. 16);
@@ -149,11 +194,15 @@ begin
       Item.Read_Text (Value, Length, Error);
       pragma Assert (Error.Code = Errors.No_Error);
       pragma Assert (Length = 16);
-      pragma Assert (Value (1 .. 12) = "line" & Character'Val (10) & """quote ");
-      pragma Assert
-        (Value (13 .. 16)
-         = Character'Val (16#F0#) & Character'Val (16#9F#)
-           & Character'Val (16#98#) & Character'Val (16#80#));
+      pragma
+        Assert (Value (1 .. 12) = "line" & Character'Val (10) & """quote ");
+      pragma
+        Assert
+          (Value (13 .. 16)
+             = Character'Val (16#F0#)
+               & Character'Val (16#9F#)
+               & Character'Val (16#98#)
+               & Character'Val (16#80#));
       Finish (Item, Error);
    end;
 
@@ -165,10 +214,11 @@ begin
    begin
       Item.Initialize;
       Item.Read_Float_64 (Value, Error);
-      pragma Assert
-        (Flyology_Serde.Data_Model.Finite_Value (Value) = 0.0
-         and then Bits (Flyology_Serde.Data_Model.Finite_Value (Value))
-                  = 16#8000_0000_0000_0000#);
+      pragma
+        Assert
+          (Flyology_Serde.Data_Model.Finite_Value (Value) = 0.0
+             and then Bits (Flyology_Serde.Data_Model.Finite_Value (Value))
+                      = 16#8000_0000_0000_0000#);
       Finish (Item, Error);
    end;
 
@@ -223,10 +273,10 @@ begin
    end;
 
    declare
-      Input  : aliased constant String := "[1,[1,[0]]]";
-      Item   : JSON.Reader (Input'Access);
-      Error  : Errors.Error_Info;
-      Policy : Policies.Decode_Policy := (others => <>);
+      Input   : aliased constant String := "[1,[1,[0]]]";
+      Item    : JSON.Reader (Input'Access);
+      Error   : Errors.Error_Info;
+      Policy  : Policies.Decode_Policy := (others => <>);
       Present : Boolean;
    begin
       Policy.Limits.Maximum_Nesting_Depth := 2;
@@ -247,13 +297,13 @@ begin
    end;
 
    declare
-      Input  : aliased constant String := "[1,2]";
-      Item   : JSON.Reader (Input'Access);
-      Error  : Errors.Error_Info;
-      Policy : Policies.Decode_Policy := (others => <>);
-      Length : Flyology_Serde.Data_Model.Length_Information;
+      Input       : aliased constant String := "[1,2]";
+      Item        : JSON.Reader (Input'Access);
+      Error       : Errors.Error_Info;
+      Policy      : Policies.Decode_Policy := (others => <>);
+      Length      : Flyology_Serde.Data_Model.Length_Information;
       Has_Element : Boolean;
-      Value : Interfaces.Integer_64;
+      Value       : Interfaces.Integer_64;
    begin
       Policy.Limits.Maximum_Container_Items := 1;
       Item.Initialize (Policy);
@@ -265,10 +315,10 @@ begin
    end;
 
    declare
-      Input  : aliased constant String := "01";
-      Item   : JSON.Reader (Input'Access);
-      Error  : Errors.Error_Info;
-      Value  : Interfaces.Unsigned_64;
+      Input : aliased constant String := "01";
+      Item  : JSON.Reader (Input'Access);
+      Error : Errors.Error_Info;
+      Value : Interfaces.Unsigned_64;
    begin
       Item.Initialize;
       Item.Read_Unsigned (Value, Error);
@@ -299,12 +349,14 @@ begin
       Item.Read_Text (Value, Length, Error);
       pragma Assert (Error.Code = Errors.Capacity_Exceeded);
       pragma Assert (Item.Input_Offset = 0);
+      pragma
+        Assert (Length = 0 and then (for all Item of Value => Item = ' '));
    end;
 
    declare
-      Input  : aliased constant String := "null false";
-      Item   : JSON.Reader (Input'Access);
-      Error  : Errors.Error_Info;
+      Input : aliased constant String := "null false";
+      Item  : JSON.Reader (Input'Access);
+      Error : Errors.Error_Info;
    begin
       Item.Initialize;
       Item.Read_Null (Error);
@@ -384,12 +436,12 @@ begin
    end;
 
    declare
-      Input   : aliased constant String := """\u0000""";
-      Item    : JSON.Reader (Input'Access);
-      Error   : Errors.Error_Info;
-      Policy  : Policies.Decode_Policy := (others => <>);
-      Value   : String (1 .. 1);
-      Length  : Natural;
+      Input  : aliased constant String := """\u0000""";
+      Item   : JSON.Reader (Input'Access);
+      Error  : Errors.Error_Info;
+      Policy : Policies.Decode_Policy := (others => <>);
+      Value  : String (1 .. 1);
+      Length : Natural;
    begin
       Policy.Limits.Maximum_Input_Units := 2;
       Item.Initialize (Policy);
@@ -447,8 +499,7 @@ begin
       Error : Errors.Error_Info;
    begin
       Item.Initialize;
-      pragma Assert
-        (Item.Peek_Kind (Error) = Data_Model.Signed_Integer_Value);
+      pragma Assert (Item.Peek_Kind (Error) = Data_Model.Signed_Integer_Value);
    end;
 
    declare
@@ -457,8 +508,8 @@ begin
       Error : Errors.Error_Info;
    begin
       Item.Initialize;
-      pragma Assert
-        (Item.Peek_Kind (Error) = Data_Model.Unsigned_Integer_Value);
+      pragma
+        Assert (Item.Peek_Kind (Error) = Data_Model.Unsigned_Integer_Value);
    end;
 
    declare
@@ -516,6 +567,41 @@ begin
       Item.Read_Text (Value, Length, Error);
       pragma Assert (Error.Code = Errors.Invalid_Text);
       pragma Assert (Error.Input_Offset = 4);
+      pragma
+        Assert (Length = 0 and then (for all Item of Value => Item = ' '));
+   end;
+
+   declare
+      Input       : aliased constant String := "{""name"" 1}";
+      Item        : JSON.Reader (Input'Access);
+      Error       : Errors.Error_Info;
+      Length      : Data_Model.Length_Information;
+      Name        : String (1 .. 8) := [others => 'x'];
+      Name_Length : Natural := Natural'Last;
+      Has_Field   : Boolean := True;
+   begin
+      Item.Initialize;
+      Item.Begin_Record ("Tests.Malformed", Length, Error);
+      Item.Next_Field (Name, Name_Length, Has_Field, Error);
+      pragma Assert (Error.Code = Errors.Syntax_Error);
+      pragma Assert (not Has_Field and then Name_Length = 0);
+      pragma Assert (for all Character of Name => Character = ' ');
+   end;
+
+   declare
+      Input       : aliased constant String := "[""Circle"" {}]";
+      Item        : JSON.Reader (Input'Access);
+      Error       : Errors.Error_Info;
+      Alternative : String (1 .. 8) := [others => 'x'];
+      Name_Length : Natural := Natural'Last;
+      Length      : Data_Model.Length_Information;
+   begin
+      Item.Initialize;
+      Item.Begin_Variant
+        ("Tests.Malformed", Alternative, Name_Length, Length, Error);
+      pragma Assert (Error.Code = Errors.Syntax_Error);
+      pragma Assert (Name_Length = 0);
+      pragma Assert (for all Character of Alternative => Character = ' ');
    end;
 
    declare

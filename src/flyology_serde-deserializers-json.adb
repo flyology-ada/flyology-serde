@@ -43,7 +43,8 @@ package body Flyology_Serde.Deserializers.JSON is
 
    function Has_Input (Self : Reader; Ahead : Natural := 0) return Boolean is
    begin
-      return Ahead <= Self.Source'Length
+      return
+        Ahead <= Self.Source'Length
         and then Self.Cursor <= Self.Source'Length - Ahead
         and then Self.Cursor + Ahead < Self.Source'Length;
    end Has_Input;
@@ -53,12 +54,13 @@ package body Flyology_Serde.Deserializers.JSON is
       return Self.Source (Self.Source'First + Self.Cursor + Ahead);
    end Current;
 
-   function Is_Value_Leading (Item : Character) return Boolean is
-     (Item in 'n' | 't' | 'f' | '"' | '{' | '[' | '-' | '0' .. '9');
+   function Is_Value_Leading (Item : Character) return Boolean
+   is (Item in 'n' | 't' | 'f' | '"' | '{' | '[' | '-' | '0' .. '9');
 
    procedure Advance
      (Self : in out Reader; Count : Natural; Error : in out Errors.Error_Info)
    is
+      Consumed  : Boolean;
       Remaining : Natural := Count;
    begin
       if Error.Code /= Errors.No_Error or else Self.Failed then
@@ -69,12 +71,29 @@ package body Flyology_Serde.Deserializers.JSON is
       end if;
 
       while Remaining > 0 loop
-         Budgets.Consume_Input (Self.Budget, 1, Error);
+         JSON_Event_Drivers.Consume_One
+           (Self.Syntax, Self.Budget, Consumed, Error);
+         if Consumed then
+            Self.Cursor := Self.Cursor + 1;
+            Remaining := Remaining - 1;
+         end if;
          exit when Error.Code /= Errors.No_Error;
-         Self.Cursor := Self.Cursor + 1;
-         Remaining := Remaining - 1;
+         if not Consumed then
+            Fail (Self, Errors.Invalid_State, Error);
+            exit;
+         end if;
       end loop;
       Latch (Self, Error);
+   exception
+      when others =>
+         begin
+            Self.Abort_Document (Error);
+         exception
+            when others =>
+               Self.Failed := True;
+               Self.Document_Complete := False;
+         end;
+         raise;
    end Advance;
 
    procedure Skip_Whitespace
@@ -83,8 +102,11 @@ package body Flyology_Serde.Deserializers.JSON is
       while Error.Code = Errors.No_Error
         and then not Self.Failed
         and then Has_Input (Self)
-        and then Current (Self) in ' ' | Character'Val (9) | Character'Val (10)
-                                      | Character'Val (13)
+        and then Current (Self)
+                 in ' '
+                  | Character'Val (9)
+                  | Character'Val (10)
+                  | Character'Val (13)
       loop
          Advance (Self, 1, Error);
       end loop;
@@ -106,9 +128,8 @@ package body Flyology_Serde.Deserializers.JSON is
    end Expect;
 
    procedure Expect_Literal
-     (Self  : in out Reader;
-      Value : String;
-      Error : in out Errors.Error_Info) is
+     (Self : in out Reader; Value : String; Error : in out Errors.Error_Info)
+   is
    begin
       Skip_Whitespace (Self, Error);
       if Error.Code /= Errors.No_Error or else Self.Failed then
@@ -152,14 +173,17 @@ package body Flyology_Serde.Deserializers.JSON is
          end if;
       else
          case Self.Stack (Self.Depth).Kind is
-            when Optional_Container | Sequence_Container | Record_Container
+            when Optional_Container
+               | Sequence_Container
+               | Record_Container
                | Variant_Container =>
                if Self.Stack (Self.Depth).Child /= Child_Ready then
                   Fail (Self, Errors.Invalid_State, Error);
                end if;
-            when Map_Container =>
+
+            when Map_Container     =>
                if Self.Stack (Self.Depth).Map_Phase
-                    not in Map_Key_Ready | Map_Value_Ready
+                  not in Map_Key_Ready | Map_Value_Ready
                then
                   Fail (Self, Errors.Invalid_State, Error);
                end if;
@@ -185,10 +209,13 @@ package body Flyology_Serde.Deserializers.JSON is
          Self.Root := Root_In_Progress;
       else
          case Self.Stack (Self.Depth).Kind is
-            when Optional_Container | Sequence_Container | Record_Container
+            when Optional_Container
+               | Sequence_Container
+               | Record_Container
                | Variant_Container =>
                Self.Stack (Self.Depth).Child := Child_In_Progress;
-            when Map_Container =>
+
+            when Map_Container     =>
                if Self.Stack (Self.Depth).Map_Phase = Map_Key_Ready then
                   Self.Stack (Self.Depth).Map_Phase := Map_Key_In_Progress;
                else
@@ -199,9 +226,8 @@ package body Flyology_Serde.Deserializers.JSON is
    end Prepare_Value;
 
    procedure Require_Leading
-     (Self    : in out Reader;
-      Allowed : String;
-      Error   : in out Errors.Error_Info) is
+     (Self : in out Reader; Allowed : String; Error : in out Errors.Error_Info)
+   is
    begin
       Check_Value_Ready (Self, Error);
       Skip_Whitespace (Self, Error);
@@ -220,8 +246,7 @@ package body Flyology_Serde.Deserializers.JSON is
       Skip_Whitespace (Self, Error);
       if Error.Code /= Errors.No_Error then
          return;
-      elsif not Has_Input (Self)
-        or else not Is_Value_Leading (Current (Self))
+      elsif not Has_Input (Self) or else not Is_Value_Leading (Current (Self))
       then
          Fail (Self, Errors.Syntax_Error, Error);
       end if;
@@ -242,16 +267,19 @@ package body Flyology_Serde.Deserializers.JSON is
       end if;
 
       case Self.Stack (Self.Depth).Kind is
-         when Optional_Container | Sequence_Container | Record_Container
+         when Optional_Container
+            | Sequence_Container
+            | Record_Container
             | Variant_Container =>
             if Self.Stack (Self.Depth).Child /= Child_In_Progress then
                Fail (Self, Errors.Invalid_State, Error);
             else
                Self.Stack (Self.Depth).Child := No_Child;
             end if;
-         when Map_Container =>
+
+         when Map_Container     =>
             case Self.Stack (Self.Depth).Map_Phase is
-               when Map_Key_In_Progress =>
+               when Map_Key_In_Progress   =>
                   Expect (Self, ',', Error);
                   if Error.Code = Errors.No_Error then
                      Require_Child_Start (Self, Error);
@@ -259,12 +287,14 @@ package body Flyology_Serde.Deserializers.JSON is
                         Self.Stack (Self.Depth).Map_Phase := Map_Value_Ready;
                      end if;
                   end if;
+
                when Map_Value_In_Progress =>
                   Expect (Self, ']', Error);
                   if Error.Code = Errors.No_Error then
                      Self.Stack (Self.Depth).Map_Phase := Map_Needs_Entry;
                   end if;
-               when others =>
+
+               when others                =>
                   Fail (Self, Errors.Invalid_State, Error);
             end case;
       end case;
@@ -325,11 +355,14 @@ package body Flyology_Serde.Deserializers.JSON is
       case Item is
          when '0' .. '9' =>
             return Character'Pos (Item) - Character'Pos ('0');
+
          when 'A' .. 'F' =>
             return Character'Pos (Item) - Character'Pos ('A') + 10;
+
          when 'a' .. 'f' =>
             return Character'Pos (Item) - Character'Pos ('a') + 10;
-         when others =>
+
+         when others     =>
             return 16;
       end case;
    end Hex_Value;
@@ -340,10 +373,10 @@ package body Flyology_Serde.Deserializers.JSON is
       Decoded_Length : out Natural;
       Error          : in out Errors.Error_Info)
    is
-      Position      : Natural := Self.Cursor;
-      Segment_Start : Natural;
-      Code          : Natural;
-      Low           : Natural;
+      Position        : Natural := Self.Cursor;
+      Segment_Start   : Natural;
+      Code            : Natural;
+      Low             : Natural;
       Input_Remaining : constant Natural :=
         Budgets.Input_Remaining (Self.Budget);
 
@@ -361,7 +394,8 @@ package body Flyology_Serde.Deserializers.JSON is
                Self.Cursor + Input_Remaining);
             return False;
          end if;
-         return Position <= Self.Source'Length
+         return
+           Position <= Self.Source'Length
            and then Count <= Self.Source'Length - Position;
       end Has;
 
@@ -381,8 +415,7 @@ package body Flyology_Serde.Deserializers.JSON is
          for Offset in 0 .. 3 loop
             Digit := Hex_Value (Item (Offset));
             if Digit = 16 then
-               Fail
-                 (Self, Errors.Syntax_Error, Error, Position + Offset);
+               Fail (Self, Errors.Syntax_Error, Error, Position + Offset);
                return;
             end if;
             Value := Value * 16 + Digit;
@@ -406,7 +439,8 @@ package body Flyology_Serde.Deserializers.JSON is
          if Last > Segment_Start then
             Flyology_Serde.UTF_8_Validation.Locate
               (Self.Source
-                 (Self.Source'First + Segment_Start
+                 (Self.Source'First
+                  + Segment_Start
                   .. Self.Source'First + Last - 1),
                Valid,
                Invalid);
@@ -415,11 +449,7 @@ package body Flyology_Serde.Deserializers.JSON is
             Invalid := 0;
          end if;
          if not Valid then
-            Fail
-              (Self,
-               Errors.Invalid_Text,
-               Error,
-               Segment_Start + Invalid);
+            Fail (Self, Errors.Invalid_Text, Error, Segment_Start + Invalid);
          end if;
       end Validate_Segment;
    begin
@@ -438,15 +468,17 @@ package body Flyology_Serde.Deserializers.JSON is
             exit;
          end if;
          case Item is
-            when '"' =>
+            when '"'                                     =>
                Validate_Segment (Position);
                exit when Error.Code /= Errors.No_Error;
                Position := Position + 1;
                Raw_Length := Position - Self.Cursor;
                return;
+
             when Character'Val (0) .. Character'Val (31) =>
                Fail (Self, Errors.Syntax_Error, Error, Position);
-            when '\' =>
+
+            when '\'                                     =>
                Validate_Segment (Position);
                exit when Error.Code /= Errors.No_Error;
                Position := Position + 1;
@@ -458,12 +490,16 @@ package body Flyology_Serde.Deserializers.JSON is
                   when '"' | '\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' =>
                      Add_Decoded (1);
                      Position := Position + 1;
-                  when 'u' =>
+
+                  when 'u'                                           =>
                      Position := Position + 1;
                      Scan_Hex (Code);
                      exit when Error.Code /= Errors.No_Error;
                      if Code in 16#D800# .. 16#DBFF# then
-                        if not Has (2) or else Item /= '\' or else Item (1) /= 'u' then
+                        if not Has (2)
+                          or else Item /= '\'
+                          or else Item (1) /= 'u'
+                        then
                            Fail (Self, Errors.Invalid_Text, Error, Position);
                            exit;
                         end if;
@@ -471,7 +507,8 @@ package body Flyology_Serde.Deserializers.JSON is
                         Scan_Hex (Low);
                         exit when Error.Code /= Errors.No_Error;
                         if Low not in 16#DC00# .. 16#DFFF# then
-                           Fail (Self, Errors.Invalid_Text, Error, Position - 4);
+                           Fail
+                             (Self, Errors.Invalid_Text, Error, Position - 4);
                            exit;
                         end if;
                         Add_Decoded (4);
@@ -484,11 +521,13 @@ package body Flyology_Serde.Deserializers.JSON is
                      else
                         Add_Decoded (3);
                      end if;
-                  when others =>
+
+                  when others                                        =>
                      Fail (Self, Errors.Syntax_Error, Error, Position);
                end case;
                Segment_Start := Position;
-            when others =>
+
+            when others                                  =>
                Add_Decoded (1);
                Position := Position + 1;
          end case;
@@ -496,11 +535,11 @@ package body Flyology_Serde.Deserializers.JSON is
    end Scan_String;
 
    procedure Decode_String
-     (Self   : in out Reader;
-      Value  : out String;
-      Length : out Natural;
+     (Self         : in out Reader;
+      Value        : out String;
+      Length       : out Natural;
       Check_Length : Boolean;
-      Error  : in out Errors.Error_Info)
+      Error        : in out Errors.Error_Info)
    is
       Raw_Length     : Natural;
       Decoded_Length : Natural;
@@ -580,7 +619,8 @@ package body Flyology_Serde.Deserializers.JSON is
       if Check_Length then
          Budgets.Check_Text_Length (Self.Budget, Decoded_Length, Error);
       end if;
-      if Error.Code = Errors.No_Error and then Decoded_Length > Value'Length then
+      if Error.Code = Errors.No_Error and then Decoded_Length > Value'Length
+      then
          Errors.Fail (Error, Errors.Capacity_Exceeded);
       end if;
       Latch (Self, Error);
@@ -600,12 +640,28 @@ package body Flyology_Serde.Deserializers.JSON is
                when '"' | '\' | '/' =>
                   Put (Current (Self));
                   Advance (Self, 1, Error);
-               when 'b' => Put (Character'Val (8)); Advance (Self, 1, Error);
-               when 'f' => Put (Character'Val (12)); Advance (Self, 1, Error);
-               when 'n' => Put (Character'Val (10)); Advance (Self, 1, Error);
-               when 'r' => Put (Character'Val (13)); Advance (Self, 1, Error);
-               when 't' => Put (Character'Val (9)); Advance (Self, 1, Error);
-               when 'u' =>
+
+               when 'b'             =>
+                  Put (Character'Val (8));
+                  Advance (Self, 1, Error);
+
+               when 'f'             =>
+                  Put (Character'Val (12));
+                  Advance (Self, 1, Error);
+
+               when 'n'             =>
+                  Put (Character'Val (10));
+                  Advance (Self, 1, Error);
+
+               when 'r'             =>
+                  Put (Character'Val (13));
+                  Advance (Self, 1, Error);
+
+               when 't'             =>
+                  Put (Character'Val (9));
+                  Advance (Self, 1, Error);
+
+               when 'u'             =>
                   Advance (Self, 1, Error);
                   exit when Error.Code /= Errors.No_Error;
                   Read_Hex (Code);
@@ -615,18 +671,25 @@ package body Flyology_Serde.Deserializers.JSON is
                      exit when Error.Code /= Errors.No_Error;
                      Read_Hex (Low);
                      exit when Error.Code /= Errors.No_Error;
-                     Code := 16#1_0000# + (Code - 16#D800#) * 1_024
-                       + Low - 16#DC00#;
+                     Code :=
+                       16#1_0000# + (Code - 16#D800#) * 1_024 + Low - 16#DC00#;
                   end if;
                   Put_Code_Point (Code);
-               when others =>
+
+               when others          =>
                   Fail (Self, Errors.Syntax_Error, Error);
             end case;
          end if;
       end loop;
       if Error.Code = Errors.No_Error then
          Advance (Self, 1, Error);
-         Length := Output;
+         if Error.Code = Errors.No_Error then
+            Length := Output;
+         end if;
+      end if;
+      if Error.Code /= Errors.No_Error then
+         Value := [others => ' '];
+         Length := 0;
       end if;
    end Decode_String;
 
@@ -637,8 +700,8 @@ package body Flyology_Serde.Deserializers.JSON is
       Negative   : out Boolean;
       Error      : in out Errors.Error_Info)
    is
-      Position : Natural := Self.Cursor;
-      Start    : constant Natural := Self.Cursor;
+      Position        : Natural := Self.Cursor;
+      Start           : constant Natural := Self.Cursor;
       Input_Remaining : constant Natural :=
         Budgets.Input_Remaining (Self.Budget);
 
@@ -648,16 +711,13 @@ package body Flyology_Serde.Deserializers.JSON is
            and then Position - Start >= Input_Remaining
          then
             Fail
-              (Self,
-               Errors.Capacity_Exceeded,
-               Error,
-               Start + Input_Remaining);
+              (Self, Errors.Capacity_Exceeded, Error, Start + Input_Remaining);
             return False;
          end if;
          return Position < Self.Source'Length;
       end Has;
-      function Item return Character is
-        (Self.Source (Self.Source'First + Position));
+      function Item return Character
+      is (Self.Source (Self.Source'First + Position));
 
       procedure Scan_Digits is
       begin
@@ -697,7 +757,8 @@ package body Flyology_Serde.Deserializers.JSON is
          Position := Position + 1;
          Scan_Digits;
       end if;
-      if Error.Code = Errors.No_Error and then Has and then Item in 'e' | 'E' then
+      if Error.Code = Errors.No_Error and then Has and then Item in 'e' | 'E'
+      then
          Is_Integer := False;
          Position := Position + 1;
          if Has and then Item in '+' | '-' then
@@ -728,30 +789,47 @@ package body Flyology_Serde.Deserializers.JSON is
       else
          Buffer (Buffer'First .. Buffer'First + Length - 1) :=
            Self.Source
-             (Self.Source'First + Self.Cursor
+             (Self.Source'First
+              + Self.Cursor
               .. Self.Source'First + Self.Cursor + Length - 1);
          Advance (Self, Length, Error);
       end if;
    end Read_Number_Text;
 
    procedure Initialize
-     (Self   : in out Reader;
-      Policy : Policies.Decode_Policy := (others => <>)) is
+     (Self : in out Reader; Policy : Policies.Decode_Policy := (others => <>))
+   is
+      Syntax_Error : Errors.Error_Info;
    begin
       Self.Policy := Policy;
-      Budgets.Initialize (Self.Budget, Policy.Limits);
+      Errors.Reset (Syntax_Error);
+      JSON_Event_Drivers.Initialize (Self.Syntax, Syntax_Error);
+      if Syntax_Error.Code = Errors.No_Error then
+         Budgets.Initialize (Self.Budget, Policy.Limits);
+      end if;
       Self.Stack := [others => <>];
       Self.Depth := 0;
       Self.Cursor := 0;
       Self.Root := Root_Ready;
       Self.Initialized := True;
-      Self.Failed := False;
+      Self.Failed := Syntax_Error.Code /= Errors.No_Error;
       Self.Document_Complete := False;
+   exception
+      when others =>
+         JSON_Event_Drivers.Abort_Document (Self.Syntax);
+         Self.Stack := [others => <>];
+         Self.Depth := 0;
+         Self.Cursor := 0;
+         Self.Root := Root_Ready;
+         Self.Initialized := True;
+         Self.Failed := True;
+         Self.Document_Complete := False;
+         raise;
    end Initialize;
 
    procedure Reset
-     (Self   : in out Reader;
-      Policy : Policies.Decode_Policy := (others => <>)) is
+     (Self : in out Reader; Policy : Policies.Decode_Policy := (others => <>))
+   is
    begin
       Initialize (Self, Policy);
    end Reset;
@@ -761,6 +839,7 @@ package body Flyology_Serde.Deserializers.JSON is
      (Self : in out Reader; Error : in out Errors.Error_Info) is
    begin
       Latch (Self, Error);
+      JSON_Event_Drivers.Abort_Document (Self.Syntax, Error);
       while Budgets.Depth (Self.Budget) > 0 loop
          Budgets.Leave_Container (Self.Budget, Error);
       end loop;
@@ -785,18 +864,33 @@ package body Flyology_Serde.Deserializers.JSON is
       if Error.Code = Errors.No_Error and then Has_Input (Self) then
          Fail (Self, Errors.Syntax_Error, Error);
       elsif Error.Code = Errors.No_Error then
-         Self.Document_Complete := True;
+         JSON_Event_Drivers.Finish (Self.Syntax, Error);
+         Latch (Self, Error);
+         if Error.Code = Errors.No_Error then
+            Self.Document_Complete := True;
+         end if;
       end if;
+   exception
+      when others =>
+         begin
+            Self.Abort_Document (Error);
+         exception
+            when others =>
+               Self.Failed := True;
+               Self.Document_Complete := False;
+         end;
+         raise;
    end Finish_Document;
 
-   function Is_Complete (Self : Reader) return Boolean is
-     (Self.Document_Complete and then not Self.Failed);
+   function Is_Complete (Self : Reader) return Boolean
+   is (Self.Document_Complete and then not Self.Failed);
 
-   function Input_Offset (Self : Reader) return Natural is (Self.Cursor);
+   function Input_Offset (Self : Reader) return Natural
+   is (Self.Cursor);
 
    overriding
-   function Capabilities
-     (Self : Reader) return Data_Model.Format_Capabilities is
+   function Capabilities (Self : Reader) return Data_Model.Format_Capabilities
+   is
       pragma Unreferenced (Self);
    begin
       return
@@ -811,7 +905,8 @@ package body Flyology_Serde.Deserializers.JSON is
    overriding
    function Peek_Kind
      (Self : in out Reader; Error : in out Errors.Error_Info)
-      return Data_Model.Value_Kind is
+      return Data_Model.Value_Kind
+   is
       Raw_Length : Natural;
       Is_Integer : Boolean;
       Negative   : Boolean;
@@ -825,11 +920,14 @@ package body Flyology_Serde.Deserializers.JSON is
          return Data_Model.Null_Value;
       end if;
       case Current (Self) is
-         when 'n'       => return Data_Model.Null_Value;
-         when 't' | 'f' => return Data_Model.Boolean_Value;
+         when 'n'              =>
+            return Data_Model.Null_Value;
+
+         when 't' | 'f'        =>
+            return Data_Model.Boolean_Value;
+
          when '-' | '0' .. '9' =>
-            Scan_Number
-              (Self, Raw_Length, Is_Integer, Negative, Error);
+            Scan_Number (Self, Raw_Length, Is_Integer, Negative, Error);
             if Error.Code /= Errors.No_Error then
                return Data_Model.Null_Value;
             elsif not Is_Integer then
@@ -839,18 +937,25 @@ package body Flyology_Serde.Deserializers.JSON is
             else
                return Data_Model.Unsigned_Integer_Value;
             end if;
-         when '"'       => return Data_Model.Text_Value;
-         when '['       => return Data_Model.Sequence_Value;
-         when '{'       => return Data_Model.Record_Value;
-         when others    =>
+
+         when '"'              =>
+            return Data_Model.Text_Value;
+
+         when '['              =>
+            return Data_Model.Sequence_Value;
+
+         when '{'              =>
+            return Data_Model.Record_Value;
+
+         when others           =>
             Fail (Self, Errors.Syntax_Error, Error);
             return Data_Model.Null_Value;
       end case;
    end Peek_Kind;
 
    overriding
-   procedure Read_Null
-     (Self : in out Reader; Error : in out Errors.Error_Info) is
+   procedure Read_Null (Self : in out Reader; Error : in out Errors.Error_Info)
+   is
    begin
       Require_Leading (Self, "n", Error);
       Prepare_Value (Self, Error);
@@ -983,6 +1088,10 @@ package body Flyology_Serde.Deserializers.JSON is
       Prepare_Value (Self, Error);
       Decode_String (Self, Value, Length, True, Error);
       Finish_Value (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         Value := [others => ' '];
+         Length := 0;
+      end if;
    end Read_Text;
 
    overriding
@@ -992,10 +1101,10 @@ package body Flyology_Serde.Deserializers.JSON is
       Length : out Natural;
       Error  : in out Errors.Error_Info)
    is
-      Position : Natural;
-      Count    : Natural := 0;
-      Tag      : String (1 .. 6);
-      Tag_Length : Natural;
+      Position        : Natural;
+      Count           : Natural := 0;
+      Tag             : String (1 .. 6);
+      Tag_Length      : Natural;
       Input_Remaining : Natural;
    begin
       Value := [others => 0];
@@ -1050,9 +1159,9 @@ package body Flyology_Serde.Deserializers.JSON is
       for Index in 1 .. Count loop
          Value (Value'First + Ada.Streams.Stream_Element_Offset (Index - 1)) :=
            Ada.Streams.Stream_Element
-             (Hex_Value (Current (Self)) * 16
-              + Hex_Value (Current (Self, 1)));
+             (Hex_Value (Current (Self)) * 16 + Hex_Value (Current (Self, 1)));
          Advance (Self, 2, Error);
+         exit when Error.Code /= Errors.No_Error;
       end loop;
       Expect (Self, '"', Error);
       Expect (Self, '}', Error);
@@ -1060,6 +1169,10 @@ package body Flyology_Serde.Deserializers.JSON is
          Length := Count;
       end if;
       Finish_Value (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         Value := [others => 0];
+         Length := 0;
+      end if;
    end Read_Bytes;
 
    procedure Skip_Raw
@@ -1068,11 +1181,12 @@ package body Flyology_Serde.Deserializers.JSON is
       Error        : in out Errors.Error_Info);
 
    procedure Check_Raw_Depth
-     (Self : in out Reader;
+     (Self      : in out Reader;
       Raw_Depth : Natural;
-      Error : in out Errors.Error_Info) is
+      Error     : in out Errors.Error_Info) is
    begin
-      if Budgets.Depth (Self.Budget) > Natural (Self.Policy.Limits.Maximum_Nesting_Depth)
+      if Budgets.Depth (Self.Budget)
+        > Natural (Self.Policy.Limits.Maximum_Nesting_Depth)
         or else Raw_Depth
                 > Natural (Self.Policy.Limits.Maximum_Nesting_Depth)
                   - Budgets.Depth (Self.Budget)
@@ -1112,14 +1226,23 @@ package body Flyology_Serde.Deserializers.JSON is
          return;
       end if;
       case Current (Self) is
-         when 'n' => Expect_Literal (Self, "null", Error);
-         when 't' => Expect_Literal (Self, "true", Error);
-         when 'f' => Expect_Literal (Self, "false", Error);
-         when '"' => Skip_Raw_String (Self, Error);
+         when 'n'              =>
+            Expect_Literal (Self, "null", Error);
+
+         when 't'              =>
+            Expect_Literal (Self, "true", Error);
+
+         when 'f'              =>
+            Expect_Literal (Self, "false", Error);
+
+         when '"'              =>
+            Skip_Raw_String (Self, Error);
+
          when '-' | '0' .. '9' =>
             Scan_Number (Self, Raw_Length, Integerish, Negative, Error);
             Advance (Self, Raw_Length, Error);
-         when '[' | '{' =>
+
+         when '[' | '{'        =>
             Check_Raw_Depth (Self, Syntax_Depth + 1, Error);
             if Error.Code /= Errors.No_Error then
                return;
@@ -1154,7 +1277,8 @@ package body Flyology_Serde.Deserializers.JSON is
                   First := False;
                end loop;
             end;
-         when others =>
+
+         when others           =>
             Fail (Self, Errors.Syntax_Error, Error);
       end case;
    end Skip_Raw;
@@ -1285,11 +1409,7 @@ package body Flyology_Serde.Deserializers.JSON is
       Require_Leading (Self, "[", Error);
       Prepare_Value (Self, Error);
       Expect (Self, '[', Error);
-      Push
-        (Self,
-         Map_Container,
-         (Kind => Map_Container, others => <>),
-         Error);
+      Push (Self, Map_Container, (Kind => Map_Container, others => <>), Error);
    end Begin_Map;
 
    overriding
@@ -1330,8 +1450,8 @@ package body Flyology_Serde.Deserializers.JSON is
    end Next_Map_Entry;
 
    overriding
-   procedure End_Map
-     (Self : in out Reader; Error : in out Errors.Error_Info) is
+   procedure End_Map (Self : in out Reader; Error : in out Errors.Error_Info)
+   is
    begin
       Pop (Self, Map_Container, "]", Error);
    end End_Map;
@@ -1391,6 +1511,9 @@ package body Flyology_Serde.Deserializers.JSON is
          Self.Stack (Self.Depth).First_Item := False;
          Self.Stack (Self.Depth).Child := Child_Ready;
          Available := True;
+      else
+         Name := [others => ' '];
+         Length := 0;
       end if;
    end Next_Record_Field;
 
@@ -1454,6 +1577,10 @@ package body Flyology_Serde.Deserializers.JSON is
       Expect (Self, ',', Error);
       Expect (Self, '{', Error);
       Push (Self, Variant_Container, (others => <>), Error);
+      if Error.Code /= Errors.No_Error then
+         Alternative_Name := [others => ' '];
+         Name_Length := 0;
+      end if;
    end Begin_Variant;
 
    overriding

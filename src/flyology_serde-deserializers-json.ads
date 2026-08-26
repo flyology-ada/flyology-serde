@@ -3,6 +3,7 @@ with Flyology_Serde.Budgets;
 with Flyology_Serde.Data_Model;
 with Flyology_Serde.Deserialization;
 with Flyology_Serde.Errors;
+private with Flyology_Serde.JSON_Event_Drivers;
 with Flyology_Serde.Policies;
 with Interfaces;
 
@@ -18,18 +19,16 @@ package Flyology_Serde.Deserializers.JSON is
    --  prevent the Reader from outliving it. The source owner must not mutate
    --  the string through another alias or task during traversal. No operation
    --  returns a slice; decoded values are copied into caller-owned buffers.
-   type Reader (Source : not null access constant String) is
-     limited new Deserialization.Deserializer with private;
+   type Reader (Source : not null access constant String) is limited
+     new Deserialization.Deserializer with private;
 
    --  Initialize is required before traversal. Reset is the only legal reuse
    --  after any error and restarts at byte offset zero with a fresh budget.
    procedure Initialize
-     (Self   : in out Reader;
-      Policy : Policies.Decode_Policy := (others => <>));
+     (Self : in out Reader; Policy : Policies.Decode_Policy := (others => <>));
 
    procedure Reset
-     (Self   : in out Reader;
-      Policy : Policies.Decode_Policy := (others => <>));
+     (Self : in out Reader; Policy : Policies.Decode_Policy := (others => <>));
 
    --  After exactly one root value, Finish_Document consumes JSON whitespace
    --  and rejects trailing input. Is_Complete becomes true only on success.
@@ -47,8 +46,7 @@ package Flyology_Serde.Deserializers.JSON is
    function Input_Offset (Self : Reader) return Natural;
 
    overriding
-   function Capabilities
-     (Self : Reader) return Data_Model.Format_Capabilities;
+   function Capabilities (Self : Reader) return Data_Model.Format_Capabilities;
 
    overriding
    function Peek_Kind
@@ -140,8 +138,7 @@ package Flyology_Serde.Deserializers.JSON is
       Error     : in out Errors.Error_Info);
 
    overriding
-   procedure End_Map
-     (Self : in out Reader; Error : in out Errors.Error_Info);
+   procedure End_Map (Self : in out Reader; Error : in out Errors.Error_Info);
 
    overriding
    procedure Begin_Record
@@ -208,15 +205,18 @@ private
    end record;
 
    type Container_Stack is
-     array (Positive range 1 .. Policies.Maximum_Supported_Nesting) of Container_Frame;
+     array (Positive range 1 .. Policies.Maximum_Supported_Nesting)
+     of Container_Frame;
 
    type Root_State is (Root_Ready, Root_In_Progress, Root_Complete);
 
-   type Reader (Source : not null access constant String) is
-     limited new Deserialization.Deserializer with record
+   type Reader (Source : not null access constant String) is limited
+     new Deserialization.Deserializer
+   with record
       Policy            : Policies.Decode_Policy;
       Budget            : Budgets.Decode_Budget;
       Stack             : Container_Stack := [others => <>];
+      Syntax            : JSON_Event_Drivers.Driver (Source);
       Depth             : Natural := 0;
       Cursor            : Natural := 0;
       Root              : Root_State := Root_Ready;

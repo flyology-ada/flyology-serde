@@ -11,6 +11,9 @@ tags = ["test"]
 
 executables = ["tests"]
 
+[environment]
+FLYOLOGY_SERDE_TEST_HOOKS.set = "enabled"
+
 [[depends-on]]
 flyology_serde = "*"
 

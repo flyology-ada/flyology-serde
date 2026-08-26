@@ -2,14 +2,18 @@
 
 Date: 2026-08-26
 
-Status: corrected pre-integration architecture proposal; no dependency or runtime change is authorized by this
-record.
+Status: gate-only migration checkpoint under change review. This record does not freeze or claim completion of the
+event-to-Serde translator described below.
 
 ## Reviewed release
 
-This assessment covers the indexed `flyology_json=0.1.0-dev` release from source commit
+This assessment initially covered the indexed `flyology_json=0.1.0-dev` release from source commit
 `f8a4a0331a03552733e7bd8531552ba0c21f8997` and Flyology Alire-index commit
-`5693988242276f7a93b5034383764f87f5a42890`. The release exposes the trusted incremental `Parsing`
+`5693988242276f7a93b5034383764f87f5a42890`. Integration consumes the reviewed successor source commit
+`3445b7540b89c3d1aa5c55d43b2817fab97710ae` from index commit
+`dab710a490366488a1542e82104d531fe9cd25e9`. Relative to the independently accepted parser/API commit
+`ae02ae2`, that successor changes only `scripts/verify-release.sh`; the public parser, profiles, and implementation
+are byte-identical. The release exposes the trusted incremental `Parsing`
 `Step`/`Drain` event grammar, exact number lexemes, decoded Unicode fragments, duplicate-name policy,
 transactional `Writing`, and checked signed and unsigned integer conversion. Its release record explicitly
 states that the trusted core has no accounting or budget surface for untrusted consumer integration.
@@ -28,7 +32,8 @@ input-unit bound; the budget has no independent parser-work or total-work catego
 code. The input may be untrusted, and its caller-driven `Step` boundary permits Serde to bound how much input one
 call can inspect without requiring a parser-internal accounting hook.
 
-The first adapter uses one-byte input windows. Before exposing a new byte, it consumes that byte exactly once from
+The first implemented checkpoint is a syntax-admission gate using one-byte input windows. Before exposing a new
+byte, it consumes that byte exactly once from
 the existing input budget and records the charged window. If `Step` publishes a zero-consumption event, the adapter
 reuses the same already charged byte; it does not charge again. When the parser consumes it, the adapter advances
 the source offset and clears the window. End-of-input calls use an empty array and no input charge. This may charge
@@ -47,8 +52,9 @@ charge.
 The ceiling is conservative: a zero-consumption event advances one phase of the closed grammar. Another token
 fragment, container, or value requires input consumption; an inline decoded scalar is the bounded completion of a
 previously consumed escape; and document, string, name, number, and container boundary events form finite sequences.
-Direct tests must record the maximum observed zero-consumption run for every complete one-byte fixture, malformed
-fixture, and event kind, and inject the exact ceiling and one-over transition into the adapter guard. With
+Before this checkpoint freezes, direct tests must record the maximum observed zero-consumption run for complete
+one-byte fixtures, malformed fixtures, and every event kind, and exercise the exact ceiling and one-over transition
+in the adapter guard without leaving a production test hook. With
 `Preserve_Unchecked`, no duplicate index or retained-name comparison occurs in the parser. Total parser calls are
 therefore bounded by admitted input bytes plus the exact zero-progress ceiling per consumed-byte/terminal interval.
 This is the initial correctness profile. A later batched `Drain` optimization requires separate accounting,
@@ -81,9 +87,12 @@ denied fragment is not partially copied, and a later failure leaves the scalar o
 the handwritten reader. Split-fragment tests compare both successful values and every failed caller buffer/length or
 scalar output against that oracle.
 
-The event engine remains private behind the existing `Flyology_Serde.Deserializers.JSON.Reader` API. The current
-handwritten reader remains a byte-for-byte and diagnostic oracle until all JSON, adapter, malformed, arbitrary-bound,
-budget, abort/reset, and allocation tests pass against both engines. Root candidate commit still occurs only after
+The event engine remains private behind the existing `Flyology_Serde.Deserializers.JSON.Reader` API. In this
+checkpoint the mature handwritten reader remains the sole logical-value, envelope, text, and number translator;
+Flyology JSON independently admits every advanced byte and accepts the complete document. This catches syntax drift
+without yet satisfying the planned event-to-Reader-state migration. The handwritten reader remains a byte-for-byte
+and diagnostic oracle until all JSON, adapter, malformed, arbitrary-bound, budget, abort/reset, and allocation tests
+pass against a complete event translator. Root candidate commit still occurs only after
 the existing `Finish_Document`; Flyology JSON's `Document_Complete` is necessary but does not publish a Serde
 candidate. Serde error-path ownership, logical optional/variant envelopes, bytes encoding, and duplicate/alias
 policy remain unchanged.
@@ -101,14 +110,19 @@ scope exactly once, and leaves the reader failed until `Reset`; no accepted char
 guard latches `Invalid_State` before taking this abort path, so cleanup cannot replace it.
 
 `Reset` first terminalizes and cleans any old active or `Failure_Pending` parser operation with normal primary
-precedence, then deliberately discards every diagnostic belonging to that old operation. A reported or unreported
-old parse failure is therefore never a reset blocker and never leaks into the new operation. Only a new cleanup
+precedence, then deliberately discards every diagnostic belonging to that old operation. The statically selected
+`Preserve_Unchecked` parser performs no retained-name admission, which is the only current Flyology JSON path that
+constructs `Failure_Pending`; Serde therefore cannot manufacture that state without switching to an incompatible
+duplicate profile or adding a production test mutation hook. The indexed parser's own lifecycle suite covers that
+state. Serde directly tests reset after its reachable reported `Step_Failed` state and retains the defensive pending
+diagnostic cleanup branch. A reported or unreported old parse failure is therefore never a reset blocker and never
+leaks into the new operation. Only a new cleanup
 mechanism defect or failure while applying the new Flyology JSON `Reset`/`Initialize` and profile may prevent
 readiness; because the public `Reset` has no error output, such a failure leaves the Reader poisoned and does not
 retroactively mutate a caller's prior `Error_Info`. Reset applies the same explicit profile, installs a fresh
 `Decode_Budget`, and publishes Reader readiness only after every new-operation step succeeds. Direct tests reset
-from an unreported JSON `Failure_Pending` and after a reported `Step_Failed`, then require readiness, a fresh budget,
-byte offset zero, and no stale diagnostic leakage. JSON cleanup is nonraising and allocation-free. An unexpected
+after a reported `Step_Failed`, then require readiness, a fresh budget, byte offset zero, and no stale diagnostic
+leakage. JSON cleanup is nonraising and allocation-free. An unexpected
 adapter programming exception performs the same cleanup and then remains an exception; it is never reported as
 malformed input or allowed to replace an already latched input diagnostic.
 
@@ -121,9 +135,15 @@ abort/finalization precedence.
 
 - Keep CBOR unchanged and keep the current JSON reader as the conformance oracle during the parser migration.
 - After explicit dependency authorization, add exactly `flyology_json = "0.1.0-dev"` from the Flyology Alire index;
-  do not add a Git/path pin or a generator dependency.
-- Implement the one-byte `Step` driver and event-to-existing-Reader-state translation privately before selecting a
-  batched path or deleting handwritten parsing code.
+  do not add a Git/path pin or a generator dependency. Because the development index entry can advance, require
+  every resolved root and test lock to name reviewed source commit `3445b7540b89c3d1aa5c55d43b2817fab97710ae`;
+  also require the exact normalized release-metadata block SHA-256
+  `a11cf63220d0244a65efd72d94c25adb09ba9443e5494d51d8487890abca2a3f` and the closed reviewed solution-state set.
+  An index update therefore fails closed until its exact successor receives another review.
+- Freeze the one-byte syntax gate only after its own lifecycle, charge, terminal-diagnostic, and transcript review;
+  do not describe that checkpoint as the complete event adapter.
+- Implement event-to-existing-Reader-state translation privately before selecting a batched path or deleting
+  handwritten parsing code.
 - Preserve all current public JSON/CBOR APIs, logical bytes, diagnostics, offsets, budget outcomes, and fixtures.
 - Keep this runtime work independent of Ada Type IR, generator attestation, Wire, Flyology tasking, and remoting.
 
@@ -134,3 +154,7 @@ lifetime, static duplicate/profile selection, exact offset mapping, candidate no
 precedence. The change review must compare the complete existing JSON suite under both engines, including failed
 output preservation, and add direct one-byte charge and zero-progress traces. Any dependency or adapter
 implementation still requires explicit dependency authorization and its own final change review.
+
+For the current static `Preserve_Unchecked` instance, direct construction of `Failure_Pending` is non-applicable and
+is not a Serde checkpoint gate; the dependency's reviewed strict-instance suite owns that state. A future parser
+profile or implementation that makes it reachable reopens this lifecycle test gate before integration.
