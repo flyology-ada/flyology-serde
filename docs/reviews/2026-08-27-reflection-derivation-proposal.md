@@ -243,7 +243,7 @@ claim of this checkpoint.
 ## Uninstalled implementation checkpoint
 
 The repository now contains `experiments/reflection_serialization`, an uninstalled implementation against exact
-Reflection commit `89afd7dbfb38f9e545a02dabe57ff9ec0cd03b16`. Its runner exports that commit into a fresh temporary source tree,
+Reflection commit `b63e8c9b0a9aec3a97776ae9fbb4ce5c34d81c1c`. Its runner exports that commit into a fresh temporary source tree,
 builds Reflection there, builds and runs the integration in fresh temporary object and executable directories,
 requires a mismatched source type and `Observe` procedure to fail at the external generic instantiation, and checks
 that Reflection or extractor dependencies do not enter the root Serde source/build closure. The maintained
@@ -267,3 +267,11 @@ diagnostic in the controlled source. The final gate requires the one intended `O
 the controlled instantiation, rejects additional GNAT errors, and rejects a completed main ALI, object, or
 executable. Both independent fix re-reviews report P0/P1/P2 none and independently reran the exact archived-source
 integration against commit `89afd7dbfb38f9e545a02dabe57ff9ec0cd03b16` successfully.
+
+The release-candidate delta from that reviewed API commit to
+`b63e8c9b0a9aec3a97776ae9fbb4ce5c34d81c1c` adds only the MIT and Apache-2.0-with-LLVM-exception license texts that
+match the unchanged manifest expression. The Serde consumer review reports P0/P1/P2 none; no Ada, generator,
+profile, project, test, documentation, or workflow path changes across the range. The attested runner therefore uses
+the release candidate while repository publication and the indexed release remain external promotion gates. Two
+independent Serde release/fix re-reviews also report P0/P1/P2 none and reran the complete exact archived-source
+integration against the clean detached release candidate successfully.
