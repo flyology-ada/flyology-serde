@@ -237,6 +237,13 @@ package body Flyology_Serde_Generator.Lowered_Records.Test_Fixtures is
          Maximum_Logical_Events  => 64);
    end Populate;
 
+   function Legacy_Record return Model is
+   begin
+      return Value : Model do
+         Populate (Value);
+      end return;
+   end Legacy_Record;
+
    function Lower_Wire_Record
      (Overlay    : Overlay_Document;
       Budget     : in out Operation_Budget;

@@ -8,6 +8,7 @@ scaffold_tests="$generator_root/tests/bin/scaffold_tests"
 renderer_tests="$generator_root/tests/bin/flyology_serde_generator-renderer_tests"
 production_shape_renderer_tests="$generator_root/tests/bin/"
 production_shape_renderer_tests="${production_shape_renderer_tests}flyology_serde_generator-production_shape_renderer_tests"
+rendering_abort_test="$generator_root/tests/bin/flyology_serde_generator-rendering_abort_test"
 build_sha_256_tests="$generator_root/tests/bin/build_sha_256_tests"
 build_budgets_tests="$generator_root/tests/bin/build_budgets_tests"
 atomic_ledgers_tests="$generator_root/tests/bin/atomic_ledgers_tests"
@@ -50,6 +51,11 @@ snapshot_hook_object="$generator_root/tests/obj/attestation_hook_elision/"
 snapshot_hook_object="${snapshot_hook_object}flyology_serde_generator-build_attestations-local_snapshots.o"
 snapshot_hook_ali="$generator_root/tests/obj/attestation_hook_elision/"
 snapshot_hook_ali="${snapshot_hook_ali}flyology_serde_generator-build_attestations-local_snapshots.ali"
+rendering_hook_project="$generator_root/tests/rendering_hook_elision.gpr"
+rendering_hook_object="$generator_root/tests/obj/rendering_hook_elision/"
+rendering_hook_object="${rendering_hook_object}flyology_serde_generator-rendering.o"
+rendering_hook_ali="$generator_root/tests/obj/rendering_hook_elision/"
+rendering_hook_ali="${rendering_hook_ali}flyology_serde_generator-rendering.ali"
 overlay_fixture="$generator_root/../tests/fixtures/wire-record-overlay.json"
 policy_overlay_fixture="$generator_root/../tests/fixtures/wire-record-overlay-policy.json"
 type_ir_fixture="$generator_root/../vendor/type_ir/fixtures/wire-record-shape.json"
@@ -161,6 +167,58 @@ for hook_optimization in -O0 -O2; do
    fi
 done
 for hook_optimization in -O0 -O2; do
+   alr -C "$generator_root" exec -- gprbuild -f -p -u -P "$rendering_hook_project" \
+     -XHOOK_OPT="$hook_optimization" \
+     flyology_serde_generator-rendering.adb >/dev/null
+   if ! test -r "$rendering_hook_object"; then
+      echo "renderer hook object is missing after $hook_optimization compilation" >&2
+      exit 1
+   fi
+   if ! test -r "$rendering_hook_ali"; then
+      echo "renderer hook ALI is missing after $hook_optimization compilation" >&2
+      exit 1
+   fi
+   if nm "$rendering_hook_object" | grep -qi flyology_serde_disabled_rendering; then
+      echo "disabled renderer test hook survived $hook_optimization compilation" >&2
+      exit 1
+   fi
+   if nm "$rendering_hook_object" | grep -qi rendering_test_hooks; then
+      echo "renderer test-hook unit survived $hook_optimization compilation" >&2
+      exit 1
+   fi
+   if strings "$rendering_hook_object" | grep -Eqi \
+     'flyology_serde_disabled_rendering|test_identity'; then
+      echo "renderer test state or sentinel survived $hook_optimization compilation" >&2
+      exit 1
+   fi
+   if grep -Eqi 'flyology_serde_disabled_rendering|test_identity' "$rendering_hook_ali"; then
+      echo "renderer test state or sentinel survived in ALI at $hook_optimization" >&2
+      exit 1
+   fi
+done
+if rg -n 'Test_Identity' "$generator_root/src/flyology_serde_generator-rendering.adb" \
+  >/dev/null; then
+   echo "renderer product layout retains test-only identity state" >&2
+   exit 1
+fi
+if ! awk '
+  /if Test_Hooks[.]Enabled and then Detached/ { guarded = 1 }
+  /Detached[.]all.Address/ {
+     seen += 1
+     if (!guarded) { bad = 1 }
+  }
+  guarded && /^[[:space:]]*else[[:space:]]*$/ { guarded = 0 }
+  END { exit bad || seen != 1 }
+' "$generator_root/src/flyology_serde_generator-rendering.adb"; then
+   echo "renderer allocation-address test seam escaped its literal guard" >&2
+   exit 1
+fi
+if ! grep -Eq 'Enabled[[:space:]]*:[[:space:]]*constant Boolean := False;' \
+  "$generator_root/src/test_hooks_disabled/flyology_serde_generator-rendering_test_hooks.ads"; then
+   echo "renderer disabled hook does not expose a literal false guard" >&2
+   exit 1
+fi
+for hook_optimization in -O0 -O2; do
    alr -C "$generator_root" exec -- gprbuild -f -p -u -P "$attestation_hook_project" \
      -XHOOK_OPT="$hook_optimization" \
      flyology_serde_generator-build_attestations-source_lists.adb >/dev/null
@@ -240,6 +298,7 @@ python3 "$generator_root/../generate.py" --type-ir "$type_ir_fixture" \
   "$golden_root/flyology-generated.ads" "$golden_root/flyology-generated.adb" \
   "$test_root/python/flyology-generated.ads" "$test_root/python/flyology-generated.adb" \
   "$overlay_fixture" "$policy_overlay_fixture"
+"$rendering_abort_test"
 mkdir "$test_root/production-generated"
 "$production_shape_renderer_tests" "$test_root/production-generated"
 GENERATED_DIR="$test_root/production-generated" \

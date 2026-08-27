@@ -22,6 +22,8 @@ package Flyology_Serde_Generator.Lowered_Records.Test_Fixtures is
       return Model
    with Pre => Flyology_Serde_Generator.Overlays.Is_Valid (Overlay);
 
+   function Legacy_Record return Model;
+
    function Malformed (Kind : Malformation) return Model;
 
    type Line_Boundary is (Signed_Component_Line, Presentation_Line);

@@ -3,12 +3,16 @@ with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
 with Flyology_Serde_Generator.Graph_Work;
+with Flyology_Serde_Generator.Rendering_Test_Hooks;
+with System.Soft_Links;
 
 package body Flyology_Serde_Generator.Rendering is
    use Ada.Strings.Unbounded;
    use Flyology_Serde_Generator.Diagnostics;
    use Flyology_Serde_Generator.Lowered_Records;
    use Flyology_Serde_Generator.Requests;
+   package Rendering_Hooks renames
+     Flyology_Serde_Generator.Rendering_Test_Hooks;
 
    type Artifact_Data is record
       Specification_Name    : Unbounded_String;
@@ -22,15 +26,100 @@ package body Flyology_Serde_Generator.Rendering is
        (Object => Artifact_Data,
         Name   => Artifact_Data_Access);
 
-   procedure Discard (Value : in out Artifact_Data_Access) is
+   procedure Try_Discard
+     (Value     : in out Artifact_Data_Access;
+      Succeeded : out Boolean)
+   is
+      package Test_Hooks renames
+        Flyology_Serde_Generator.Rendering_Test_Hooks;
+
       Detached : Artifact_Data_Access := Value;
    begin
-      Value := null;
-      Free (Detached);
+      if Test_Hooks.Enabled and then Detached /= null then
+         declare
+            Address  : constant System.Address := Detached.all'Address;
+            Identity : Test_Hooks.Artifact_Identity;
+            Found    : Boolean;
+            Released : Boolean := False;
+            Damaged  : Boolean := False;
+            Injected : Boolean;
+         begin
+            Test_Hooks.Begin_Free (Address, Identity, Found);
+            Value := null;
+            begin
+               Test_Hooks.Pause (Test_Hooks.Cleanup_Detached, Released);
+            exception
+               when others =>
+                  Damaged := True;
+            end;
+            if not Released then
+               Damaged := True;
+            end if;
+            begin
+               Free (Detached);
+            exception
+               when others =>
+                  if Found then
+                     Test_Hooks.Note_Damaged (Identity);
+                  end if;
+                  raise;
+            end;
+            if Found then
+               Test_Hooks.Note_Freed (Identity);
+            else
+               Damaged := True;
+            end if;
+            Test_Hooks.Take_Failure (Test_Hooks.Cleanup_Damage, Injected);
+            Damaged := Damaged or else Injected;
+            Succeeded := not Damaged;
+         end;
+      else
+         Value := null;
+         Free (Detached);
+         Succeeded := True;
+      end if;
    exception
       when others =>
-         null;
+         if Value /= null then
+            Value := null;
+            begin
+               Free (Detached);
+            exception
+               when others =>
+                  null;
+            end;
+         end if;
+         Succeeded := False;
+   end Try_Discard;
+
+   procedure Discard (Value : in out Artifact_Data_Access) is
+      Succeeded : Boolean;
+   begin
+      Try_Discard (Value, Succeeded);
    end Discard;
+
+   type Cleanup_Result is (Not_Attempted, Cleanup_Succeeded, Cleanup_Damaged);
+
+   type Artifact_Holder (Result : access Cleanup_Result) is
+     new Ada.Finalization.Limited_Controlled with
+   record
+      Value : Artifact_Data_Access := null;
+   end record;
+
+   overriding procedure Finalize (Item : in out Artifact_Holder) is
+      Succeeded : Boolean;
+   begin
+      if Item.Value = null then
+         Item.Result.all := Cleanup_Succeeded;
+      else
+         Try_Discard (Item.Value, Succeeded);
+         Item.Result.all :=
+           (if Succeeded then Cleanup_Succeeded else Cleanup_Damaged);
+      end if;
+   exception
+      when others =>
+         Item.Result.all := Cleanup_Damaged;
+   end Finalize;
 
    Unsupported_Model : exception;
    Invalid_Render    : exception;
@@ -1838,100 +1927,208 @@ package body Flyology_Serde_Generator.Rendering is
       Into       : in out Rendered_Artifacts;
       Diagnostic : out Flyology_Serde_Generator.Diagnostics.Diagnostic)
    is
-      Candidate  : Artifact_Data_Access := null;
-      Accepted   : Boolean;
-      Previous   : Artifact_Data_Access;
-      Model_Work : Natural := 0;
+      Candidate_Result : aliased Cleanup_Result := Not_Attempted;
+      Accepted         : Boolean;
+      Model_Work       : Natural := 0;
    begin
       Clear (Diagnostic);
-      if Is_Poisoned (Budget) then
-         Set (Diagnostic, Resource_Exhausted);
-         return;
-      end if;
-      if Has_Type_Graph (Value) then
-         Model_Work := Graph_Work_Units (Value);
-      else
-         Validate (Value);
-         Model_Work := With_Unit_Count (Value) + Field_Count (Value);
-      end if;
-      Charge_Work (Budget, Model_Work, Accepted);
-      if not Accepted then
-         raise Exhausted;
-      end if;
-      if Has_Type_Graph (Value) then
-         declare
-            Members         : Natural := 0;
-            Text_Bytes      : Natural := 0;
-            Recomputed_Work : Natural := 0;
-         begin
-            Graph_Size (Value, Members, Text_Bytes, Recomputed_Work);
-            if Recomputed_Work /= Model_Work then
-               raise Unsupported_Model;
-            end if;
-            Preflight_Graph (Value);
-         end;
-      end if;
-      Start_Rendered_Artifact (Budget, Accepted);
-      if not Accepted then
-         raise Exhausted;
-      end if;
-      Start_Rendered_Artifact (Budget, Accepted);
-      if not Accepted then
-         raise Exhausted;
-      end if;
-      Candidate :=
-        new Artifact_Data'
-          (Specification_Name    =>
-             To_Unbounded_String (File_Stem (Output_Unit (Value)) & ".ads"),
-           Specification_Payload => Null_Unbounded_String,
-           Body_Name             =>
-             To_Unbounded_String (File_Stem (Output_Unit (Value)) & ".adb"),
-           Body_Payload          => Null_Unbounded_String);
       declare
-         Spec_Output :
-           Output_Sink
-             (False, Budget'Access, Candidate.Specification_Payload'Access);
-         Body_Output :
-           Output_Sink (False, Budget'Access, Candidate.Body_Payload'Access);
+         Candidate : Artifact_Holder (Candidate_Result'Access);
       begin
-         Emit_Spec (Value, Spec_Output);
-         Emit_Body (Value, Body_Output);
-         if not Spec_Output.Last_Was_LF
-           or else not Body_Output.Last_Was_LF
-           or else Length (Candidate.Specification_Payload)
-                   /= Spec_Output.Bytes
-           or else Length (Candidate.Body_Payload) /= Body_Output.Bytes
-         then
-            raise Invalid_Render;
+         if Is_Poisoned (Budget) then
+            Set (Diagnostic, Resource_Exhausted);
+            return;
          end if;
+         if Has_Type_Graph (Value) then
+            Model_Work := Graph_Work_Units (Value);
+         else
+            Validate (Value);
+            Model_Work := With_Unit_Count (Value) + Field_Count (Value);
+         end if;
+         Charge_Work (Budget, Model_Work, Accepted);
+         if not Accepted then
+            raise Exhausted;
+         end if;
+         if Has_Type_Graph (Value) then
+            declare
+               Members         : Natural := 0;
+               Text_Bytes      : Natural := 0;
+               Recomputed_Work : Natural := 0;
+            begin
+               Graph_Size (Value, Members, Text_Bytes, Recomputed_Work);
+               if Recomputed_Work /= Model_Work then
+                  raise Unsupported_Model;
+               end if;
+               Preflight_Graph (Value);
+            end;
+         end if;
+         Start_Rendered_Artifact (Budget, Accepted);
+         if not Accepted then
+            raise Exhausted;
+         end if;
+         Start_Rendered_Artifact (Budget, Accepted);
+         if not Accepted then
+            raise Exhausted;
+         end if;
+         declare
+            Defer_Active : Boolean := False;
+         begin
+            System.Soft_Links.Abort_Defer.all;
+            Defer_Active := True;
+            Candidate.Value :=
+              new Artifact_Data'
+                (Specification_Name    =>
+                   To_Unbounded_String
+                     (File_Stem (Output_Unit (Value)) & ".ads"),
+                 Specification_Payload => Null_Unbounded_String,
+                 Body_Name             =>
+                   To_Unbounded_String
+                     (File_Stem (Output_Unit (Value)) & ".adb"),
+                 Body_Payload          => Null_Unbounded_String);
+            if Rendering_Hooks.Enabled then
+               declare
+                  Released : Boolean;
+                  Fail     : Boolean;
+               begin
+                  Rendering_Hooks.Note_Attached (Candidate.Value.all'Address);
+                  Rendering_Hooks.Pause
+                    (Rendering_Hooks.After_Attachment, Released);
+                  if not Released then
+                     raise Program_Error with
+                       "renderer attachment test pause timed out";
+                  end if;
+                  Rendering_Hooks.Take_Failure
+                    (Rendering_Hooks.After_Attachment_Failure, Fail);
+                  if Fail then
+                     raise Program_Error with
+                       "injected renderer attachment failure";
+                  end if;
+               end;
+            end if;
+            Defer_Active := False;
+            System.Soft_Links.Abort_Undefer.all;
+         exception
+            when others =>
+               if Defer_Active then
+                  Defer_Active := False;
+                  System.Soft_Links.Abort_Undefer.all;
+               end if;
+               raise;
+         end;
+         declare
+            Spec_Output :
+              Output_Sink
+                (False,
+                 Budget'Access,
+                 Candidate.Value.Specification_Payload'Access);
+            Body_Output :
+              Output_Sink
+                (False, Budget'Access, Candidate.Value.Body_Payload'Access);
+         begin
+            Emit_Spec (Value, Spec_Output);
+            Emit_Body (Value, Body_Output);
+            if not Spec_Output.Last_Was_LF
+              or else not Body_Output.Last_Was_LF
+              or else Length (Candidate.Value.Specification_Payload)
+                      /= Spec_Output.Bytes
+              or else Length (Candidate.Value.Body_Payload) /= Body_Output.Bytes
+            then
+               raise Invalid_Render;
+            end if;
+         end;
+         if Rendering_Hooks.Enabled then
+            declare
+               Released : Boolean;
+               Fail     : Boolean;
+            begin
+               Rendering_Hooks.Pause
+                 (Rendering_Hooks.Before_Publication, Released);
+               if not Released then
+                  raise Program_Error with
+                    "renderer prepublication test pause timed out";
+               end if;
+               Rendering_Hooks.Take_Failure
+                 (Rendering_Hooks.Before_Publication_Failure, Fail);
+               if Fail then
+                  raise Program_Error with
+                    "injected renderer prepublication failure";
+               end if;
+            end;
+         end if;
+         declare
+            Previous_Result : aliased Cleanup_Result := Not_Attempted;
+         begin
+            declare
+               Previous     : Artifact_Holder (Previous_Result'Access);
+               pragma Unreferenced (Previous);
+               Defer_Active : Boolean := False;
+            begin
+               System.Soft_Links.Abort_Defer.all;
+               Defer_Active := True;
+               if Rendering_Hooks.Enabled then
+                  declare
+                     Released : Boolean;
+                     Fail     : Boolean;
+                  begin
+                     Rendering_Hooks.Pause
+                       (Rendering_Hooks.Deferred_Publication, Released);
+                     if not Released then
+                        raise Program_Error with
+                          "renderer publication test pause timed out";
+                     end if;
+                     Rendering_Hooks.Take_Failure
+                       (Rendering_Hooks.Deferred_Publication_Failure, Fail);
+                     if Fail then
+                        raise Program_Error with
+                          "injected renderer deferred-publication failure";
+                     end if;
+                  end;
+               end if;
+               Previous.Value := Into.Data;
+               Into.Data := Candidate.Value;
+               Candidate.Value := null;
+               Defer_Active := False;
+               System.Soft_Links.Abort_Undefer.all;
+            exception
+               when others =>
+                  if Defer_Active then
+                     Defer_Active := False;
+                     System.Soft_Links.Abort_Undefer.all;
+                  end if;
+                  raise;
+            end;
+            if Previous_Result = Cleanup_Damaged then
+               Poison (Budget);
+               if Code (Diagnostic) = No_Error then
+                  Set (Diagnostic, Internal_Error);
+               end if;
+            end if;
+         end;
+      exception
+         when Unsupported_Model =>
+            Set (Diagnostic, Unsupported_Lowered_Model);
+         when Invalid_Render =>
+            Poison (Budget);
+            Set (Diagnostic, Internal_Error);
+         when Exhausted =>
+            Set (Diagnostic, Resource_Exhausted);
+         when Storage_Error =>
+            Poison (Budget);
+            if Code (Diagnostic) = No_Error then
+               Set (Diagnostic, Internal_Error);
+            end if;
+         when others =>
+            Poison (Budget);
+            if Code (Diagnostic) = No_Error then
+               Set (Diagnostic, Internal_Error);
+            end if;
       end;
-      Previous := Into.Data;
-      Into.Data := Candidate;
-      Candidate := null;
-      Discard (Previous);
-   exception
-      when Unsupported_Model =>
-         Discard (Candidate);
-         Set (Diagnostic, Unsupported_Lowered_Model);
-      when Invalid_Render =>
-         Discard (Candidate);
-         Poison (Budget);
-         Set (Diagnostic, Internal_Error);
-      when Exhausted =>
-         Discard (Candidate);
-         Set (Diagnostic, Resource_Exhausted);
-      when Storage_Error =>
-         Discard (Candidate);
+      if Candidate_Result = Cleanup_Damaged then
          Poison (Budget);
          if Code (Diagnostic) = No_Error then
             Set (Diagnostic, Internal_Error);
          end if;
-      when others =>
-         Discard (Candidate);
-         Poison (Budget);
-         if Code (Diagnostic) = No_Error then
-            Set (Diagnostic, Internal_Error);
-         end if;
+      end if;
    end Render_Payload;
 
    function Is_Valid (Value : Rendered_Artifacts) return Boolean

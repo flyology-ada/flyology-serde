@@ -44,3 +44,4 @@ src/flyology_serde_generator-requests.ads
 src/flyology_serde_generator.ads
 src/test_hooks_disabled/flyology_serde_generator-build_attestation_test_hooks.ads
 src/test_hooks_disabled/flyology_serde_generator-build_process_test_hooks.ads
+src/test_hooks_disabled/flyology_serde_generator-rendering_test_hooks.ads
