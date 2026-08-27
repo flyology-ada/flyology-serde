@@ -2,9 +2,10 @@
 
 Date: 2026-08-26
 
-Status: accepted architecture; implementation in progress. The map slice is
-reviewed; the remaining container scope is pending. It extends the accepted
-private root-scalar milestone and grants no public backend-selection authority.
+Status: accepted architecture; implementation in progress. The sequence,
+record, map, and optional slices are reviewed; the remaining container scope
+is pending. It extends the accepted private root-scalar milestone and grants
+no public backend-selection authority.
 
 ## Scope and authority
 
@@ -446,3 +447,33 @@ The final verification ran the root build and assertion-enabled tests, the
 Flyology JSON dependency and Python checks, test-hook elision, every maintained
 Ada and Python generator gate, release-marker and fixture-manifest checks, APM
 0.28.0 install/compile/audit reproduction, formatting, and diff checks.
+
+## Optional implementation review record
+
+The optional implementation and two fix re-reviews closed with P0 none, P1
+none, and P2 none. Review fixes made the optional frame retain its exact
+presence phase, require the mandatory tag terminal for `none`, require the
+exact child terminal or no terminal for `some`, and reject every inapplicable
+number-event payload before publishing the frame. No synthetic corruption hook
+was added: the state is not caller-constructible or mutable through the private
+API, both valid branches are covered, and the complete defensive truth table is
+explicit in `End_Optional`. Omitting the hook is a scoped test-design decision,
+not a language-security claim.
+
+Differential tests cover root and nested none/some values, optional and
+sequence/record/map nesting in both directions, optional map keys and values,
+item/value/depth limits, every input boundary including literal-preflight
+retention, a source ending at `Positive'Last`, prelatched output, call-order
+misuse, abort/reset with and without a primary diagnostic, driver exceptions,
+structural and number transcript mutations, parent-map resolution after pop,
+and real root-adapter commit/rollback after a closer or trailing-document
+failure. The exact whitespace-rich denial trace retains 0, 1, 2, 3, 4, 5, 6,
+6, 6, 6, 10, and 11 bytes for limits 0 through 11 while reporting the matching
+denial offsets.
+
+Final verification passed the root build and assertion-enabled tests, both
+Flyology JSON lock attestations and their Python suite, test-hook elision, the
+Ada generator build/scaffold/smoke suite, all 12 Python generator tests,
+release-marker and fixture-manifest checks, the generated-fixture crate, all
+10 APM 0.28.0 audit checks, formatting, the 110-column scan, and
+`git diff --check`.

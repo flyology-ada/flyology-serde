@@ -199,11 +199,12 @@ private
       Map_Value_In_Progress);
 
    type Container_Frame is record
-      Kind       : Container_Kind := Sequence_Container;
-      Child      : Child_State := No_Child;
-      Map_Phase  : Map_State := Map_Needs_Entry;
-      First_Item : Boolean := True;
-      Exhausted  : Boolean := False;
+      Kind             : Container_Kind := Sequence_Container;
+      Child            : Child_State := No_Child;
+      Map_Phase        : Map_State := Map_Needs_Entry;
+      First_Item       : Boolean := True;
+      Exhausted        : Boolean := False;
+      Optional_Present : Boolean := False;
    end record;
    type Container_Stack is
      array (Positive range 1 .. Policies.Maximum_Supported_Nesting)
@@ -221,6 +222,8 @@ private
       Sequence_End_Terminal,
       Map_Key_Terminal,
       Map_Value_Terminal,
+      Optional_Tag_Terminal,
+      Optional_Child_Terminal,
       Record_Child_Terminal,
       Record_End_Terminal);
 

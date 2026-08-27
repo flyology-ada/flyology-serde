@@ -55,6 +55,15 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
        and then (for all Value of Item.Decoded => Value = 0)
        and then not Item.Boolean_Payload);
 
+   function Has_Raw_Only_Payload (Item : Drivers.Event_Summary) return Boolean
+   is (Item.Has_Raw_Byte
+       and then Item.Decoded_Form = Drivers.No_Decoded
+       and then Item.Decoded_Offset = 0
+       and then Item.Decoded_Source_Length = 0
+       and then Item.Decoded_Length = 0
+       and then (for all Value of Item.Decoded => Value = 0)
+       and then not Item.Boolean_Payload);
+
    procedure Mark_Value_Complete
      (Self             : in out Reader;
       Terminal         : Terminal_State;
@@ -86,6 +95,9 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
 
                when Record_Container   =>
                   Self.Owner := Record_Child_Terminal;
+
+               when Optional_Container =>
+                  Self.Owner := Optional_Child_Terminal;
 
                when others             =>
                   raise Program_Error;
@@ -316,7 +328,7 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
             Reject (Self, Errors.Invalid_State, Error);
          end if;
       elsif Self.Stack (Self.Depth).Kind
-            not in Sequence_Container | Record_Container
+            not in Optional_Container | Sequence_Container | Record_Container
         or else Self.Stack (Self.Depth).Child /= Child_Ready
       then
          Reject (Self, Errors.Invalid_State, Error);
@@ -549,11 +561,12 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       else
          Self.Depth := Self.Depth + 1;
          Self.Stack (Self.Depth) :=
-           (Kind       => Sequence_Container,
-            Child      => No_Child,
-            Map_Phase  => Map_Needs_Entry,
-            First_Item => True,
-            Exhausted  => False);
+           (Kind             => Sequence_Container,
+            Child            => No_Child,
+            Map_Phase        => Map_Needs_Entry,
+            First_Item       => True,
+            Exhausted        => False,
+            Optional_Present => False);
       end if;
    end Push_Sequence;
 
@@ -568,11 +581,12 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       else
          Self.Depth := Self.Depth + 1;
          Self.Stack (Self.Depth) :=
-           (Kind       => Map_Container,
-            Child      => No_Child,
-            Map_Phase  => Map_Needs_Entry,
-            First_Item => True,
-            Exhausted  => False);
+           (Kind             => Map_Container,
+            Child            => No_Child,
+            Map_Phase        => Map_Needs_Entry,
+            First_Item       => True,
+            Exhausted        => False,
+            Optional_Present => False);
       end if;
    end Push_Map;
 
@@ -587,13 +601,73 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       else
          Self.Depth := Self.Depth + 1;
          Self.Stack (Self.Depth) :=
-           (Kind       => Record_Container,
-            Child      => No_Child,
-            Map_Phase  => Map_Needs_Entry,
-            First_Item => True,
-            Exhausted  => False);
+           (Kind             => Record_Container,
+            Child            => No_Child,
+            Map_Phase        => Map_Needs_Entry,
+            First_Item       => True,
+            Exhausted        => False,
+            Optional_Present => False);
       end if;
    end Push_Record;
+
+   procedure Resolve_Local_Separator
+     (Self     : in out Reader;
+      Terminal : Terminal_State;
+      Expected : Character;
+      Error    : in out Errors.Error_Info) is
+   begin
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Terminal = Deferred_Invalid_Follower or else not Has_Input (Self)
+      then
+         Reject (Self, Errors.Syntax_Error, Error);
+         return;
+      elsif Is_Whitespace (Current (Self)) then
+         Consume_Separator (Self, Current (Self), Error);
+         Commit_Value_Whitespace (Self, Error);
+         if Error.Code /= Errors.No_Error then
+            return;
+         end if;
+      end if;
+      Consume_Separator (Self, Expected, Error);
+   end Resolve_Local_Separator;
+
+   procedure Push_Optional
+     (Self         : in out Reader;
+      Present      : Boolean;
+      Tag_Terminal : Terminal_State;
+      Error        : in out Errors.Error_Info) is
+   begin
+      Budgets.Enter_Container (Self.Budget, Unknown_Length, Error);
+      if Error.Code /= Errors.No_Error then
+         Latch (Self, Error);
+      elsif Self.Depth = Policies.Maximum_Supported_Nesting then
+         Reject (Self, Errors.Depth_Exceeded, Error);
+      elsif Present then
+         Budgets.Consume_Container_Item (Self.Budget, Error);
+         if Error.Code /= Errors.No_Error then
+            Latch (Self, Error);
+            return;
+         end if;
+      end if;
+
+      if Error.Code = Errors.No_Error then
+         Self.Depth := Self.Depth + 1;
+         Self.Stack (Self.Depth) :=
+           (Kind             => Optional_Container,
+            Child            => (if Present then Child_Ready else No_Child),
+            Map_Phase        => Map_Needs_Entry,
+            First_Item       => False,
+            Exhausted        => True,
+            Optional_Present => Present);
+         Self.Terminal := Tag_Terminal;
+         Self.Owner :=
+           (if Tag_Terminal = No_Pending_Terminal
+            then No_Terminal_Owner
+            else Optional_Tag_Terminal);
+         Self.Owner_Depth := Self.Depth;
+      end if;
+   end Push_Optional;
 
    procedure Resolve_Map_Child
      (Self : in out Reader; Error : in out Errors.Error_Info)
@@ -818,6 +892,7 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
               or else Ended
               or else Summary.Source_Offset /= Token_First
               or else Summary.Source_Length /= 0
+              or else not Has_Empty_Payload (Summary)
             then
                Reject_Transcript (Self, Error);
             else
@@ -827,7 +902,7 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          when Drivers.Number_Fragment =>
             if not Begun
               or else Ended
-              or else not Summary.Has_Raw_Byte
+              or else not Has_Raw_Only_Payload (Summary)
               or else Summary.Source_Length /= 1
               or else Summary.Source_Offset /= Next_Byte
               or else Next_Byte >= Token_Last
@@ -848,6 +923,7 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
               or else Ended
               or else Summary.Source_Offset /= Token_Last
               or else Summary.Source_Length /= 0
+              or else not Has_Empty_Payload (Summary)
             then
                Reject_Transcript (Self, Error);
             else
@@ -860,11 +936,12 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
    end Process_Number_Event;
 
    procedure Collect_Number
-     (Self        : in out Reader;
-      Token_First : Natural;
-      Raw_Length  : Positive;
-      Terminal    : out Terminal_State;
-      Error       : in out Errors.Error_Info)
+     (Self            : in out Reader;
+      Token_First     : Natural;
+      Raw_Length      : Positive;
+      Terminal        : out Terminal_State;
+      Error           : in out Errors.Error_Info;
+      Finalize_At_EOF : Boolean := True)
    is
       Summaries  :
         Drivers.Event_Summary_Array (1 .. Drivers.Maximum_Event_Summaries);
@@ -903,7 +980,9 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          return;
       end if;
 
-      if not Has_Input (Self) then
+      if not Has_Input (Self) and then not Finalize_At_EOF then
+         Terminal := Deferred_Invalid_Follower;
+      elsif not Has_Input (Self) then
          Drivers.Step_Final (Self.Syntax, Outcome, Summary, Error);
          if Error.Code /= Errors.No_Error then
             Latch (Self, Error);
@@ -1294,7 +1373,8 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       if Error.Code /= Errors.No_Error then
          return;
       end if;
-      Collect_Number (Self, Start, Summary.Raw_Length, Terminal, Error);
+      Collect_Number
+        (Self, Start, Summary.Raw_Length, Terminal, Error => Error);
       if Error.Code /= Errors.No_Error then
          return;
       end if;
@@ -1358,7 +1438,8 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       if Error.Code /= Errors.No_Error then
          return;
       end if;
-      Collect_Number (Self, Start, Summary.Raw_Length, Terminal, Error);
+      Collect_Number
+        (Self, Start, Summary.Raw_Length, Terminal, Error => Error);
       if Error.Code /= Errors.No_Error then
          return;
       end if;
@@ -1422,7 +1503,8 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       if Error.Code /= Errors.No_Error then
          return;
       end if;
-      Collect_Number (Self, Start, Summary.Raw_Length, Terminal, Error);
+      Collect_Number
+        (Self, Start, Summary.Raw_Length, Terminal, Error => Error);
       if Error.Code /= Errors.No_Error then
          return;
       end if;
@@ -1676,17 +1758,166 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
    procedure Begin_Optional
      (Self    : in out Reader;
       Present : out Boolean;
-      Error   : in out Errors.Error_Info) is
+      Error   : in out Errors.Error_Info)
+   is
+      Candidate        : Boolean := False;
+      Start            : Natural := 0;
+      Terminal         : Terminal_State := No_Pending_Terminal;
+      Saw_Document_End : Boolean;
    begin
       Present := False;
-      Reject_Unsupported (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Require_Leading (Self, "[", Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Prepare_Value (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Claim_Boundary (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Consume_Structure
+        (Self,
+         '[',
+         Drivers.Array_Begin,
+         Allow_Document_End => False,
+         Saw_Document_End   => Saw_Document_End,
+         Error              => Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Saw_Document_End then
+         Reject_Transcript (Self, Error);
+         return;
+      end if;
+      Commit_Value_Whitespace (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif not Has_Input (Self) or else Current (Self) not in '0' | '1' then
+         Reject (Self, Errors.Syntax_Error, Error);
+         return;
+      end if;
+
+      Start := Self.Cursor;
+      Candidate := Current (Self) = '1';
+      Collect_Number
+        (Self, Start, 1, Terminal, Error, Finalize_At_EOF => False);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Candidate then
+         Resolve_Local_Separator (Self, Terminal, ',', Error);
+         Commit_Value_Whitespace (Self, Error);
+         if Error.Code /= Errors.No_Error then
+            return;
+         elsif not Has_Input (Self)
+           or else not Is_Value_Leading (Current (Self))
+         then
+            Reject (Self, Errors.Syntax_Error, Error);
+            return;
+         end if;
+         Push_Optional
+           (Self,
+            Present      => True,
+            Tag_Terminal => No_Pending_Terminal,
+            Error        => Error);
+      else
+         Push_Optional (Self, False, Terminal, Error);
+      end if;
+      if Error.Code = Errors.No_Error then
+         Present := Candidate;
+      end if;
+   exception
+      when others =>
+         Poison_After_Exception (Self);
+         Present := False;
+         raise;
    end Begin_Optional;
 
    overriding
    procedure End_Optional
-     (Self : in out Reader; Error : in out Errors.Error_Info) is
+     (Self : in out Reader; Error : in out Errors.Error_Info)
+   is
+      Closing_Root     : Boolean;
+      Saw_Document_End : Boolean;
    begin
-      Reject_Unsupported (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Self.Operation /= Active
+        or else Self.Depth = 0
+        or else Self.Stack (Self.Depth).Kind /= Optional_Container
+        or else Self.Stack (Self.Depth).Child /= No_Child
+        or else not Self.Stack (Self.Depth).Exhausted
+        or else (if not Self.Stack (Self.Depth).Optional_Present
+                 then
+                   Self.Terminal = No_Pending_Terminal
+                   or else Self.Owner /= Optional_Tag_Terminal
+                   or else Self.Owner_Depth /= Self.Depth
+                 elsif Self.Terminal = No_Pending_Terminal
+                 then Self.Owner /= No_Terminal_Owner
+                 else
+                   Self.Owner /= Optional_Child_Terminal
+                   or else Self.Owner_Depth /= Self.Depth)
+      then
+         Reject (Self, Errors.Invalid_State, Error);
+         return;
+      end if;
+
+      if Self.Terminal /= No_Pending_Terminal then
+         if Self.Terminal = Deferred_Invalid_Follower
+           or else not Has_Input (Self)
+         then
+            Reject (Self, Errors.Syntax_Error, Error);
+            return;
+         elsif Is_Whitespace (Current (Self)) then
+            Consume_Separator (Self, Current (Self), Error);
+            if Error.Code /= Errors.No_Error then
+               return;
+            end if;
+            Clear_Terminal (Self);
+            Commit_Value_Whitespace (Self, Error);
+         elsif Current (Self) /= ']' then
+            Reject (Self, Errors.Syntax_Error, Error);
+         end if;
+      else
+         Commit_Value_Whitespace (Self, Error);
+      end if;
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+
+      Closing_Root := Self.Depth = 1 and then Self.Root = Root_In_Progress;
+      Consume_Structure
+        (Self,
+         ']',
+         Drivers.Array_End,
+         Allow_Document_End => Closing_Root,
+         Saw_Document_End   => Saw_Document_End,
+         Error              => Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+
+      Clear_Terminal (Self);
+      Self.Stack (Self.Depth) := (others => <>);
+      Self.Depth := Self.Depth - 1;
+      Budgets.Leave_Container (Self.Budget, Error);
+      if Error.Code /= Errors.No_Error then
+         Latch (Self, Error);
+      else
+         Finish_Value
+           (Self,
+            No_Pending_Terminal,
+            Error,
+            Saw_Document_End => Saw_Document_End);
+      end if;
+   exception
+      when others =>
+         Poison_After_Exception (Self);
+         raise;
    end End_Optional;
 
    procedure Admit_Sequence_Child
