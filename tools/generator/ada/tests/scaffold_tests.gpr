@@ -5,6 +5,11 @@ project Scaffold_Tests is
 
    for Languages use ("Ada", "C");
    for Source_Dirs use ("src", "src/test_hooks_enabled", "../src", "../config", "../native");
+   --  Declaration-only private snapshot units are compiled explicitly by smoke.sh until their reviewed body
+   --  milestone lands; compiling every source in this test project would otherwise require that pending body.
+   for Excluded_Source_Files use
+     ("flyology_serde_generator-build_attestations-file_abi.ads",
+      "flyology_serde_generator-build_attestations-local_snapshots.ads");
    for Object_Dir use "obj";
    for Create_Missing_Dirs use "True";
    for Exec_Dir use "bin";

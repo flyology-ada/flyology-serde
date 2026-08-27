@@ -7,6 +7,8 @@ provenance-files-v2.txt
 schema/dependency-identities-v2.schema.json
 schema/serde-generation-v2.schema.json
 src/flyology_serde_generate.adb
+src/flyology_serde_generator-build_attestations-file_abi.ads
+src/flyology_serde_generator-build_attestations-local_snapshots.ads
 src/flyology_serde_generator-build_attestations-source_lists.adb
 src/flyology_serde_generator-build_attestations-source_lists.ads
 src/flyology_serde_generator-build_attestations.adb

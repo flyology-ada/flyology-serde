@@ -2,8 +2,14 @@
 
 Date: 2026-08-26
 
-Status: pre-implementation architecture proposal. It selects no production limits and creates no production
-generation authority.
+Status: declaration-level implementation checkpoint under mandatory review. It selects no production limits and
+creates no production generation authority. Bodies, tests, and integration remain pending.
+
+The concrete private declaration checkpoint is in
+`flyology_serde_generator-build_attestations-local_snapshots.ads` and
+`flyology_serde_generator-build_attestations-file_abi.ads`; the corresponding header-dependent C declarations are
+staged in `native/open_regular.c`. No parent operation references these units, and `Create_Checked_Stage` remains
+fail-closed while this checkpoint is reviewed.
 
 ## Scope
 
@@ -69,8 +75,9 @@ then verifies each retained payload's stored session before reading another fiel
 observable. Caller-buffer queries create no cursor, view, callback latch, or reusable lease, so cross-owner, stale,
 nested, and reentrant observation cannot be expressed.
 
-The private statuses distinguish prelatched no-op, foreign budget/session, nonempty owner, malformed relative path,
-root/open/type/read/close/changed failures, directory-depth, per-file, or aggregate limit exhaustion, budget
+The private statuses distinguish prelatched no-op, foreign budget/session, nonempty owner, path-length limit,
+malformed relative path, root/open/type/read/close/changed failures, directory-depth, per-file, or aggregate limit
+exhaustion, budget
 exhaustion, budget failure, allocation failure, output-too-small, end-of-bytes, and invalid-offset query outcomes, and
 internal failure.
 The first primary status survives cleanup. An unexpected cleanup defect poisons an active budget but does not
@@ -84,12 +91,13 @@ Ada imports cannot express portably:
 
 - open an absolute directory with `O_RDONLY`, `O_CLOEXEC`, `O_NOFOLLOW`, and `O_DIRECTORY`;
 - open a child directory with `openat`, `O_RDONLY`, `O_CLOEXEC`, `O_NOFOLLOW`, and `O_DIRECTORY`;
-- open a final unknown candidate with `openat`, `O_RDONLY`, `O_CLOEXEC`, `O_NOFOLLOW`, and `O_NONBLOCK`, then accept
+- open a final unknown candidate with `openat`, `O_RDONLY`, `O_CLOEXEC`, `O_NOFOLLOW`, `O_NONBLOCK`, and `O_NOCTTY`, then accept
   only a regular `fstat` result. This makes a FIFO open prompt; it does not claim that `O_NONBLOCK` prevents every
   device driver or block-device open from blocking. The trusted/quiescent source-root precondition excludes an
   adversary placing such special nodes in the selected tree;
 - extract `st_dev`, `st_ino`, `st_size`, nanosecond `mtime`/`ctime`, and the directory/regular classification from
-  `fstat` into fixed private unsigned or signed values after compile-time width checks.
+  `fstat` through separate fixed scalar outputs after compile-time width and signedness checks. No C aggregate
+  layout crosses the Ada boundary.
 
 Ada directly imports fixed-signature `read` and `close`. Ada owns path grammar, component walking, limits, charging,
 read sequencing, identity comparison, hashing, allocation, status precedence, and cleanup. The C leaf contains no
@@ -149,7 +157,8 @@ The v1 operation trace is:
    nonzero pathname bytes before its local C-string materialization and defensive absolute-path scan. It reserves
    one `Work_Units` before every actual open or `fstat` attempt, including each `EINTR` retry.
 3. `Capture` reserves one `Work_Units` path probe, applies `Maximum_Path_Bytes`, then reserves exact nonzero relative
-   path bytes before grammar scanning and component materialization. That scan also applies directory depth. It
+   path bytes before grammar scanning and component materialization. A length excess has its own status and no
+   path byte is reserved or inspected. That scan also applies directory depth. It
    reserves one `Work_Units` before every actual `openat` or `fstat` attempt in both walks, including retries.
 4. Each actual read attempt reserves one `Work_Units` before `read`, including an `EINTR` retry and the zero-byte EOF
    attempt.
@@ -207,17 +216,18 @@ value is at least the transient capacity, request exactly that capacity; otherwi
 
 Tests cover null and arbitrary Ada bounds; exact and one-extra path, directory-depth, per-file, aggregate-input, and
 work limits; aggregate equality with an empty file; empty and binary files; non-UTF-8 octets; final and intermediate
-symlinks; a final FIFO with no writer returning promptly; promptly rejected known special-file finals without a
-universal device-open latency claim; `.`/`..`, empty, absolute,
+symlinks; a final FIFO with no writer returning promptly; a final terminal device rejected without changing
+controlling-terminal state; promptly rejected known special-file finals without a universal device-open latency
+claim; `.`/`..`, empty, absolute,
 repeated-separator, and nonportable relative paths; root replacement after opening; file replacement before and
 after the initial final open; every observed identity, type, size, `mtime`, or `ctime` change; truncation/growth and
 same-handle mutation hooks; short reads, charged `EINTR` retries, zero-read EOF, and read failure; close failure or
 `EINTR` with no retry at every intermediate/verifier/final position; prior-owner and query-output preservation;
 cross-session and cross-budget use; deterministic complete charge traces; digest parity; cleanup faults; and
 stale-owner finalization after reinitializing the same budget session; pending abort at every descriptor attach,
-close commit, allocation, aggregate update, and owner transfer. The
-focused native ABI test verifies `ssize_t`/Ada read-result and `off_t`/`dev_t`/`ino_t` conversions, fixed identity
-widths, errno classification, and file-type classification on macOS and Linux.
+close commit, allocation, aggregate update, and owner transfer. The focused native ABI test verifies the
+compile-time `ssize_t`/Ada `C.long` match and `off_t`/`dev_t`/`ino_t` conversions, fixed scalar identity widths,
+nanosecond-domain rejection, errno classification, and file-type classification on macOS and Linux.
 
 Implementation and every corrective diff receive independent P0/P1/P2 review. P0/P1 must be fixed, and P2 is
 fix-by-default. Only a later reviewed parent transaction may connect this owner to `Create_Checked_Stage`.

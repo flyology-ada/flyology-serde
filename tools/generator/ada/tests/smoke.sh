@@ -50,6 +50,11 @@ test_root=$(mktemp -d)
 trap 'rm -rf -- "$test_root"' EXIT HUP INT TERM
 limits=4096,1048576,2097152,4096,32,8,64,4096,100000,10000,1048576,2097152,3,64,256,4194304
 
+alr -C "$generator_root" exec -- gprbuild -f -p -c -gnatc -P \
+  flyology_serde_generator.gpr \
+  src/flyology_serde_generator-build_attestations-file_abi.ads \
+  src/flyology_serde_generator-build_attestations-local_snapshots.ads >/dev/null
+
 for query_spec in \
   "$generator_root/src/flyology_serde_generator-requests.ads" \
   "$generator_root/src/flyology_serde_generator-overlays.ads"
