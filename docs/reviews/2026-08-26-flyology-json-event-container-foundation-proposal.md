@@ -477,3 +477,36 @@ Ada generator build/scaffold/smoke suite, all 12 Python generator tests,
 release-marker and fixture-manifest checks, the generated-fixture crate, all
 10 APM 0.28.0 audit checks, formatting, the 110-column scan, and
 `git diff --check`.
+
+## Enumeration and variant implementation review record
+
+The enumeration and variant implementation and both fix re-reviews closed with
+P0 none, P1 none, and P2 none. Enumeration retains its distinct format-neutral
+operation while sharing the exact JSON string transcript. A variant owns one
+Serde logical value and depth scope across its private array, alternative-name,
+and object representation; only the object fields consume logical items and
+child values.
+
+Review found and fixed nested exception cleanup in the shared string collector.
+The private driver now latches an abort once per parser operation, Reset clears
+that latch only after beginning a fresh operation, and shared string/name event
+validation checks exact raw, decoded-source, decoded-form, Unicode, unused-byte,
+and Boolean-payload facts. Exception traces prove one parser abort at every
+reachable Begin/End driver boundary, idempotent repeated abort, prelatched Reset
+inertness, and a fresh abort after successful Reset.
+
+Differential tests cover nullary and payload variants, escaped Unicode
+alternatives, exact and one-past alternative capacity, deferred invalid
+followers, every structural event mutation, absolute input/value denial traces,
+item/text/depth limits, a source and destination ending at `Positive'Last`,
+nested sequence and map key/value traversal, call-order and wrong-End misuse,
+abort/reset from every variant phase with and without a primary diagnostic,
+exceptions after variant pop during map-parent resolution, and real root-adapter
+commit/rollback after the final closer or trailing-document failure.
+
+Final verification passed the root build and assertion-enabled tests, both
+Flyology JSON lock attestations and their seven Python tests, test-hook elision,
+the Ada generator build/scaffold/smoke suite, all 12 Python generator tests,
+release-marker and fixture-manifest checks, the generated-fixture crate, all 10
+APM 0.28.0 audit checks, formatting, the 110-column scan, and
+`git diff --check`.

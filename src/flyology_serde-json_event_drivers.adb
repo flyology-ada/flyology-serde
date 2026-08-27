@@ -130,6 +130,7 @@ package body Flyology_Serde.JSON_Event_Drivers is
       Self.Offset := 0;
       Self.Zero_Run := 0;
       Self.Failed := False;
+      Self.Aborted := False;
       Self.Diagnostic_Reported := False;
       Self.Document_Accepted := False;
    end Reset_Progress;
@@ -142,6 +143,11 @@ package body Flyology_Serde.JSON_Event_Drivers is
       if Error.Code /= Errors.No_Error then
          return;
       end if;
+
+      --  This call begins a distinct parser operation even when initialization
+      --  itself later raises. Its exception cleanup must not inherit the
+      --  preceding operation's completed abort latch.
+      Self.Aborted := False;
 
       if Parsing.State (Self.Parser) = Parsing.Uninitialized then
          Parsing.Initialize (Self.Parser, Profile, Diagnostic);
@@ -1053,6 +1059,10 @@ package body Flyology_Serde.JSON_Event_Drivers is
    is
       Diagnostic : JSON_Errors.Diagnostic;
    begin
+      if Self.Aborted then
+         return;
+      end if;
+      Self.Aborted := True;
       if Test_Hooks.Enabled then
          Test_Hooks.Note_Abort;
       end if;

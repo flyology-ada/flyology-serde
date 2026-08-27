@@ -216,6 +216,7 @@ private
       Zero_Run            : Zero_Progress_Count := 0;
       Initialized         : Boolean := False;
       Failed              : Boolean := False;
+      Aborted             : Boolean := False;
       Diagnostic_Reported : Boolean := False;
       Document_Accepted   : Boolean := False;
    end record;

@@ -3,6 +3,7 @@ with Flyology_JSON.Errors;
 with Flyology_JSON.Profiles;
 with Flyology_Serde.Adapters.Optionals;
 with Flyology_Serde.Adapters.Unsigned_Integers;
+with Flyology_Serde.Adapters.Variants;
 with Flyology_Serde.Deserialization;
 with Flyology_Serde.Deserialization_Adapters;
 with Flyology_Serde.Deserializers.JSON.Event_Readers;
@@ -37,6 +38,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
    use type Parsing.Step_Outcome;
    use type Preflights.Number_Summary;
    use type Preflights.String_Summary;
+   use type Test_Hooks.Failure_Point;
 
    function Syntax_Input_Offset (Self : Reader) return Natural
    is (JSON_Event_Drivers.Input_Offset (Self.Syntax));
@@ -2359,6 +2361,906 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
       end Check_Text_Capacity;
 
+      procedure Check_Enumeration_Parity
+        (Source       : String;
+         Capacity     : Natural;
+         Maximum_Text : Natural := Natural'Last)
+      is
+         Input           : aliased constant String := Source;
+         Oracle          : Reader (Input'Access);
+         Parallel        : Event_Readers.Reader (Input'Access);
+         Oracle_Error    : Errors.Error_Info;
+         Parallel_Error  : Errors.Error_Info;
+         Oracle_Value    : String (5 .. 4 + Capacity);
+         Parallel_Value  : String (9 .. 8 + Capacity);
+         Oracle_Length   : Natural;
+         Parallel_Length : Natural;
+         Local_Policy    : Policies.Decode_Policy := Policy;
+      begin
+         Local_Policy.Limits.Maximum_Text_Length := Maximum_Text;
+         Initialize (Oracle, Local_Policy);
+         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Read_Enumeration
+           (Oracle, "Color", Oracle_Value, Oracle_Length, Oracle_Error);
+         Event_Readers.Read_Enumeration
+           (Parallel,
+            "Color",
+            Parallel_Value,
+            Parallel_Length,
+            Parallel_Error);
+         pragma
+           Assert
+             (Parallel_Length = Oracle_Length
+                and then (if Oracle_Length = 0
+                          then (for all Value of Parallel_Value => Value = ' ')
+                          else
+                            Parallel_Value
+                              (Parallel_Value'First
+                               .. Parallel_Value'First + Parallel_Length - 1)
+                            = Oracle_Value
+                                (Oracle_Value'First
+                                 .. Oracle_Value'First + Oracle_Length - 1)));
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         if Oracle_Error.Code = Errors.No_Error then
+            Finish_Document (Oracle, Oracle_Error);
+            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end if;
+      end Check_Enumeration_Parity;
+
+      type String_Exception_Operation is
+        (Read_Text_Exception, Read_Enumeration_Exception);
+
+      procedure Check_String_Operation_Exception
+        (Operation : String_Exception_Operation;
+         Point     : Test_Hooks.Failure_Point)
+      is
+         Input  : aliased constant String := """A""";
+         Item   : Event_Readers.Reader (Input'Access);
+         Error  : Errors.Error_Info;
+         Value  : String (3 .. 10);
+         Length : Natural;
+         Raised : Boolean := False;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Test_Hooks.Reset_Abort_Count;
+         Test_Hooks.Arm (Point);
+         begin
+            case Operation is
+               when Read_Text_Exception        =>
+                  Event_Readers.Read_Text (Item, Value, Length, Error);
+
+               when Read_Enumeration_Exception =>
+                  Event_Readers.Read_Enumeration
+                    (Item, "Color", Value, Length, Error);
+            end case;
+         exception
+            when Constraint_Error =>
+               Raised := True;
+         end;
+         pragma
+           Assert
+             (Raised
+                and then Test_Hooks.Abort_Count = 1
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0,
+              Operation'Image & Point'Image & Test_Hooks.Abort_Count'Image);
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         Event_Readers.Abort_Document (Item, Error);
+         pragma Assert (Error.Code = Errors.No_Error);
+      end Check_String_Operation_Exception;
+
+      procedure Check_Variant_Parity
+        (Source        : String;
+         Expected_Name : String;
+         Has_Field     : Boolean;
+         Name_Capacity : Natural := 16)
+      is
+         Input              : aliased constant String := Source;
+         Oracle             : Reader (Input'Access);
+         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle_Error       : Errors.Error_Info;
+         Parallel_Error     : Errors.Error_Info;
+         Oracle_Name        : String (3 .. 2 + Name_Capacity);
+         Parallel_Name      : String (7 .. 6 + Name_Capacity);
+         Oracle_Length      : Natural;
+         Parallel_Length    : Natural;
+         Oracle_Info        : Data_Model.Length_Information;
+         Parallel_Info      : Data_Model.Length_Information;
+         Oracle_Available   : Boolean;
+         Parallel_Available : Boolean;
+
+         procedure Compare is
+         begin
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end Compare;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Begin_Variant
+           (Oracle,
+            "Choice",
+            Oracle_Name,
+            Oracle_Length,
+            Oracle_Info,
+            Oracle_Error);
+         Event_Readers.Begin_Variant
+           (Parallel,
+            "Choice",
+            Parallel_Name,
+            Parallel_Length,
+            Parallel_Info,
+            Parallel_Error);
+         pragma
+           Assert
+             (Oracle_Length = Expected_Name'Length
+                and then Parallel_Length = Expected_Name'Length
+                and then Oracle_Name
+                           (Oracle_Name'First
+                            .. Oracle_Name'First + Oracle_Length - 1)
+                         = Expected_Name
+                and then Parallel_Name
+                           (Parallel_Name'First
+                            .. Parallel_Name'First + Parallel_Length - 1)
+                         = Expected_Name
+                and then not Oracle_Info.Known
+                and then not Parallel_Info.Known);
+         Compare;
+         Next_Field
+           (Oracle,
+            Oracle_Name,
+            Oracle_Length,
+            Oracle_Available,
+            Oracle_Error);
+         Event_Readers.Next_Field
+           (Parallel,
+            Parallel_Name,
+            Parallel_Length,
+            Parallel_Available,
+            Parallel_Error);
+         pragma
+           Assert
+             (Oracle_Available = Has_Field
+                and then Parallel_Available = Has_Field);
+         Compare;
+         if Has_Field then
+            pragma
+              Assert
+                (Oracle_Length = 1
+                   and then Parallel_Length = 1
+                   and then Oracle_Name (Oracle_Name'First) = 'x'
+                   and then Parallel_Name (Parallel_Name'First) = 'x');
+            Read_Null (Oracle, Oracle_Error);
+            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Compare;
+            Next_Field
+              (Oracle,
+               Oracle_Name,
+               Oracle_Length,
+               Oracle_Available,
+               Oracle_Error);
+            Event_Readers.Next_Field
+              (Parallel,
+               Parallel_Name,
+               Parallel_Length,
+               Parallel_Available,
+               Parallel_Error);
+            pragma
+              Assert (not Oracle_Available and then not Parallel_Available);
+            Compare;
+         end if;
+         End_Variant (Oracle, Oracle_Error);
+         Event_Readers.End_Variant (Parallel, Parallel_Error);
+         Compare;
+         Finish_Document (Oracle, Oracle_Error);
+         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Compare;
+         pragma
+           Assert
+             (Oracle_Error.Code = Errors.No_Error
+                and then Event_Readers.Is_Complete (Parallel));
+      end Check_Variant_Parity;
+
+      procedure Check_Variant_Failure
+        (Source                   : String;
+         Expected_Code            : Errors.Error_Code;
+         Expected_Offset          : Natural;
+         Name_Capacity            : Natural := 16;
+         Maximum_Input            : Natural := Natural'Last;
+         Maximum_Text             : Natural := Natural'Last;
+         Maximum_Items            : Natural := Natural'Last;
+         Maximum_Values           : Natural := Natural'Last;
+         Expected_Input_Consumed  : Natural := Natural'Last;
+         Expected_Values_Consumed : Natural := Natural'Last;
+         Maximum_Depth            : Policies.Nesting_Limit :=
+           Policies.Nesting_Limit (Policies.Maximum_Supported_Nesting))
+      is
+         Input              : aliased constant String := Source;
+         Oracle             : Reader (Input'Access);
+         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle_Error       : Errors.Error_Info;
+         Parallel_Error     : Errors.Error_Info;
+         Oracle_Name        : String (3 .. 2 + Name_Capacity);
+         Parallel_Name      : String (7 .. 6 + Name_Capacity);
+         Oracle_Length      : Natural;
+         Parallel_Length    : Natural;
+         Oracle_Info        : Data_Model.Length_Information;
+         Parallel_Info      : Data_Model.Length_Information;
+         Oracle_Available   : Boolean;
+         Parallel_Available : Boolean;
+         Local_Policy       : Policies.Decode_Policy := Policy;
+
+         procedure Compare is
+         begin
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end Compare;
+      begin
+         Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
+         Local_Policy.Limits.Maximum_Text_Length := Maximum_Text;
+         Local_Policy.Limits.Maximum_Container_Items := Maximum_Items;
+         Local_Policy.Limits.Maximum_Logical_Values := Maximum_Values;
+         Local_Policy.Limits.Maximum_Nesting_Depth := Maximum_Depth;
+         Initialize (Oracle, Local_Policy);
+         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Begin_Variant
+           (Oracle,
+            "Choice",
+            Oracle_Name,
+            Oracle_Length,
+            Oracle_Info,
+            Oracle_Error);
+         Event_Readers.Begin_Variant
+           (Parallel,
+            "Choice",
+            Parallel_Name,
+            Parallel_Length,
+            Parallel_Info,
+            Parallel_Error);
+         Compare;
+         if Oracle_Error.Code /= Errors.No_Error then
+            pragma
+              Assert
+                (Oracle_Length = 0
+                   and then Parallel_Length = 0
+                   and then (for all Value of Oracle_Name => Value = ' ')
+                   and then (for all Value of Parallel_Name => Value = ' '),
+                 Source
+                   & Oracle_Error.Code'Image
+                   & Parallel_Error.Code'Image
+                   & Oracle_Length'Image
+                   & Parallel_Length'Image);
+         end if;
+         if Oracle_Error.Code = Errors.No_Error then
+            Next_Field
+              (Oracle,
+               Oracle_Name,
+               Oracle_Length,
+               Oracle_Available,
+               Oracle_Error);
+            Event_Readers.Next_Field
+              (Parallel,
+               Parallel_Name,
+               Parallel_Length,
+               Parallel_Available,
+               Parallel_Error);
+            Compare;
+         end if;
+         if Oracle_Error.Code = Errors.No_Error and then Oracle_Available then
+            Read_Null (Oracle, Oracle_Error);
+            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Compare;
+         end if;
+         if Oracle_Error.Code = Errors.No_Error and then Oracle_Available then
+            Next_Field
+              (Oracle,
+               Oracle_Name,
+               Oracle_Length,
+               Oracle_Available,
+               Oracle_Error);
+            Event_Readers.Next_Field
+              (Parallel,
+               Parallel_Name,
+               Parallel_Length,
+               Parallel_Available,
+               Parallel_Error);
+            Compare;
+         end if;
+         if Oracle_Error.Code = Errors.No_Error then
+            End_Variant (Oracle, Oracle_Error);
+            Event_Readers.End_Variant (Parallel, Parallel_Error);
+            Compare;
+         end if;
+         pragma
+           Assert
+             (Parallel_Error.Code = Expected_Code
+                and then Parallel_Error.Input_Offset = Expected_Offset
+                and then (Expected_Input_Consumed = Natural'Last
+                          or else Event_Readers.Input_Consumed (Parallel)
+                                  = Expected_Input_Consumed)
+                and then (Expected_Values_Consumed = Natural'Last
+                          or else Event_Readers.Values_Consumed (Parallel)
+                                  = Expected_Values_Consumed)
+                and then Event_Readers.Container_Depth (Parallel) = 0
+                and then Event_Readers.Budget_Depth (Parallel) = 0,
+              Source
+                & Parallel_Error.Code'Image
+                & Parallel_Error.Input_Offset'Image
+                & Event_Readers.Input_Consumed (Parallel)'Image
+                & Event_Readers.Values_Consumed (Parallel)'Image);
+      end Check_Variant_Failure;
+
+      procedure Check_Variant_Container_Parity is
+      begin
+         --  Variant -> sequence field.
+         declare
+            Input              : aliased constant String :=
+              "[""Some"",{""x"":[null]}]";
+            Oracle             : Reader (Input'Access);
+            Parallel           : Event_Readers.Reader (Input'Access);
+            Oracle_Error       : Errors.Error_Info;
+            Parallel_Error     : Errors.Error_Info;
+            Oracle_Name        : String (3 .. 10);
+            Parallel_Name      : String (7 .. 14);
+            Oracle_Length      : Natural;
+            Parallel_Length    : Natural;
+            Oracle_Info        : Data_Model.Length_Information;
+            Parallel_Info      : Data_Model.Length_Information;
+            Oracle_Available   : Boolean;
+            Parallel_Available : Boolean;
+
+            procedure Compare is
+            begin
+               Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+            end Compare;
+         begin
+            Initialize (Oracle, Policy);
+            Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+            Begin_Variant
+              (Oracle,
+               "Choice",
+               Oracle_Name,
+               Oracle_Length,
+               Oracle_Info,
+               Oracle_Error);
+            Event_Readers.Begin_Variant
+              (Parallel,
+               "Choice",
+               Parallel_Name,
+               Parallel_Length,
+               Parallel_Info,
+               Parallel_Error);
+            Compare;
+            Next_Field
+              (Oracle,
+               Oracle_Name,
+               Oracle_Length,
+               Oracle_Available,
+               Oracle_Error);
+            Event_Readers.Next_Field
+              (Parallel,
+               Parallel_Name,
+               Parallel_Length,
+               Parallel_Available,
+               Parallel_Error);
+            pragma Assert (Oracle_Available and then Parallel_Available);
+            Compare;
+            Begin_Sequence (Oracle, Oracle_Info, Oracle_Error);
+            Event_Readers.Begin_Sequence
+              (Parallel, Parallel_Info, Parallel_Error);
+            Compare;
+            Next_Element (Oracle, Oracle_Available, Oracle_Error);
+            Event_Readers.Next_Element
+              (Parallel, Parallel_Available, Parallel_Error);
+            pragma Assert (Oracle_Available and then Parallel_Available);
+            Compare;
+            Read_Null (Oracle, Oracle_Error);
+            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Compare;
+            Next_Element (Oracle, Oracle_Available, Oracle_Error);
+            Event_Readers.Next_Element
+              (Parallel, Parallel_Available, Parallel_Error);
+            pragma
+              Assert (not Oracle_Available and then not Parallel_Available);
+            Compare;
+            End_Sequence (Oracle, Oracle_Error);
+            Event_Readers.End_Sequence (Parallel, Parallel_Error);
+            Compare;
+            Next_Field
+              (Oracle,
+               Oracle_Name,
+               Oracle_Length,
+               Oracle_Available,
+               Oracle_Error);
+            Event_Readers.Next_Field
+              (Parallel,
+               Parallel_Name,
+               Parallel_Length,
+               Parallel_Available,
+               Parallel_Error);
+            pragma
+              Assert (not Oracle_Available and then not Parallel_Available);
+            Compare;
+            End_Variant (Oracle, Oracle_Error);
+            Event_Readers.End_Variant (Parallel, Parallel_Error);
+            Compare;
+            Finish_Document (Oracle, Oracle_Error);
+            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Compare;
+         end;
+
+         --  Map -> variant key and variant value.
+         declare
+            Input              : aliased constant String :=
+              "[[[""None"",{}],[""Some"",{}]]]";
+            Oracle             : Reader (Input'Access);
+            Parallel           : Event_Readers.Reader (Input'Access);
+            Oracle_Error       : Errors.Error_Info;
+            Parallel_Error     : Errors.Error_Info;
+            Oracle_Name        : String (3 .. 10);
+            Parallel_Name      : String (7 .. 14);
+            Oracle_Length      : Natural;
+            Parallel_Length    : Natural;
+            Oracle_Info        : Data_Model.Length_Information;
+            Parallel_Info      : Data_Model.Length_Information;
+            Oracle_Available   : Boolean;
+            Parallel_Available : Boolean;
+
+            procedure Compare is
+            begin
+               Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+            end Compare;
+
+            procedure Read_Nullary_Variant is
+            begin
+               Begin_Variant
+                 (Oracle,
+                  "Choice",
+                  Oracle_Name,
+                  Oracle_Length,
+                  Oracle_Info,
+                  Oracle_Error);
+               Event_Readers.Begin_Variant
+                 (Parallel,
+                  "Choice",
+                  Parallel_Name,
+                  Parallel_Length,
+                  Parallel_Info,
+                  Parallel_Error);
+               Compare;
+               Next_Field
+                 (Oracle,
+                  Oracle_Name,
+                  Oracle_Length,
+                  Oracle_Available,
+                  Oracle_Error);
+               Event_Readers.Next_Field
+                 (Parallel,
+                  Parallel_Name,
+                  Parallel_Length,
+                  Parallel_Available,
+                  Parallel_Error);
+               pragma
+                 Assert (not Oracle_Available and then not Parallel_Available);
+               Compare;
+               End_Variant (Oracle, Oracle_Error);
+               Event_Readers.End_Variant (Parallel, Parallel_Error);
+               Compare;
+            end Read_Nullary_Variant;
+         begin
+            Initialize (Oracle, Policy);
+            Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+            Begin_Map (Oracle, Oracle_Info, Oracle_Error);
+            Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+            Compare;
+            Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+            Event_Readers.Next_Map_Entry
+              (Parallel, Parallel_Available, Parallel_Error);
+            pragma Assert (Oracle_Available and then Parallel_Available);
+            Compare;
+            Read_Nullary_Variant;
+            Read_Nullary_Variant;
+            Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+            Event_Readers.Next_Map_Entry
+              (Parallel, Parallel_Available, Parallel_Error);
+            pragma
+              Assert (not Oracle_Available and then not Parallel_Available);
+            Compare;
+            End_Map (Oracle, Oracle_Error);
+            Event_Readers.End_Map (Parallel, Parallel_Error);
+            Compare;
+            Finish_Document (Oracle, Oracle_Error);
+            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Compare;
+         end;
+      end Check_Variant_Container_Parity;
+
+      procedure Check_Variant_Arbitrary_Bound is
+         Input              : aliased constant String :=
+           [Positive'Last - 7 => '[',
+            Positive'Last - 6 => '"',
+            Positive'Last - 5 => 'A',
+            Positive'Last - 4 => '"',
+            Positive'Last - 3 => ',',
+            Positive'Last - 2 => '{',
+            Positive'Last - 1 => '}',
+            Positive'Last     => ']'];
+         Oracle             : Reader (Input'Access);
+         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle_Error       : Errors.Error_Info;
+         Parallel_Error     : Errors.Error_Info;
+         Oracle_Name        : String (Positive'Last - 3 .. Positive'Last);
+         Parallel_Name      : String (Positive'Last - 3 .. Positive'Last);
+         Oracle_Length      : Natural;
+         Parallel_Length    : Natural;
+         Oracle_Info        : Data_Model.Length_Information;
+         Parallel_Info      : Data_Model.Length_Information;
+         Oracle_Available   : Boolean;
+         Parallel_Available : Boolean;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Begin_Variant
+           (Oracle,
+            "Choice",
+            Oracle_Name,
+            Oracle_Length,
+            Oracle_Info,
+            Oracle_Error);
+         Event_Readers.Begin_Variant
+           (Parallel,
+            "Choice",
+            Parallel_Name,
+            Parallel_Length,
+            Parallel_Info,
+            Parallel_Error);
+         pragma
+           Assert
+             (Oracle_Length = 1
+                and then Parallel_Length = 1
+                and then Oracle_Name (Oracle_Name'First) = 'A'
+                and then Parallel_Name (Parallel_Name'First) = 'A');
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         Next_Field
+           (Oracle,
+            Oracle_Name,
+            Oracle_Length,
+            Oracle_Available,
+            Oracle_Error);
+         Event_Readers.Next_Field
+           (Parallel,
+            Parallel_Name,
+            Parallel_Length,
+            Parallel_Available,
+            Parallel_Error);
+         pragma Assert (not Oracle_Available and then not Parallel_Available);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         End_Variant (Oracle, Oracle_Error);
+         Event_Readers.End_Variant (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         Finish_Document (Oracle, Oracle_Error);
+         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+      end Check_Variant_Arbitrary_Bound;
+
+      type Variant_Abort_State is
+        (Abort_Variant_Fields_Ready,
+         Abort_Variant_Child_Ready,
+         Abort_Variant_Child_Complete,
+         Abort_Variant_Nested_Child,
+         Abort_Variant_Exhausted);
+
+      procedure Check_Variant_Abort
+        (State : Variant_Abort_State; With_Primary : Boolean)
+      is
+         Source    : constant String :=
+           (case State is
+              when Abort_Variant_Fields_Ready | Abort_Variant_Exhausted     =>
+                "[""A"",{}]",
+              when Abort_Variant_Child_Ready | Abort_Variant_Child_Complete =>
+                "[""A"",{""x"":null}]",
+              when Abort_Variant_Nested_Child                               =>
+                "[""A"",{""x"":[]}]");
+         Input     : aliased constant String := Source;
+         Item      : Event_Readers.Reader (Input'Access);
+         Error     : Errors.Error_Info;
+         Name      : String (3 .. 10);
+         Length    : Natural;
+         Info      : Data_Model.Length_Information;
+         Available : Boolean;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Begin_Variant
+           (Item, "Choice", Name, Length, Info, Error);
+         case State is
+            when Abort_Variant_Fields_Ready   =>
+               null;
+
+            when Abort_Variant_Child_Ready    =>
+               Event_Readers.Next_Field (Item, Name, Length, Available, Error);
+               pragma Assert (Available);
+
+            when Abort_Variant_Child_Complete =>
+               Event_Readers.Next_Field (Item, Name, Length, Available, Error);
+               Event_Readers.Read_Null (Item, Error);
+
+            when Abort_Variant_Nested_Child   =>
+               Event_Readers.Next_Field (Item, Name, Length, Available, Error);
+               Event_Readers.Begin_Sequence (Item, Info, Error);
+
+            when Abort_Variant_Exhausted      =>
+               Event_Readers.Next_Field (Item, Name, Length, Available, Error);
+               pragma Assert (not Available);
+         end case;
+         pragma Assert (Error.Code = Errors.No_Error);
+         if With_Primary then
+            Errors.Fail
+              (Error, Errors.Application_Error, 37, Errors.Byte_Offset);
+         end if;
+         Event_Readers.Abort_Document (Item, Error);
+         pragma
+           Assert
+             ((if With_Primary
+               then
+                 Error.Code = Errors.Application_Error
+                 and then Error.Input_Offset = 37
+               else Error.Code = Errors.No_Error)
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0,
+              State'Image & With_Primary'Image);
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         Event_Readers.Begin_Variant
+           (Item, "Choice", Name, Length, Info, Error);
+         Event_Readers.Abort_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0);
+      end Check_Variant_Abort;
+
+      type Variant_Misuse_Case is
+        (End_Before_Variant_Exhaustion,
+         End_While_Variant_Child_Ready,
+         End_While_Variant_Child_In_Progress,
+         End_Record_On_Variant,
+         End_Variant_On_Record);
+
+      procedure Check_Variant_Misuse (Test_Case : Variant_Misuse_Case) is
+         Source             : constant String :=
+           (case Test_Case is
+              when End_While_Variant_Child_Ready       =>
+                "[""A"",{""x"":null}]",
+              when End_While_Variant_Child_In_Progress => "[""A"",{""x"":[]}]",
+              when End_Variant_On_Record               => "{}",
+              when others                              => "[""A"",{}]");
+         Input              : aliased constant String := Source;
+         Oracle             : Reader (Input'Access);
+         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle_Error       : Errors.Error_Info;
+         Parallel_Error     : Errors.Error_Info;
+         Oracle_Name        : String (3 .. 10);
+         Parallel_Name      : String (7 .. 14);
+         Oracle_Length      : Natural;
+         Parallel_Length    : Natural;
+         Oracle_Info        : Data_Model.Length_Information;
+         Parallel_Info      : Data_Model.Length_Information;
+         Oracle_Available   : Boolean;
+         Parallel_Available : Boolean;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         if Test_Case = End_Variant_On_Record then
+            Begin_Record (Oracle, "R", Oracle_Info, Oracle_Error);
+            Event_Readers.Begin_Record
+              (Parallel, "R", Parallel_Info, Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         else
+            Begin_Variant
+              (Oracle,
+               "Choice",
+               Oracle_Name,
+               Oracle_Length,
+               Oracle_Info,
+               Oracle_Error);
+            Event_Readers.Begin_Variant
+              (Parallel,
+               "Choice",
+               Parallel_Name,
+               Parallel_Length,
+               Parallel_Info,
+               Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end if;
+         case Test_Case is
+            when End_Before_Variant_Exhaustion       =>
+               End_Variant (Oracle, Oracle_Error);
+               Event_Readers.End_Variant (Parallel, Parallel_Error);
+
+            when End_While_Variant_Child_Ready       =>
+               Next_Field
+                 (Oracle,
+                  Oracle_Name,
+                  Oracle_Length,
+                  Oracle_Available,
+                  Oracle_Error);
+               Event_Readers.Next_Field
+                 (Parallel,
+                  Parallel_Name,
+                  Parallel_Length,
+                  Parallel_Available,
+                  Parallel_Error);
+               Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+               End_Variant (Oracle, Oracle_Error);
+               Event_Readers.End_Variant (Parallel, Parallel_Error);
+
+            when End_While_Variant_Child_In_Progress =>
+               Next_Field
+                 (Oracle,
+                  Oracle_Name,
+                  Oracle_Length,
+                  Oracle_Available,
+                  Oracle_Error);
+               Event_Readers.Next_Field
+                 (Parallel,
+                  Parallel_Name,
+                  Parallel_Length,
+                  Parallel_Available,
+                  Parallel_Error);
+               Begin_Sequence (Oracle, Oracle_Info, Oracle_Error);
+               Event_Readers.Begin_Sequence
+                 (Parallel, Parallel_Info, Parallel_Error);
+               Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+               End_Variant (Oracle, Oracle_Error);
+               Event_Readers.End_Variant (Parallel, Parallel_Error);
+
+            when End_Record_On_Variant               =>
+               End_Record (Oracle, Oracle_Error);
+               Event_Readers.End_Record (Parallel, Parallel_Error);
+
+            when End_Variant_On_Record               =>
+               End_Variant (Oracle, Oracle_Error);
+               Event_Readers.End_Variant (Parallel, Parallel_Error);
+         end case;
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         pragma
+           Assert
+             (Parallel_Error.Code = Errors.Invalid_State
+                and then Event_Readers.Container_Depth (Parallel) = 0
+                and then Event_Readers.Budget_Depth (Parallel) = 0,
+              Test_Case'Image);
+         Errors.Reset (Oracle_Error);
+         Errors.Reset (Parallel_Error);
+         Reset (Oracle, Policy);
+         Event_Readers.Reset (Parallel, Policy, Parallel_Error);
+         Abort_Document (Oracle, Oracle_Error);
+         Event_Readers.Abort_Document (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+      end Check_Variant_Misuse;
+
+      procedure Check_Variant_Begin_Mutation (Summaries_To_Skip : Natural) is
+         Input  : aliased constant String := "[""A"",{}]";
+         Item   : Event_Readers.Reader (Input'Access);
+         Error  : Errors.Error_Info;
+         Name   : String (3 .. 10) := [others => 'x'];
+         Length : Natural := 99;
+         Info   : Data_Model.Length_Information;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Test_Hooks.Arm_Payload_Contamination (Summaries_To_Skip);
+         Event_Readers.Begin_Variant
+           (Item, "Choice", Name, Length, Info, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then Length = 0
+                and then (for all Value of Name => Value = ' ')
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0,
+              Summaries_To_Skip'Image & Error.Code'Image);
+      end Check_Variant_Begin_Mutation;
+
+      procedure Check_Variant_End_Mutation (Summaries_To_Skip : Natural) is
+         Input     : aliased constant String := "[""A"",{}]";
+         Item      : Event_Readers.Reader (Input'Access);
+         Error     : Errors.Error_Info;
+         Name      : String (3 .. 10);
+         Length    : Natural;
+         Info      : Data_Model.Length_Information;
+         Available : Boolean;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Begin_Variant
+           (Item, "Choice", Name, Length, Info, Error);
+         Event_Readers.Next_Field (Item, Name, Length, Available, Error);
+         pragma Assert (Error.Code = Errors.No_Error and then not Available);
+         Test_Hooks.Arm_Payload_Contamination (Summaries_To_Skip);
+         Event_Readers.End_Variant (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0,
+              Summaries_To_Skip'Image & Error.Code'Image);
+      end Check_Variant_End_Mutation;
+
+      procedure Check_Variant_Begin_Exception
+        (Point : Test_Hooks.Failure_Point; Matching_Calls_To_Skip : Natural)
+      is
+         Input  : aliased constant String := "[ ""A"" , {} ]";
+         Item   : Event_Readers.Reader (Input'Access);
+         Error  : Errors.Error_Info;
+         Name   : String (3 .. 10) := [others => 'x'];
+         Length : Natural := 99;
+         Info   : Data_Model.Length_Information;
+         Raised : Boolean := False;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Test_Hooks.Reset_Abort_Count;
+         Test_Hooks.Arm_After (Point, Matching_Calls_To_Skip);
+         begin
+            Event_Readers.Begin_Variant
+              (Item, "Choice", Name, Length, Info, Error);
+         exception
+            when Constraint_Error =>
+               Raised := True;
+         end;
+         pragma
+           Assert
+             (Raised
+                and then Test_Hooks.Abort_Count = 1
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0,
+              Point'Image
+                & Matching_Calls_To_Skip'Image
+                & Test_Hooks.Abort_Count'Image);
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         Event_Readers.Abort_Document (Item, Error);
+         pragma Assert (Error.Code = Errors.No_Error);
+      end Check_Variant_Begin_Exception;
+
+      procedure Check_Variant_End_Exception
+        (Point : Test_Hooks.Failure_Point; Matching_Calls_To_Skip : Natural)
+      is
+         Input     : aliased constant String := "[""A"",{}]";
+         Item      : Event_Readers.Reader (Input'Access);
+         Error     : Errors.Error_Info;
+         Name      : String (3 .. 10);
+         Length    : Natural;
+         Info      : Data_Model.Length_Information;
+         Available : Boolean;
+         Raised    : Boolean := False;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Begin_Variant
+           (Item, "Choice", Name, Length, Info, Error);
+         Event_Readers.Next_Field (Item, Name, Length, Available, Error);
+         pragma Assert (Error.Code = Errors.No_Error and then not Available);
+         Test_Hooks.Reset_Abort_Count;
+         Test_Hooks.Arm_After (Point, Matching_Calls_To_Skip);
+         begin
+            Event_Readers.End_Variant (Item, Error);
+         exception
+            when Constraint_Error =>
+               Raised := True;
+         end;
+         pragma
+           Assert
+             (Raised
+                and then Test_Hooks.Abort_Count = 1
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0,
+              Point'Image
+                & Matching_Calls_To_Skip'Image
+                & Test_Hooks.Abort_Count'Image);
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         Event_Readers.Abort_Document (Item, Error);
+         pragma Assert (Error.Code = Errors.No_Error);
+      end Check_Variant_End_Exception;
+
       procedure Check_Optional_Parity
         (Source           : String;
          Expected_Present : Boolean;
@@ -3066,7 +3968,10 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Next_Map_Entry_Operation,
          End_Map_Operation,
          Begin_Optional_Operation,
-         End_Optional_Operation);
+         End_Optional_Operation,
+         Read_Enumeration_Operation,
+         Begin_Variant_Operation,
+         End_Variant_Operation);
 
       procedure Check_Prelatched (Operation : Supported_Operation) is
          Input          : aliased constant String := "null";
@@ -3088,55 +3993,55 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Event_Readers.Initialize (Item, Policy, Error);
          Errors.Fail (Error, Errors.Application_Error, 17, Errors.Byte_Offset);
          case Operation is
-            when Peek_Operation           =>
+            when Peek_Operation             =>
                Kind := Event_Readers.Peek_Kind (Item, Error);
                pragma Assert (Kind = Data_Model.Null_Value);
 
-            when Read_Null_Operation      =>
+            when Read_Null_Operation        =>
                Event_Readers.Read_Null (Item, Error);
 
-            when Read_Boolean_Operation   =>
+            when Read_Boolean_Operation     =>
                Event_Readers.Read_Boolean (Item, Boolean_Value, Error);
                pragma Assert (not Boolean_Value);
 
-            when Read_Signed_Operation    =>
+            when Read_Signed_Operation      =>
                Event_Readers.Read_Signed (Item, Signed_Value, Error);
                pragma Assert (Signed_Value = 0);
 
-            when Read_Unsigned_Operation  =>
+            when Read_Unsigned_Operation    =>
                Event_Readers.Read_Unsigned (Item, Unsigned_Value, Error);
                pragma Assert (Unsigned_Value = 0);
 
-            when Read_Float_Operation     =>
+            when Read_Float_Operation       =>
                Event_Readers.Read_Float_64 (Item, Float_Value, Error);
                pragma
                  Assert
                    (Data_Model.Finite_Value (Float_Value) = 0.0
                       and then not Data_Model.Is_Negative_Zero (Float_Value));
 
-            when Read_Text_Operation      =>
+            when Read_Text_Operation        =>
                Event_Readers.Read_Text (Item, Text, Length, Error);
                pragma
                  Assert
                    (Length = 0
                       and then (for all Value of Text => Value = ' '));
 
-            when Begin_Sequence_Operation =>
+            when Begin_Sequence_Operation   =>
                Event_Readers.Begin_Sequence (Item, Info, Error);
                pragma Assert (not Info.Known and then Info.Length = 0);
 
-            when Next_Element_Operation   =>
+            when Next_Element_Operation     =>
                Event_Readers.Next_Element (Item, Available, Error);
                pragma Assert (not Available);
 
-            when End_Sequence_Operation   =>
+            when End_Sequence_Operation     =>
                Event_Readers.End_Sequence (Item, Error);
 
-            when Begin_Record_Operation   =>
+            when Begin_Record_Operation     =>
                Event_Readers.Begin_Record (Item, "T", Info, Error);
                pragma Assert (not Info.Known and then Info.Length = 0);
 
-            when Next_Field_Operation     =>
+            when Next_Field_Operation       =>
                Event_Readers.Next_Field (Item, Text, Length, Available, Error);
                pragma
                  Assert
@@ -3144,26 +4049,46 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                       and then not Available
                       and then (for all Value of Text => Value = ' '));
 
-            when End_Record_Operation     =>
+            when End_Record_Operation       =>
                Event_Readers.End_Record (Item, Error);
 
-            when Begin_Map_Operation      =>
+            when Begin_Map_Operation        =>
                Event_Readers.Begin_Map (Item, Info, Error);
                pragma Assert (not Info.Known and then Info.Length = 0);
 
-            when Next_Map_Entry_Operation =>
+            when Next_Map_Entry_Operation   =>
                Event_Readers.Next_Map_Entry (Item, Available, Error);
                pragma Assert (not Available);
 
-            when End_Map_Operation        =>
+            when End_Map_Operation          =>
                Event_Readers.End_Map (Item, Error);
 
-            when Begin_Optional_Operation =>
+            when Begin_Optional_Operation   =>
                Event_Readers.Begin_Optional (Item, Present, Error);
                pragma Assert (not Present);
 
-            when End_Optional_Operation   =>
+            when End_Optional_Operation     =>
                Event_Readers.End_Optional (Item, Error);
+
+            when Read_Enumeration_Operation =>
+               Event_Readers.Read_Enumeration (Item, "T", Text, Length, Error);
+               pragma
+                 Assert
+                   (Length = 0
+                      and then (for all Value of Text => Value = ' '));
+
+            when Begin_Variant_Operation    =>
+               Event_Readers.Begin_Variant
+                 (Item, "T", Text, Length, Info, Error);
+               pragma
+                 Assert
+                   (Length = 0
+                      and then not Info.Known
+                      and then Info.Length = 0
+                      and then (for all Value of Text => Value = ' '));
+
+            when End_Variant_Operation      =>
+               Event_Readers.End_Variant (Item, Error);
          end case;
          pragma
            Assert
@@ -3186,55 +4111,26 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       end Check_Prelatched;
 
       type Unsupported_Operation is
-        (Read_Bytes_Operation,
-         Skip_Value_Operation,
-         Read_Enumeration_Operation,
-         Begin_Variant_Operation,
-         End_Variant_Operation);
+        (Read_Bytes_Operation, Skip_Value_Operation);
 
       procedure Check_Unsupported (Operation : Unsupported_Operation) is
-         Input    : aliased constant String := "null";
-         Item     : Event_Readers.Reader (Input'Access);
-         Error    : Errors.Error_Info;
-         Bytes    : Ada.Streams.Stream_Element_Array (5 .. 6) := [others => 9];
-         Text     : String (7 .. 14) := [others => 'x'];
-         Length   : Natural := 99;
-         Name_Len : Natural := 99;
-         Info     : Data_Model.Length_Information :=
-           (Known => True, Length => 99);
+         Input  : aliased constant String := "null";
+         Item   : Event_Readers.Reader (Input'Access);
+         Error  : Errors.Error_Info;
+         Bytes  : Ada.Streams.Stream_Element_Array (5 .. 6) := [others => 9];
+         Length : Natural := 99;
          procedure Invoke is
          begin
             case Operation is
-               when Read_Bytes_Operation       =>
+               when Read_Bytes_Operation =>
                   Event_Readers.Read_Bytes (Item, Bytes, Length, Error);
                   pragma
                     Assert
                       (Length = 0
                          and then (for all Value of Bytes => Value = 0));
 
-               when Skip_Value_Operation       =>
+               when Skip_Value_Operation =>
                   Event_Readers.Skip_Value (Item, Error);
-
-               when Read_Enumeration_Operation =>
-                  Event_Readers.Read_Enumeration
-                    (Item, "T", Text, Name_Len, Error);
-                  pragma
-                    Assert
-                      (Name_Len = 0
-                         and then (for all Value of Text => Value = ' '));
-
-               when Begin_Variant_Operation    =>
-                  Event_Readers.Begin_Variant
-                    (Item, "T", Text, Name_Len, Info, Error);
-                  pragma
-                    Assert
-                      (Name_Len = 0
-                         and then not Info.Known
-                         and then Info.Length = 0
-                         and then (for all Value of Text => Value = ' '));
-
-               when End_Variant_Operation      =>
-                  Event_Readers.End_Variant (Item, Error);
             end case;
          end Invoke;
       begin
@@ -3410,6 +4306,215 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Target.Candidate := (others => <>);
          Target.Rollbacks := Target.Rollbacks + 1;
       end Rollback_Maybe_U64;
+
+      type Test_Alternative is (Some_Alternative);
+      type Test_Field is (Value_Field);
+
+      type Variant_U64 is record
+         Value : Interfaces.Unsigned_64 := 0;
+      end record;
+
+      function Test_Alternative_Name (Item : Test_Alternative) return String is
+         pragma Unreferenced (Item);
+      begin
+         return "Some";
+      end Test_Alternative_Name;
+
+      function No_Alternative_Aliases (Item : Test_Alternative) return Natural
+      is
+         pragma Unreferenced (Item);
+      begin
+         return 0;
+      end No_Alternative_Aliases;
+
+      function No_Alternative_Alias
+        (Item : Test_Alternative; Position : Positive) return String
+      is
+         pragma Unreferenced (Item, Position);
+      begin
+         return "";
+      end No_Alternative_Alias;
+
+      function Matches_Test_Alternative
+        (Item : Test_Alternative; Name : String) return Boolean
+      is
+         pragma Unreferenced (Item);
+      begin
+         return Name = "Some";
+      end Matches_Test_Alternative;
+
+      function Test_Field_Belongs
+        (Alternative : Test_Alternative; Field : Test_Field) return Boolean
+      is
+         pragma Unreferenced (Alternative, Field);
+      begin
+         return True;
+      end Test_Field_Belongs;
+
+      function Test_Field_Name (Item : Test_Field) return String
+      is (case Item is
+            when Value_Field => "value");
+
+      function No_Field_Aliases (Item : Test_Field) return Natural is
+         pragma Unreferenced (Item);
+      begin
+         return 0;
+      end No_Field_Aliases;
+
+      function No_Field_Alias
+        (Item : Test_Field; Position : Positive) return String
+      is
+         pragma Unreferenced (Item, Position);
+      begin
+         return "";
+      end No_Field_Alias;
+
+      function Matches_Test_Field
+        (Item : Test_Field; Name : String) return Boolean
+      is (case Item is
+            when Value_Field => Name = "value");
+
+      function Select_Test_Alternative
+        (Item : Variant_U64) return Test_Alternative
+      is
+         pragma Unreferenced (Item);
+      begin
+         return Some_Alternative;
+      end Select_Test_Alternative;
+
+      procedure Serialize_Test_Field
+        (Item        : Variant_U64;
+         Alternative : Test_Alternative;
+         Field       : Test_Field;
+         Into        : in out Serialization.Serializer'Class;
+         Error       : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Alternative, Field);
+      begin
+         U64_Adapter.Serialize_Value (Item.Value, Into, Error);
+      end Serialize_Test_Field;
+
+      procedure Begin_Test_Alternative
+        (Target      : in out Variant_U64;
+         Alternative : Test_Alternative;
+         Policy      : Policies.Decode_Policy;
+         Error       : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Alternative, Policy, Error);
+      begin
+         Target := (others => <>);
+      end Begin_Test_Alternative;
+
+      procedure Deserialize_Test_Field
+        (From        : in out Deserialization.Deserializer'Class;
+         Target      : in out Variant_U64;
+         Alternative : Test_Alternative;
+         Field       : Test_Field;
+         Replacing   : Boolean;
+         Policy      : Policies.Decode_Policy;
+         Error       : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Alternative, Field, Replacing, Policy);
+      begin
+         U64_Adapter.Deserialize_Candidate (From, Target.Value, Error);
+      end Deserialize_Test_Field;
+
+      procedure Apply_Missing_Test_Field
+        (Target      : in out Variant_U64;
+         Alternative : Test_Alternative;
+         Field       : Test_Field;
+         Policy      : Policies.Decode_Policy;
+         Applied     : out Boolean;
+         Error       : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Target, Alternative, Field, Policy, Error);
+      begin
+         Applied := False;
+      end Apply_Missing_Test_Field;
+
+      procedure Finish_Test_Candidate
+        (Target      : in out Variant_U64;
+         Alternative : Test_Alternative;
+         Error       : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Target, Alternative, Error);
+      begin
+         null;
+      end Finish_Test_Candidate;
+
+      package Variant_U64_Adapter is new
+        Flyology_Serde.Adapters.Variants
+          (Source_Type                     => Variant_U64,
+           Builder_Type                    => Variant_U64,
+           Alternative_Ordinal             => Test_Alternative,
+           Field_Ordinal                   => Test_Field,
+           Type_Name                       => "Test.Variant_U64",
+           Maximum_Type_Name_Length        => 16,
+           Maximum_Alternatives            => 1,
+           Maximum_Alternative_Name_Length => 4,
+           Maximum_Aliases_Per_Alternative => 0,
+           Maximum_Total_Fields            => 1,
+           Maximum_Fields_Per_Alternative  => 1,
+           Maximum_Field_Name_Length       => 5,
+           Maximum_Aliases_Per_Field       => 0,
+           Alternative_Name                => Test_Alternative_Name,
+           Alternative_Alias_Count         => No_Alternative_Aliases,
+           Alternative_Alias_Name          => No_Alternative_Alias,
+           Matches_Alternative             => Matches_Test_Alternative,
+           Field_Belongs_To                => Test_Field_Belongs,
+           Field_Name                      => Test_Field_Name,
+           Field_Alias_Count               => No_Field_Aliases,
+           Field_Alias_Name                => No_Field_Alias,
+           Matches_Field                   => Matches_Test_Field,
+           Select_Alternative              => Select_Test_Alternative,
+           Serialize_Field                 => Serialize_Test_Field,
+           Begin_Alternative               => Begin_Test_Alternative,
+           Deserialize_Field               => Deserialize_Test_Field,
+           Apply_Missing                   => Apply_Missing_Test_Field,
+           Finish_Candidate                => Finish_Test_Candidate);
+
+      type Variant_U64_Root_Builder is limited record
+         Published : Variant_U64 := (Value => 41);
+         Candidate : Variant_U64;
+         Commits   : Natural := 0;
+         Rollbacks : Natural := 0;
+      end record;
+
+      procedure Begin_Variant_U64
+        (Target : in out Variant_U64_Root_Builder;
+         Error  : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Error);
+      begin
+         Target.Candidate := (others => <>);
+      end Begin_Variant_U64;
+
+      procedure Read_Variant_U64
+        (From   : in out Deserialization.Deserializer'Class;
+         Target : in out Variant_U64_Root_Builder;
+         Policy : Policies.Decode_Policy;
+         Error  : in out Errors.Error_Info) is
+      begin
+         Variant_U64_Adapter.Deserialize_Candidate
+           (From, Target.Candidate, Policy, Error);
+      end Read_Variant_U64;
+
+      procedure Commit_Variant_U64
+        (Target : in out Variant_U64_Root_Builder;
+         Error  : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Error);
+      begin
+         Target.Published := Target.Candidate;
+         Target.Commits := Target.Commits + 1;
+      end Commit_Variant_U64;
+
+      procedure Rollback_Variant_U64 (Target : in out Variant_U64_Root_Builder)
+      is
+      begin
+         Target.Candidate := (others => <>);
+         Target.Rollbacks := Target.Rollbacks + 1;
+      end Rollback_Variant_U64;
 
       procedure Check_Map_Parity (Maximum_Items : Natural := Natural'Last) is
          Input              : aliased constant String :=
@@ -4197,7 +5302,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Record_Key_Resolution,
          Record_Value_Resolution,
          Optional_Key_Resolution,
-         Optional_Value_Resolution);
+         Optional_Value_Resolution,
+         Variant_Key_Resolution,
+         Variant_Value_Resolution);
 
       procedure Check_Map_Resolution_Exception
         (Test_Case : Map_Resolution_Exception_Case;
@@ -4212,7 +5319,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
               when Record_Key_Resolution     => "[[{},true]]",
               when Record_Value_Resolution   => "[[null,{}]]",
               when Optional_Key_Resolution   => "[[[0],true]]",
-              when Optional_Value_Resolution => "[[null,[0]]]");
+              when Optional_Value_Resolution => "[[null,[0]]]",
+              when Variant_Key_Resolution    => "[[[""A"",{}],true]]",
+              when Variant_Value_Resolution  => "[[null,[""A"",{}]]]");
          Input         : aliased constant String := Source;
          Item          : Event_Readers.Reader (Input'Access);
          Error         : Errors.Error_Info;
@@ -4231,6 +5340,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
              | Sequence_Value_Resolution
              | Record_Value_Resolution
              | Optional_Value_Resolution
+             | Variant_Value_Resolution
          then
             Event_Readers.Read_Null (Item, Error);
          end if;
@@ -4254,8 +5364,15 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                then
                   Event_Readers.Begin_Sequence (Item, Info, Error);
                   Event_Readers.Next_Element (Item, Available, Error);
-               else
+               elsif Test_Case
+                     in Record_Key_Resolution | Record_Value_Resolution
+               then
                   Event_Readers.Begin_Record (Item, "T", Info, Error);
+                  Event_Readers.Next_Field
+                    (Item, Name, Name_Length, Available, Error);
+               else
+                  Event_Readers.Begin_Variant
+                    (Item, "T", Name, Name_Length, Info, Error);
                   Event_Readers.Next_Field
                     (Item, Name, Name_Length, Available, Error);
                end if;
@@ -4267,8 +5384,16 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                                     | Optional_Value_Resolution
                                 then True
                                 else not Available));
-               Test_Hooks.Arm_After (Point, Matching_Calls_To_Skip => 1);
+               Test_Hooks.Arm_After
+                 (Point,
+                  Matching_Calls_To_Skip =>
+                    (if Test_Case
+                        in Variant_Key_Resolution | Variant_Value_Resolution
+                     then 2
+                     else 1));
          end case;
+
+         Test_Hooks.Reset_Abort_Count;
 
          begin
             case Test_Case is
@@ -4286,6 +5411,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
 
                when Optional_Key_Resolution | Optional_Value_Resolution =>
                   Event_Readers.End_Optional (Item, Error);
+
+               when Variant_Key_Resolution | Variant_Value_Resolution   =>
+                  Event_Readers.End_Variant (Item, Error);
             end case;
          exception
             when Constraint_Error =>
@@ -4294,9 +5422,10 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          pragma
            Assert
              (Raised
+                and then Test_Hooks.Abort_Count = 1
                 and then Event_Readers.Container_Depth (Item) = 0
                 and then Event_Readers.Budget_Depth (Item) = 0,
-              Test_Case'Image & Point'Image);
+              Test_Case'Image & Point'Image & Test_Hooks.Abort_Count'Image);
          Errors.Reset (Error);
          Event_Readers.Reset (Item, Policy, Error);
          Event_Readers.Begin_Map (Item, Info, Error);
@@ -5312,6 +6441,15 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
            Deserialize_Value  => Read_Maybe_U64,
            Commit_Candidate   => Commit_Maybe_U64,
            Rollback_Candidate => Rollback_Maybe_U64);
+
+      package Variant_U64_Root is new
+        Flyology_Serde.Deserialization_Adapters
+          (Builder_Type       => Variant_U64_Root_Builder,
+           Policy             => Policy,
+           Begin_Candidate    => Begin_Variant_U64,
+           Deserialize_Value  => Read_Variant_U64,
+           Commit_Candidate   => Commit_Variant_U64,
+           Rollback_Candidate => Rollback_Variant_U64);
    begin
       Test_Hooks.Disarm;
 
@@ -5520,6 +6658,60 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                 and then Target.Rollbacks = 0);
       end;
 
+      --  Variant adapter construction likewise remains unpublished until the
+      --  object and outer-array closers plus the complete document succeed.
+      declare
+         Input  : aliased constant String := "[""Some"",{""value"":42}]x";
+         Item   : Event_Readers.Reader (Input'Access);
+         Target : Variant_U64_Root_Builder;
+         Error  : Errors.Error_Info;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Variant_U64_Root.Deserialize (Item, Target, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Syntax_Error
+                and then Target.Published.Value = 41
+                and then Target.Commits = 0
+                and then Target.Rollbacks = 1);
+      end;
+
+      declare
+         Input          : aliased constant String :=
+           "[""Some"",{""value"":42}]";
+         Item           : Event_Readers.Reader (Input'Access);
+         Target         : Variant_U64_Root_Builder;
+         Error          : Errors.Error_Info;
+         Bounded_Policy : Policies.Decode_Policy := Policy;
+      begin
+         Bounded_Policy.Limits.Maximum_Input_Units := Input'Length - 1;
+         Event_Readers.Initialize (Item, Bounded_Policy, Error);
+         Variant_U64_Root.Deserialize (Item, Target, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Capacity_Exceeded
+                and then Error.Input_Offset = Input'Length - 1
+                and then Target.Published.Value = 41
+                and then Target.Commits = 0
+                and then Target.Rollbacks = 1);
+      end;
+
+      declare
+         Input  : aliased constant String := "[""Some"",{""value"":42}]";
+         Item   : Event_Readers.Reader (Input'Access);
+         Target : Variant_U64_Root_Builder;
+         Error  : Errors.Error_Info;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Variant_U64_Root.Deserialize (Item, Target, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Target.Published.Value = 42
+                and then Target.Commits = 1
+                and then Target.Rollbacks = 0);
+      end;
+
       Check_Null ("null");
       Check_Null ("null ");
       Check_Null ("null" & ASCII.HT);
@@ -5702,6 +6894,89 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       Check_Text ('"' & Character'Val (16#C2#) & '"');
       Check_Text_Capacity ("""x""", 0);
       Check_Text_Capacity ("""x""", 1, Maximum_Text => 0);
+
+      Check_Enumeration_Parity ("""Red""", 8);
+      Check_Enumeration_Parity ("""R\u00E9d""", 8);
+      Check_Enumeration_Parity ("null", 8);
+      Check_Enumeration_Parity ("""Red""", 2);
+      Check_Enumeration_Parity ("""Red""", 8, Maximum_Text => 2);
+      Check_Enumeration_Parity ("""\uD800""", 8);
+      for Operation in String_Exception_Operation loop
+         for Point in Test_Hooks.Before_Source_Copy .. Test_Hooks.After_Step
+         loop
+            Check_String_Operation_Exception (Operation, Point);
+         end loop;
+      end loop;
+
+      Check_Variant_Parity ("[""None"",{}]", "None", Has_Field => False);
+      Check_Variant_Parity
+        ("[ ""Some"" , { ""x"" : null } ]", "Some", Has_Field => True);
+      Check_Variant_Parity
+        ("[""A"",{}]", "A", Has_Field => False, Name_Capacity => 1);
+      Check_Variant_Parity
+        ("[""R\u00E9d"",{}]",
+         "R" & Character'Val (16#C3#) & Character'Val (16#A9#) & "d",
+         Has_Field => False);
+      Check_Variant_Container_Parity;
+      Check_Variant_Arbitrary_Bound;
+      for State in Variant_Abort_State loop
+         Check_Variant_Abort (State, With_Primary => False);
+         Check_Variant_Abort (State, With_Primary => True);
+      end loop;
+      for Test_Case in Variant_Misuse_Case loop
+         Check_Variant_Misuse (Test_Case);
+      end loop;
+      for Summaries_To_Skip in Natural range 0 .. 4 loop
+         Check_Variant_Begin_Mutation (Summaries_To_Skip);
+      end loop;
+      for Summaries_To_Skip in Natural range 0 .. 1 loop
+         Check_Variant_End_Mutation (Summaries_To_Skip);
+      end loop;
+      for Point in Test_Hooks.Before_Source_Copy .. Test_Hooks.After_Step loop
+         for Matching_Calls_To_Skip in Natural range 0 .. 8 loop
+            Check_Variant_Begin_Exception (Point, Matching_Calls_To_Skip);
+         end loop;
+         for Matching_Calls_To_Skip in Natural range 0 .. 1 loop
+            Check_Variant_End_Exception (Point, Matching_Calls_To_Skip);
+         end loop;
+      end loop;
+      Check_Variant_Failure ("{}", Errors.Unexpected_Kind, 0);
+      Check_Variant_Failure ("[]", Errors.Syntax_Error, 1);
+      Check_Variant_Failure ("[""A"" {}]", Errors.Syntax_Error, 5);
+      Check_Variant_Failure ("[""A""x,{}]", Errors.Syntax_Error, 4);
+      Check_Variant_Failure ("[""A"",null]", Errors.Syntax_Error, 5);
+      Check_Variant_Failure ("[""A"",{}x]", Errors.Syntax_Error, 7);
+      Check_Variant_Failure
+        ("[""A"",{}]", Errors.Capacity_Exceeded, 1, Name_Capacity => 0);
+      Check_Variant_Failure
+        ("[""A"",{}]", Errors.Capacity_Exceeded, 1, Maximum_Text => 0);
+      Check_Variant_Failure
+        ("[""A"",{}]", Errors.Depth_Exceeded, 6, Maximum_Depth => 0);
+      Check_Variant_Failure
+        ("[""A"",{}]", Errors.Capacity_Exceeded, 0, Maximum_Values => 0);
+      Check_Variant_Failure
+        ("[""A"",{""x"":null}]",
+         Errors.Capacity_Exceeded,
+         10,
+         Maximum_Items => 0);
+      Check_Variant_Failure
+        ("[""A"",{""x"":null}]",
+         Errors.Capacity_Exceeded,
+         10,
+         Maximum_Values => 1);
+      for Maximum_Input in Natural range 0 .. 7 loop
+         Check_Variant_Failure
+           ("[""A"",{}]",
+            Errors.Capacity_Exceeded,
+            Maximum_Input,
+            Maximum_Input            => Maximum_Input,
+            Expected_Input_Consumed  =>
+              (case Maximum_Input is
+                 when 0      => 0,
+                 when 1 .. 3 => 1,
+                 when others => Maximum_Input),
+            Expected_Values_Consumed => 1);
+      end loop;
 
       Check_Optional_Parity ("[0]", Expected_Present => False);
       Check_Optional_Parity
@@ -6774,6 +8049,60 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
            Assert
              (Error.Code = Errors.No_Error
                 and then Event_Readers.Is_Complete (Item));
+      end;
+
+      --  The driver abort latch is idempotent within one operation and is
+      --  cleared only by a successful Reset. A prelatched Reset is a no-op.
+      declare
+         Input : aliased constant String := "[]";
+         Item  : Event_Readers.Reader (Input'Access);
+         Error : Errors.Error_Info;
+         Info  : Data_Model.Length_Information;
+      begin
+         Test_Hooks.Reset_Abort_Count;
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Begin_Sequence (Item, Info, Error);
+         Errors.Fail (Error, Errors.Application_Error, 23, Errors.Byte_Offset);
+         Event_Readers.Abort_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Application_Error
+                and then Error.Input_Offset = 23
+                and then Test_Hooks.Abort_Count = 1);
+         Event_Readers.Abort_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Application_Error
+                and then Error.Input_Offset = 23
+                and then Test_Hooks.Abort_Count = 1);
+
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         Event_Readers.Begin_Sequence (Item, Info, Error);
+         Errors.Fail (Error, Errors.Application_Error, 31, Errors.Byte_Offset);
+         Event_Readers.Abort_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Application_Error
+                and then Error.Input_Offset = 31
+                and then Test_Hooks.Abort_Count = 2);
+
+         Errors.Reset (Error);
+         Errors.Fail (Error, Errors.Application_Error, 37, Errors.Byte_Offset);
+         Event_Readers.Reset (Item, Policy, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Application_Error
+                and then Error.Input_Offset = 37
+                and then Test_Hooks.Abort_Count = 2);
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         Event_Readers.Begin_Sequence (Item, Info, Error);
+         Event_Readers.Abort_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Test_Hooks.Abort_Count = 3);
       end;
 
       --  A trailing-byte failure follows exactly one driver abort. This

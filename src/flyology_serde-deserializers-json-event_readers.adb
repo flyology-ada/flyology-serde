@@ -64,6 +64,263 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
        and then (for all Value of Item.Decoded => Value = 0)
        and then not Item.Boolean_Payload);
 
+   function Valid_Quote
+     (Item : Drivers.Event_Summary; Kind : Drivers.Event_Kind) return Boolean
+   is (Item.Kind = Kind
+       and then Item.Source_Length = 1
+       and then Item.Has_Raw_Byte
+       and then Item.Raw_Byte
+                = Ada.Streams.Stream_Element (Character'Pos ('"'))
+       and then Item.Decoded_Form = Drivers.No_Decoded
+       and then Item.Decoded_Offset = 0
+       and then Item.Decoded_Source_Length = 0
+       and then Item.Decoded_Length = 0
+       and then (for all Value of Item.Decoded => Value = 0)
+       and then not Item.Boolean_Payload);
+
+   function Hex_Value (Item : Character) return Natural is
+   begin
+      case Item is
+         when '0' .. '9' =>
+            return Character'Pos (Item) - Character'Pos ('0');
+
+         when 'A' .. 'F' =>
+            return Character'Pos (Item) - Character'Pos ('A') + 10;
+
+         when 'a' .. 'f' =>
+            return Character'Pos (Item) - Character'Pos ('a') + 10;
+
+         when others     =>
+            return 16;
+      end case;
+   end Hex_Value;
+
+   function Inline_Matches_Source
+     (Self        : Reader;
+      Token_First : Natural;
+      Token_Last  : Natural;
+      Item        : Drivers.Event_Summary) return Boolean
+   is
+      Expected        : Drivers.Scalar_Storage := [others => 0];
+      Expected_Length : Natural := 0;
+      Code            : Natural := 0;
+      Low             : Natural := 0;
+      Source_First    : Natural;
+      Source_Last     : Natural;
+
+      function Source_Byte (Offset : Natural) return Character
+      is (Self.Source (Self.Source'First + Source_First + Offset));
+
+      function Read_Hex (Offset : Natural; Value : out Natural) return Boolean
+      is
+         Digit : Natural;
+      begin
+         Value := 0;
+         for Index in Offset .. Offset + 3 loop
+            Digit := Hex_Value (Source_Byte (Index));
+            if Digit = 16 then
+               return False;
+            end if;
+            Value := Value * 16 + Digit;
+         end loop;
+         return True;
+      end Read_Hex;
+
+      procedure Put (Value : Natural) is
+      begin
+         Expected_Length := Expected_Length + 1;
+         Expected
+           (Expected'First
+            + Ada.Streams.Stream_Element_Offset (Expected_Length - 1)) :=
+           Ada.Streams.Stream_Element (Value);
+      end Put;
+
+      procedure Encode (Point : Natural) is
+      begin
+         if Point <= 16#7F# then
+            Put (Point);
+         elsif Point <= 16#7FF# then
+            Put (16#C0# + Point / 64);
+            Put (16#80# + Point mod 64);
+         elsif Point <= 16#FFFF# then
+            Put (16#E0# + Point / 4_096);
+            Put (16#80# + Point / 64 mod 64);
+            Put (16#80# + Point mod 64);
+         else
+            Put (16#F0# + Point / 262_144);
+            Put (16#80# + Point / 4_096 mod 64);
+            Put (16#80# + Point / 64 mod 64);
+            Put (16#80# + Point mod 64);
+         end if;
+      end Encode;
+   begin
+      if Item.Decoded_Source_Length = 0
+        or else Item.Decoded_Offset <= Token_First
+        or else Item.Decoded_Offset >= Token_Last - 1
+        or else Item.Decoded_Source_Length
+                > Token_Last - 1 - Item.Decoded_Offset
+        or else Item.Source_Offset > Natural'Last - Item.Source_Length
+        or else Item.Decoded_Offset > Natural'Last - Item.Decoded_Source_Length
+        or else Item.Decoded_Offset + Item.Decoded_Source_Length
+                /= Item.Source_Offset + Item.Source_Length
+      then
+         return False;
+      end if;
+      Source_First := Item.Decoded_Offset;
+      Source_Last := Source_First + Item.Decoded_Source_Length - 1;
+
+      if Source_Byte (0) /= '\' then
+         if (case Character'Pos (Source_Byte (0)) is
+               when 16#C2# .. 16#DF# => Item.Decoded_Source_Length /= 2,
+               when 16#E0# .. 16#EF# => Item.Decoded_Source_Length /= 3,
+               when 16#F0# .. 16#F4# => Item.Decoded_Source_Length /= 4,
+               when others           => True)
+         then
+            return False;
+         end if;
+         declare
+            Valid   : Boolean;
+            Invalid : Natural;
+         begin
+            Flyology_Serde.UTF_8_Validation.Locate
+              (Self.Source
+                 (Self.Source'First
+                  + Source_First
+                  .. Self.Source'First + Source_Last),
+               Valid,
+               Invalid);
+            if not Valid then
+               return False;
+            end if;
+         end;
+         Expected_Length := Item.Decoded_Source_Length;
+         for Offset in 0 .. Expected_Length - 1 loop
+            Expected
+              (Expected'First + Ada.Streams.Stream_Element_Offset (Offset)) :=
+              Ada.Streams.Stream_Element
+                (Character'Pos (Source_Byte (Offset)));
+         end loop;
+      elsif Item.Decoded_Source_Length = 2 then
+         case Source_Byte (1) is
+            when '"' | '\' | '/' =>
+               Code := Character'Pos (Source_Byte (1));
+
+            when 'b'             =>
+               Code := 8;
+
+            when 'f'             =>
+               Code := 12;
+
+            when 'n'             =>
+               Code := 10;
+
+            when 'r'             =>
+               Code := 13;
+
+            when 't'             =>
+               Code := 9;
+
+            when others          =>
+               return False;
+         end case;
+         Encode (Code);
+      elsif Item.Decoded_Source_Length = 6
+        and then Source_Byte (1) = 'u'
+        and then Read_Hex (2, Code)
+        and then Code not in 16#D800# .. 16#DFFF#
+      then
+         Encode (Code);
+      elsif Item.Decoded_Source_Length = 12
+        and then Source_Byte (1) = 'u'
+        and then Source_Byte (6) = '\'
+        and then Source_Byte (7) = 'u'
+        and then Read_Hex (2, Code)
+        and then Read_Hex (8, Low)
+        and then Code in 16#D800# .. 16#DBFF#
+        and then Low in 16#DC00# .. 16#DFFF#
+      then
+         Encode (16#1_0000# + (Code - 16#D800#) * 1_024 + Low - 16#DC00#);
+      else
+         return False;
+      end if;
+
+      return
+        Expected_Length = Item.Decoded_Length
+        and then (for all Offset in 0 .. Expected_Length - 1 =>
+                    Expected
+                      (Expected'First
+                       + Ada.Streams.Stream_Element_Offset (Offset))
+                    = Item.Decoded
+                        (Item.Decoded'First
+                         + Ada.Streams.Stream_Element_Offset (Offset)));
+   end Inline_Matches_Source;
+
+   function Valid_Text_Fragment
+     (Self        : Reader;
+      Token_First : Natural;
+      Token_Last  : Natural;
+      Item        : Drivers.Event_Summary;
+      Kind        : Drivers.Event_Kind) return Boolean
+   is
+      Source_Last : Natural;
+   begin
+      if Item.Kind /= Kind
+        or else Item.Boolean_Payload
+        or else Item.Source_Length = 0
+        or else Item.Source_Offset >= Self.Source'Length
+        or else Item.Source_Length > Self.Source'Length - Item.Source_Offset
+        or else not Item.Has_Raw_Byte
+      then
+         return False;
+      end if;
+
+      Source_Last := Item.Source_Offset + Item.Source_Length - 1;
+      if Item.Raw_Byte
+        /= Ada.Streams.Stream_Element
+             (Character'Pos (Self.Source (Self.Source'First + Source_Last)))
+      then
+         return False;
+      end if;
+
+      case Item.Decoded_Form is
+         when Drivers.No_Decoded     =>
+            if Item.Decoded_Offset /= 0
+              or else Item.Decoded_Source_Length /= 0
+              or else Item.Decoded_Length /= 0
+              or else Item.Source_Length /= 1
+            then
+               return False;
+            end if;
+
+         when Drivers.Raw_Decoded    =>
+            if Item.Source_Length /= 1
+              or else Item.Decoded_Offset /= Item.Source_Offset
+              or else Item.Decoded_Source_Length /= Item.Source_Length
+              or else Item.Decoded_Length /= 1
+              or else Item.Decoded (Item.Decoded'First) /= Item.Raw_Byte
+            then
+               return False;
+            end if;
+
+         when Drivers.Inline_Decoded =>
+            if not Inline_Matches_Source (Self, Token_First, Token_Last, Item)
+            then
+               return False;
+            end if;
+      end case;
+
+      for Index in Item.Decoded'Range loop
+         if Index
+           >= Item.Decoded'First
+              + Ada.Streams.Stream_Element_Offset (Item.Decoded_Length)
+           and then Item.Decoded (Index) /= 0
+         then
+            return False;
+         end if;
+      end loop;
+      return True;
+   end Valid_Text_Fragment;
+
    procedure Mark_Value_Complete
      (Self             : in out Reader;
       Terminal         : Terminal_State;
@@ -95,6 +352,9 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
 
                when Record_Container   =>
                   Self.Owner := Record_Child_Terminal;
+
+               when Variant_Container  =>
+                  Self.Owner := Variant_Child_Terminal;
 
                when Optional_Container =>
                   Self.Owner := Optional_Child_Terminal;
@@ -328,7 +588,10 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
             Reject (Self, Errors.Invalid_State, Error);
          end if;
       elsif Self.Stack (Self.Depth).Kind
-            not in Optional_Container | Sequence_Container | Record_Container
+            not in Optional_Container
+                 | Sequence_Container
+                 | Record_Container
+                 | Variant_Container
         or else Self.Stack (Self.Depth).Child /= Child_Ready
       then
          Reject (Self, Errors.Invalid_State, Error);
@@ -591,8 +854,13 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
    end Push_Map;
 
    procedure Push_Record
-     (Self : in out Reader; Error : in out Errors.Error_Info) is
+     (Self  : in out Reader;
+      Kind  : Container_Kind;
+      Error : in out Errors.Error_Info) is
    begin
+      if Kind not in Record_Container | Variant_Container then
+         raise Program_Error;
+      end if;
       Budgets.Enter_Container (Self.Budget, Unknown_Length, Error);
       if Error.Code /= Errors.No_Error then
          Latch (Self, Error);
@@ -601,7 +869,7 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       else
          Self.Depth := Self.Depth + 1;
          Self.Stack (Self.Depth) :=
-           (Kind             => Record_Container,
+           (Kind             => Kind,
             Child            => No_Child,
             Map_Phase        => Map_Needs_Entry,
             First_Item       => True,
@@ -1540,12 +1808,12 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          raise;
    end Read_Float_64;
 
-   overriding
-   procedure Read_Text
-     (Self   : in out Reader;
-      Value  : out String;
-      Length : out Natural;
-      Error  : in out Errors.Error_Info)
+   procedure Collect_String
+     (Self     : in out Reader;
+      Value    : out String;
+      Length   : out Natural;
+      Terminal : out Terminal_State;
+      Error    : in out Errors.Error_Info)
    is
       Summary     : Preflights.String_Summary;
       Events      :
@@ -1556,15 +1824,12 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       Token_First : Natural := 0;
       Token_Last  : Natural := 0;
       Next_Source : Natural := 0;
-      Terminal    : Terminal_State := No_Pending_Terminal;
-
       procedure Accept_String_End (Item : Drivers.Event_Summary) is
       begin
          if Phase /= 1
-           or else Item.Kind /= Drivers.String_End
+           or else not Valid_Quote (Item, Drivers.String_End)
            or else Item.Source_Offset /= Next_Source
            or else Item.Source_Offset /= Token_Last - 1
-           or else Item.Source_Length /= 1
          then
             Reject_Transcript (Self, Error);
          else
@@ -1608,11 +1873,7 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
    begin
       Value := [others => ' '];
       Length := 0;
-      if Error.Code /= Errors.No_Error then
-         return;
-      end if;
-      Require_Leading (Self, """", Error);
-      Prepare_Value (Self, Error);
+      Terminal := No_Pending_Terminal;
       if Error.Code /= Errors.No_Error then
          return;
       end if;
@@ -1643,7 +1904,6 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          return;
       end if;
 
-      Claim_Boundary (Self, Error);
       for Byte_Index in 1 .. Summary.Raw_Length loop
          exit when Error.Code /= Errors.No_Error;
          Consume_Owned_Byte (Self, Events, Count, Error);
@@ -1652,12 +1912,9 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
                case Events (Index).Kind is
                   when Drivers.String_Begin    =>
                      if Phase /= 0
+                       or else not Valid_Quote
+                                     (Events (Index), Drivers.String_Begin)
                        or else Events (Index).Source_Offset /= Token_First
-                       or else Events (Index).Source_Length /= 1
-                       or else not Events (Index).Has_Raw_Byte
-                       or else Events (Index).Raw_Byte
-                               /= Ada.Streams.Stream_Element
-                                    (Character'Pos ('"'))
                      then
                         Reject_Transcript (Self, Error);
                      else
@@ -1667,9 +1924,12 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
 
                   when Drivers.String_Fragment =>
                      if Phase /= 1
-                       or else (Events (Index).Decoded_Length = 0
-                                and then not Events (Index).Has_Raw_Byte)
-                       or else Events (Index).Source_Length = 0
+                       or else not Valid_Text_Fragment
+                                     (Self,
+                                      Token_First,
+                                      Token_Last,
+                                      Events (Index),
+                                      Drivers.String_Fragment)
                        or else Events (Index).Source_Offset /= Next_Source
                        or else Events (Index).Source_Offset <= Token_First
                        or else Events (Index).Source_Offset >= Token_Last - 1
@@ -1720,10 +1980,37 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          Reject_Transcript (Self, Error);
       end if;
 
-      Finish_Value (Self, Terminal, Error);
       if Error.Code = Errors.No_Error then
          Length := Copied;
       else
+         Value := [others => ' '];
+         Length := 0;
+      end if;
+   end Collect_String;
+
+   overriding
+   procedure Read_Text
+     (Self   : in out Reader;
+      Value  : out String;
+      Length : out Natural;
+      Error  : in out Errors.Error_Info)
+   is
+      Terminal : Terminal_State;
+   begin
+      Value := [others => ' '];
+      Length := 0;
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Require_Leading (Self, """", Error);
+      Prepare_Value (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Claim_Boundary (Self, Error);
+      Collect_String (Self, Value, Length, Terminal, Error);
+      Finish_Value (Self, Terminal, Error);
+      if Error.Code /= Errors.No_Error then
          Value := [others => ' '];
          Length := 0;
       end if;
@@ -2322,259 +2609,6 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       Token_Last  : Natural := 0;
       Next_Source : Natural := 0;
 
-      function Valid_Quote
-        (Item : Drivers.Event_Summary; Kind : Drivers.Event_Kind)
-         return Boolean
-      is (Item.Kind = Kind
-          and then Item.Source_Length = 1
-          and then Item.Has_Raw_Byte
-          and then Item.Raw_Byte
-                   = Ada.Streams.Stream_Element (Character'Pos ('"'))
-          and then Item.Decoded_Form = Drivers.No_Decoded
-          and then Item.Decoded_Offset = 0
-          and then Item.Decoded_Source_Length = 0
-          and then Item.Decoded_Length = 0
-          and then (for all Value of Item.Decoded => Value = 0)
-          and then not Item.Boolean_Payload);
-
-      function Hex_Value (Item : Character) return Natural is
-      begin
-         case Item is
-            when '0' .. '9' =>
-               return Character'Pos (Item) - Character'Pos ('0');
-
-            when 'A' .. 'F' =>
-               return Character'Pos (Item) - Character'Pos ('A') + 10;
-
-            when 'a' .. 'f' =>
-               return Character'Pos (Item) - Character'Pos ('a') + 10;
-
-            when others     =>
-               return 16;
-         end case;
-      end Hex_Value;
-
-      function Inline_Matches_Source
-        (Item : Drivers.Event_Summary) return Boolean
-      is
-         Expected        : Drivers.Scalar_Storage := [others => 0];
-         Expected_Length : Natural := 0;
-         Code            : Natural := 0;
-         Low             : Natural := 0;
-         Source_First    : Natural;
-         Source_Last     : Natural;
-
-         function Source_Byte (Offset : Natural) return Character
-         is (Self.Source (Self.Source'First + Source_First + Offset));
-
-         function Read_Hex
-           (Offset : Natural; Value : out Natural) return Boolean
-         is
-            Digit : Natural;
-         begin
-            Value := 0;
-            for Index in Offset .. Offset + 3 loop
-               Digit := Hex_Value (Source_Byte (Index));
-               if Digit = 16 then
-                  return False;
-               end if;
-               Value := Value * 16 + Digit;
-            end loop;
-            return True;
-         end Read_Hex;
-
-         procedure Put (Value : Natural) is
-         begin
-            Expected_Length := Expected_Length + 1;
-            Expected
-              (Expected'First
-               + Ada.Streams.Stream_Element_Offset (Expected_Length - 1)) :=
-              Ada.Streams.Stream_Element (Value);
-         end Put;
-
-         procedure Encode (Point : Natural) is
-         begin
-            if Point <= 16#7F# then
-               Put (Point);
-            elsif Point <= 16#7FF# then
-               Put (16#C0# + Point / 64);
-               Put (16#80# + Point mod 64);
-            elsif Point <= 16#FFFF# then
-               Put (16#E0# + Point / 4_096);
-               Put (16#80# + Point / 64 mod 64);
-               Put (16#80# + Point mod 64);
-            else
-               Put (16#F0# + Point / 262_144);
-               Put (16#80# + Point / 4_096 mod 64);
-               Put (16#80# + Point / 64 mod 64);
-               Put (16#80# + Point mod 64);
-            end if;
-         end Encode;
-      begin
-         if Item.Decoded_Source_Length = 0
-           or else Item.Decoded_Offset <= Token_First
-           or else Item.Decoded_Offset >= Token_Last - 1
-           or else Item.Decoded_Source_Length
-                   > Token_Last - 1 - Item.Decoded_Offset
-           or else Item.Source_Offset > Natural'Last - Item.Source_Length
-           or else Item.Decoded_Offset
-                   > Natural'Last - Item.Decoded_Source_Length
-           or else Item.Decoded_Offset + Item.Decoded_Source_Length
-                   /= Item.Source_Offset + Item.Source_Length
-         then
-            return False;
-         end if;
-         Source_First := Item.Decoded_Offset;
-         Source_Last := Source_First + Item.Decoded_Source_Length - 1;
-
-         if Source_Byte (0) /= '\' then
-            if (case Character'Pos (Source_Byte (0)) is
-                  when 16#C2# .. 16#DF# => Item.Decoded_Source_Length /= 2,
-                  when 16#E0# .. 16#EF# => Item.Decoded_Source_Length /= 3,
-                  when 16#F0# .. 16#F4# => Item.Decoded_Source_Length /= 4,
-                  when others           => True)
-            then
-               return False;
-            end if;
-            declare
-               Valid   : Boolean;
-               Invalid : Natural;
-            begin
-               Flyology_Serde.UTF_8_Validation.Locate
-                 (Self.Source
-                    (Self.Source'First
-                     + Source_First
-                     .. Self.Source'First + Source_Last),
-                  Valid,
-                  Invalid);
-               if not Valid then
-                  return False;
-               end if;
-            end;
-            Expected_Length := Item.Decoded_Source_Length;
-            for Offset in 0 .. Expected_Length - 1 loop
-               Expected
-                 (Expected'First
-                  + Ada.Streams.Stream_Element_Offset (Offset)) :=
-                 Ada.Streams.Stream_Element
-                   (Character'Pos (Source_Byte (Offset)));
-            end loop;
-         elsif Item.Decoded_Source_Length = 2 then
-            case Source_Byte (1) is
-               when '"' | '\' | '/' =>
-                  Code := Character'Pos (Source_Byte (1));
-
-               when 'b'             =>
-                  Code := 8;
-
-               when 'f'             =>
-                  Code := 12;
-
-               when 'n'             =>
-                  Code := 10;
-
-               when 'r'             =>
-                  Code := 13;
-
-               when 't'             =>
-                  Code := 9;
-
-               when others          =>
-                  return False;
-            end case;
-            Encode (Code);
-         elsif Item.Decoded_Source_Length = 6
-           and then Source_Byte (1) = 'u'
-           and then Read_Hex (2, Code)
-           and then Code not in 16#D800# .. 16#DFFF#
-         then
-            Encode (Code);
-         elsif Item.Decoded_Source_Length = 12
-           and then Source_Byte (1) = 'u'
-           and then Source_Byte (6) = '\'
-           and then Source_Byte (7) = 'u'
-           and then Read_Hex (2, Code)
-           and then Read_Hex (8, Low)
-           and then Code in 16#D800# .. 16#DBFF#
-           and then Low in 16#DC00# .. 16#DFFF#
-         then
-            Encode (16#1_0000# + (Code - 16#D800#) * 1_024 + Low - 16#DC00#);
-         else
-            return False;
-         end if;
-
-         return
-           Expected_Length = Item.Decoded_Length
-           and then (for all Offset in 0 .. Expected_Length - 1 =>
-                       Expected
-                         (Expected'First
-                          + Ada.Streams.Stream_Element_Offset (Offset))
-                       = Item.Decoded
-                           (Item.Decoded'First
-                            + Ada.Streams.Stream_Element_Offset (Offset)));
-      end Inline_Matches_Source;
-
-      function Valid_Name_Fragment
-        (Item : Drivers.Event_Summary) return Boolean
-      is
-         Source_Last : Natural;
-      begin
-         if Item.Kind /= Drivers.Name_Fragment
-           or else Item.Boolean_Payload
-           or else Item.Source_Length = 0
-           or else Item.Source_Offset >= Self.Source'Length
-           or else Item.Source_Length > Self.Source'Length - Item.Source_Offset
-           or else not Item.Has_Raw_Byte
-         then
-            return False;
-         end if;
-
-         Source_Last := Item.Source_Offset + Item.Source_Length - 1;
-         if Item.Raw_Byte
-           /= Ada.Streams.Stream_Element
-                (Character'Pos (Self.Source (Self.Source'First + Source_Last)))
-         then
-            return False;
-         end if;
-
-         case Item.Decoded_Form is
-            when Drivers.No_Decoded     =>
-               if Item.Decoded_Offset /= 0
-                 or else Item.Decoded_Source_Length /= 0
-                 or else Item.Decoded_Length /= 0
-                 or else Item.Source_Length /= 1
-               then
-                  return False;
-               end if;
-
-            when Drivers.Raw_Decoded    =>
-               if Item.Source_Length /= 1
-                 or else Item.Decoded_Offset /= Item.Source_Offset
-                 or else Item.Decoded_Source_Length /= Item.Source_Length
-                 or else Item.Decoded_Length /= 1
-                 or else Item.Decoded (Item.Decoded'First) /= Item.Raw_Byte
-               then
-                  return False;
-               end if;
-
-            when Drivers.Inline_Decoded =>
-               if not Inline_Matches_Source (Item) then
-                  return False;
-               end if;
-         end case;
-
-         for Index in Item.Decoded'Range loop
-            if Index
-              >= Item.Decoded'First
-                 + Ada.Streams.Stream_Element_Offset (Item.Decoded_Length)
-              and then Item.Decoded (Index) /= 0
-            then
-               return False;
-            end if;
-         end loop;
-         return True;
-      end Valid_Name_Fragment;
-
       procedure Accept_Name_End (Item : Drivers.Event_Summary) is
       begin
          if Phase /= 1
@@ -2643,7 +2677,12 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
 
                   when Drivers.Name_Fragment =>
                      if Phase /= 1
-                       or else not Valid_Name_Fragment (Events (Index))
+                       or else not Valid_Text_Fragment
+                                     (Self,
+                                      Token_First,
+                                      Token_Last,
+                                      Events (Index),
+                                      Drivers.Name_Fragment)
                        or else Events (Index).Source_Offset /= Next_Source
                        or else Events (Index).Source_Offset <= Token_First
                        or else Events (Index).Source_Offset >= Token_Last - 1
@@ -2774,7 +2813,7 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       elsif Saw_Document_End then
          Reject_Transcript (Self, Error);
       else
-         Push_Record (Self, Error);
+         Push_Record (Self, Record_Container, Error);
       end if;
    exception
       when others =>
@@ -2798,7 +2837,8 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          return;
       elsif Self.Operation /= Active
         or else Self.Depth = 0
-        or else Self.Stack (Self.Depth).Kind /= Record_Container
+        or else Self.Stack (Self.Depth).Kind
+                not in Record_Container | Variant_Container
         or else Self.Stack (Self.Depth).Child /= No_Child
         or else Self.Stack (Self.Depth).Exhausted
       then
@@ -2808,7 +2848,10 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
 
       loop
          if Self.Terminal /= No_Pending_Terminal then
-            if Self.Owner /= Record_Child_Terminal
+            if Self.Owner
+              /= (if Self.Stack (Self.Depth).Kind = Record_Container
+                  then Record_Child_Terminal
+                  else Variant_Child_Terminal)
               or else Self.Owner_Depth /= Self.Depth
             then
                Reject (Self, Errors.Invalid_State, Error);
@@ -2820,7 +2863,10 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
                return;
             elsif Current (Self) = '}' then
                Self.Stack (Self.Depth).Exhausted := True;
-               Self.Owner := Record_End_Terminal;
+               Self.Owner :=
+                 (if Self.Stack (Self.Depth).Kind = Record_Container
+                  then Record_End_Terminal
+                  else Variant_End_Terminal);
                return;
             elsif Is_Whitespace (Current (Self)) then
                Consume_Separator (Self, Current (Self), Error);
@@ -2938,9 +2984,7 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
    is
       pragma Unreferenced (Type_Name);
    begin
-      Literal_Name := [others => ' '];
-      Length := 0;
-      Reject_Unsupported (Self, Error);
+      Read_Text (Self, Literal_Name, Length, Error);
    end Read_Enumeration;
 
    overriding
@@ -2953,17 +2997,163 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       Error            : in out Errors.Error_Info)
    is
       pragma Unreferenced (Type_Name);
+      Terminal         : Terminal_State;
+      Saw_Document_End : Boolean;
    begin
       Alternative_Name := [others => ' '];
       Name_Length := 0;
       Length := Unknown_Length;
-      Reject_Unsupported (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Require_Leading (Self, "[", Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Prepare_Value (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Claim_Boundary (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Consume_Structure
+        (Self,
+         '[',
+         Drivers.Array_Begin,
+         Allow_Document_End => False,
+         Saw_Document_End   => Saw_Document_End,
+         Error              => Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Saw_Document_End then
+         Reject_Transcript (Self, Error);
+         return;
+      end if;
+      Commit_Value_Whitespace (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif not Has_Input (Self) or else Current (Self) /= '"' then
+         Reject (Self, Errors.Syntax_Error, Error);
+         return;
+      end if;
+      Collect_String (Self, Alternative_Name, Name_Length, Terminal, Error);
+      Resolve_Local_Separator (Self, Terminal, ',', Error);
+      Commit_Value_Whitespace (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         Alternative_Name := [others => ' '];
+         Name_Length := 0;
+         return;
+      elsif not Has_Input (Self) or else Current (Self) /= '{' then
+         Reject (Self, Errors.Syntax_Error, Error);
+         Alternative_Name := [others => ' '];
+         Name_Length := 0;
+         return;
+      end if;
+      Consume_Structure
+        (Self,
+         '{',
+         Drivers.Object_Begin,
+         Allow_Document_End => False,
+         Saw_Document_End   => Saw_Document_End,
+         Error              => Error);
+      if Error.Code /= Errors.No_Error then
+         Alternative_Name := [others => ' '];
+         Name_Length := 0;
+         return;
+      elsif Saw_Document_End then
+         Reject_Transcript (Self, Error);
+      else
+         Push_Record (Self, Variant_Container, Error);
+      end if;
+      if Error.Code /= Errors.No_Error then
+         Alternative_Name := [others => ' '];
+         Name_Length := 0;
+      end if;
+   exception
+      when others =>
+         Poison_After_Exception (Self);
+         Alternative_Name := [others => ' '];
+         Name_Length := 0;
+         Length := Unknown_Length;
+         raise;
    end Begin_Variant;
 
    overriding
    procedure End_Variant
-     (Self : in out Reader; Error : in out Errors.Error_Info) is
+     (Self : in out Reader; Error : in out Errors.Error_Info)
+   is
+      Closing_Root     : Boolean;
+      Saw_Document_End : Boolean;
    begin
-      Reject_Unsupported (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Self.Operation /= Active
+        or else Self.Depth = 0
+        or else Self.Stack (Self.Depth).Kind /= Variant_Container
+        or else Self.Stack (Self.Depth).Child /= No_Child
+        or else not Self.Stack (Self.Depth).Exhausted
+        or else (Self.Terminal /= No_Pending_Terminal
+                 and then (Self.Owner /= Variant_End_Terminal
+                           or else Self.Owner_Depth /= Self.Depth))
+      then
+         Reject (Self, Errors.Invalid_State, Error);
+         return;
+      end if;
+
+      if Self.Terminal = No_Pending_Terminal then
+         Commit_Value_Whitespace (Self, Error);
+      end if;
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Consume_Structure
+        (Self,
+         '}',
+         Drivers.Object_End,
+         Allow_Document_End => False,
+         Saw_Document_End   => Saw_Document_End,
+         Error              => Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Saw_Document_End then
+         Reject_Transcript (Self, Error);
+         return;
+      end if;
+
+      Clear_Terminal (Self);
+      Commit_Value_Whitespace (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Closing_Root := Self.Depth = 1 and then Self.Root = Root_In_Progress;
+      Consume_Structure
+        (Self,
+         ']',
+         Drivers.Array_End,
+         Allow_Document_End => Closing_Root,
+         Saw_Document_End   => Saw_Document_End,
+         Error              => Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+
+      Self.Stack (Self.Depth) := (others => <>);
+      Self.Depth := Self.Depth - 1;
+      Budgets.Leave_Container (Self.Budget, Error);
+      if Error.Code /= Errors.No_Error then
+         Latch (Self, Error);
+      else
+         Finish_Value
+           (Self,
+            No_Pending_Terminal,
+            Error,
+            Saw_Document_End => Saw_Document_End);
+      end if;
+   exception
+      when others =>
+         Poison_After_Exception (Self);
+         raise;
    end End_Variant;
 end Flyology_Serde.Deserializers.JSON.Event_Readers;

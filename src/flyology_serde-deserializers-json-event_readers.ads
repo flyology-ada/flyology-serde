@@ -225,7 +225,9 @@ private
       Optional_Tag_Terminal,
       Optional_Child_Terminal,
       Record_Child_Terminal,
-      Record_End_Terminal);
+      Record_End_Terminal,
+      Variant_Child_Terminal,
+      Variant_End_Terminal);
 
    type Reader (Source : not null access constant String) is limited
      new Deserialization.Deserializer
