@@ -121,6 +121,50 @@ begin
       Finish (Item, Error);
    end;
 
+   --  Optional presence is not published until its opening prefix, frame, and
+   --  logical item charge succeed.
+   declare
+      Input   : aliased constant String := "[1,0]";
+      Item    : JSON.Reader (Input'Access);
+      Error   : Errors.Error_Info;
+      Policy  : Policies.Decode_Policy := (others => <>);
+      Present : Boolean := True;
+   begin
+      Policy.Limits.Maximum_Container_Items := 0;
+      Item.Initialize (Policy);
+      Item.Begin_Optional (Present, Error);
+      pragma Assert (Error.Code = Errors.Capacity_Exceeded);
+      pragma Assert (not Present);
+      pragma Assert (Error.Input_Offset = 3);
+      pragma Assert (Error.Offset_Unit = Errors.Byte_Offset);
+      pragma Assert (Item.Input_Offset = 3);
+      pragma Assert (JSON_Testing.Syntax_Input_Offset (Item) = 3);
+      pragma Assert (JSON_Testing.Budget_Input_Consumed (Item) = 3);
+      pragma Assert (JSON_Testing.Budget_Values_Consumed (Item) = 1);
+      pragma Assert (JSON_Testing.Logical_Depth (Item) = 0);
+      pragma Assert (JSON_Testing.Budget_Depth (Item) = 0);
+
+      Errors.Reset (Error);
+      Item.End_Optional (Error);
+      pragma Assert (Error.Code = Errors.Invalid_State);
+   end;
+
+   --  A parsed some tag cannot publish presence when its child prefix is
+   --  malformed and no optional frame can be committed.
+   declare
+      Input   : aliased constant String := "[1,]";
+      Item    : JSON.Reader (Input'Access);
+      Error   : Errors.Error_Info;
+      Present : Boolean := True;
+   begin
+      Item.Initialize;
+      Item.Begin_Optional (Present, Error);
+      pragma Assert (Error.Code = Errors.Syntax_Error);
+      pragma Assert (not Present);
+      pragma Assert (JSON_Testing.Logical_Depth (Item) = 0);
+      pragma Assert (JSON_Testing.Budget_Depth (Item) = 0);
+   end;
+
    declare
       Input  : aliased constant String := " { ""$bytes"" : ""00FF"" } ";
       Item   : JSON.Reader (Input'Access);
@@ -334,8 +378,10 @@ begin
       Item.Initialize (Policy);
       Item.Begin_Optional (Present, Error);
       Item.Begin_Optional (Present, Error);
+      Present := True;
       Item.Begin_Optional (Present, Error);
       pragma Assert (Error.Code = Errors.Depth_Exceeded);
+      pragma Assert (not Present);
       pragma Assert (Error.Offset_Unit = Errors.Byte_Offset);
       Errors.Reset (Error);
       Item.End_Optional (Error);

@@ -41,6 +41,15 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
    function Budget_Input_Consumed (Self : Reader) return Natural
    is (Budgets.Input_Consumed (Self.Budget));
 
+   function Budget_Values_Consumed (Self : Reader) return Natural
+   is (Budgets.Values_Consumed (Self.Budget));
+
+   function Logical_Depth (Self : Reader) return Natural
+   is (Self.Depth);
+
+   function Budget_Depth (Self : Reader) return Natural
+   is (Budgets.Depth (Self.Budget));
+
    procedure Assert_JSON_Event_Contract is
       type Event_Set is array (Parsing.Event_Kind) of Boolean;
       Seen : Event_Set := [others => False];

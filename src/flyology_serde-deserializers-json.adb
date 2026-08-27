@@ -311,10 +311,11 @@ package body Flyology_Serde.Deserializers.JSON is
    end Finish_Value;
 
    procedure Push
-     (Self  : in out Reader;
-      Kind  : Container_Kind;
-      Frame : Container_Frame;
-      Error : in out Errors.Error_Info) is
+     (Self        : in out Reader;
+      Kind        : Container_Kind;
+      Frame       : Container_Frame;
+      Charge_Item : Boolean;
+      Error       : in out Errors.Error_Info) is
    begin
       Budgets.Enter_Container (Self.Budget, Unknown_Length, Error);
       if Error.Code /= Errors.No_Error then
@@ -322,9 +323,15 @@ package body Flyology_Serde.Deserializers.JSON is
       elsif Self.Depth = Policies.Maximum_Supported_Nesting then
          Fail (Self, Errors.Depth_Exceeded, Error);
       else
-         Self.Depth := Self.Depth + 1;
-         Self.Stack (Self.Depth) := Frame;
-         Self.Stack (Self.Depth).Kind := Kind;
+         if Charge_Item then
+            Budgets.Consume_Container_Item (Self.Budget, Error);
+            Latch (Self, Error);
+         end if;
+         if Error.Code = Errors.No_Error then
+            Self.Depth := Self.Depth + 1;
+            Self.Stack (Self.Depth) := Frame;
+            Self.Stack (Self.Depth).Kind := Kind;
+         end if;
       end if;
    end Push;
 
@@ -1312,7 +1319,9 @@ package body Flyology_Serde.Deserializers.JSON is
    procedure Begin_Optional
      (Self    : in out Reader;
       Present : out Boolean;
-      Error   : in out Errors.Error_Info) is
+      Error   : in out Errors.Error_Info)
+   is
+      Candidate_Present : Boolean := False;
    begin
       Present := False;
       Require_Leading (Self, "[", Error);
@@ -1325,9 +1334,9 @@ package body Flyology_Serde.Deserializers.JSON is
          Fail (Self, Errors.Syntax_Error, Error);
          return;
       end if;
-      Present := Current (Self) = '1';
+      Candidate_Present := Current (Self) = '1';
       Advance (Self, 1, Error);
-      if Present then
+      if Candidate_Present then
          Expect (Self, ',', Error);
          Require_Child_Start (Self, Error);
       end if;
@@ -1335,14 +1344,14 @@ package body Flyology_Serde.Deserializers.JSON is
         (Self,
          Optional_Container,
          (Kind       => Optional_Container,
-          Child      => (if Present then Child_Ready else No_Child),
+          Child      => (if Candidate_Present then Child_Ready else No_Child),
           Map_Phase  => <>,
           First_Item => False,
           Exhausted  => True),
-         Error);
-      if Error.Code = Errors.No_Error and then Present then
-         Budgets.Consume_Container_Item (Self.Budget, Error);
-         Latch (Self, Error);
+         Charge_Item => Candidate_Present,
+         Error       => Error);
+      if Error.Code = Errors.No_Error then
+         Present := Candidate_Present;
       end if;
    end Begin_Optional;
 
@@ -1363,7 +1372,12 @@ package body Flyology_Serde.Deserializers.JSON is
       Require_Leading (Self, "[", Error);
       Prepare_Value (Self, Error);
       Expect (Self, '[', Error);
-      Push (Self, Sequence_Container, (others => <>), Error);
+      Push
+        (Self,
+         Sequence_Container,
+         (others => <>),
+         Charge_Item => False,
+         Error       => Error);
    end Begin_Sequence;
 
    overriding
@@ -1425,7 +1439,12 @@ package body Flyology_Serde.Deserializers.JSON is
       Require_Leading (Self, "[", Error);
       Prepare_Value (Self, Error);
       Expect (Self, '[', Error);
-      Push (Self, Map_Container, (Kind => Map_Container, others => <>), Error);
+      Push
+        (Self,
+         Map_Container,
+         (Kind => Map_Container, others => <>),
+         Charge_Item => False,
+         Error       => Error);
    end Begin_Map;
 
    overriding
@@ -1485,7 +1504,12 @@ package body Flyology_Serde.Deserializers.JSON is
       Require_Leading (Self, "{", Error);
       Prepare_Value (Self, Error);
       Expect (Self, '{', Error);
-      Push (Self, Record_Container, (others => <>), Error);
+      Push
+        (Self,
+         Record_Container,
+         (others => <>),
+         Charge_Item => False,
+         Error       => Error);
    end Begin_Record;
 
    procedure Next_Record_Field
@@ -1592,7 +1616,12 @@ package body Flyology_Serde.Deserializers.JSON is
       Decode_String (Self, Alternative_Name, Name_Length, True, Error);
       Expect (Self, ',', Error);
       Expect (Self, '{', Error);
-      Push (Self, Variant_Container, (others => <>), Error);
+      Push
+        (Self,
+         Variant_Container,
+         (others => <>),
+         Charge_Item => False,
+         Error       => Error);
       if Error.Code /= Errors.No_Error then
          Alternative_Name := [others => ' '];
          Name_Length := 0;
