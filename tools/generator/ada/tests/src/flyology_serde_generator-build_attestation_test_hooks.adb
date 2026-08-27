@@ -5,6 +5,7 @@ package body Flyology_Serde_Generator.Build_Attestation_Test_Hooks is
 
    type Boolean_Array is array (Transfer_Point) of Boolean;
    type Source_Failure_Array is array (Source_Failure_Point) of Boolean;
+   type Snapshot_Failure_Array is array (Snapshot_Failure_Point) of Natural;
 
    protected Control is
       procedure Arm_Point (Point : Transfer_Point);
@@ -36,6 +37,33 @@ package body Flyology_Serde_Generator.Build_Attestation_Test_Hooks is
          Payloads_Released  : out Natural);
       procedure Arm_Source_Failure (Point : Source_Failure_Point);
       procedure Take_Source_Failure (Point : Source_Failure_Point; Armed : out Boolean);
+      procedure Arm_Snapshot_Failure
+        (Point : Snapshot_Failure_Point;
+         Occurrence : Positive);
+      procedure Reset_Snapshot_Failures;
+      function Snapshot_Failure_Remaining (Point : Snapshot_Failure_Point) return Natural;
+      function Snapshot_Failures_Clear return Boolean;
+      procedure Take_Snapshot_Failure
+        (Point : Snapshot_Failure_Point;
+         Armed : out Boolean);
+      procedure Snapshot_Descriptor_Attached;
+      procedure Snapshot_Descriptor_Released;
+      procedure Snapshot_Descriptor_Counts
+        (Attached : out Natural;
+         Released : out Natural);
+      procedure Snapshot_Block_Allocated;
+      procedure Snapshot_Block_Released;
+      procedure Snapshot_Path_Allocated;
+      procedure Snapshot_Path_Released;
+      procedure Snapshot_Payload_Allocated;
+      procedure Snapshot_Payload_Released;
+      procedure Snapshot_Counts
+        (Blocks_Allocated   : out Natural;
+         Blocks_Released    : out Natural;
+         Paths_Allocated    : out Natural;
+         Paths_Released     : out Natural;
+         Payloads_Allocated : out Natural;
+         Payloads_Released  : out Natural);
       procedure Arm_Request_Storage_Failure;
       procedure Arm_Request_Internal_Failure;
       procedure Arm_Dependency_Storage_Failure;
@@ -60,6 +88,15 @@ package body Flyology_Serde_Generator.Build_Attestation_Test_Hooks is
       Source_Payload_Allocations : Natural := 0;
       Source_Payload_Releases : Natural := 0;
       Source_Failures         : Source_Failure_Array := [others => False];
+      Snapshot_Failures       : Snapshot_Failure_Array := [others => 0];
+      Snapshot_Descriptors_Attached : Natural := 0;
+      Snapshot_Descriptors_Released : Natural := 0;
+      Snapshot_Block_Allocations : Natural := 0;
+      Snapshot_Block_Releases : Natural := 0;
+      Snapshot_Path_Allocations : Natural := 0;
+      Snapshot_Path_Releases  : Natural := 0;
+      Snapshot_Payload_Allocations : Natural := 0;
+      Snapshot_Payload_Releases : Natural := 0;
       Fail_Request_Storage   : Boolean := False;
       Fail_Request_Internal  : Boolean := False;
       Fail_Dependency_Storage : Boolean := False;
@@ -178,6 +215,121 @@ package body Flyology_Serde_Generator.Build_Attestation_Test_Hooks is
          Armed := Source_Failures (Point);
          Source_Failures (Point) := False;
       end Take_Source_Failure;
+
+      procedure Arm_Snapshot_Failure
+        (Point : Snapshot_Failure_Point;
+         Occurrence : Positive) is
+      begin
+         Snapshot_Failures (Point) := Occurrence;
+      end Arm_Snapshot_Failure;
+
+      procedure Reset_Snapshot_Failures is
+      begin
+         Snapshot_Failures := [others => 0];
+      end Reset_Snapshot_Failures;
+
+      function Snapshot_Failure_Remaining (Point : Snapshot_Failure_Point) return Natural is
+        (Snapshot_Failures (Point));
+
+      function Snapshot_Failures_Clear return Boolean is
+      begin
+         for Remaining of Snapshot_Failures loop
+            if Remaining /= 0 then
+               return False;
+            end if;
+         end loop;
+         return True;
+      end Snapshot_Failures_Clear;
+
+      procedure Take_Snapshot_Failure
+        (Point : Snapshot_Failure_Point;
+         Armed : out Boolean) is
+      begin
+         Armed := Snapshot_Failures (Point) = 1;
+         if Snapshot_Failures (Point) > 0 then
+            Snapshot_Failures (Point) := Snapshot_Failures (Point) - 1;
+         end if;
+      end Take_Snapshot_Failure;
+
+      procedure Snapshot_Descriptor_Attached is
+      begin
+         if Snapshot_Descriptors_Attached < Natural'Last then
+            Snapshot_Descriptors_Attached := Snapshot_Descriptors_Attached + 1;
+         end if;
+      end Snapshot_Descriptor_Attached;
+
+      procedure Snapshot_Descriptor_Released is
+      begin
+         if Snapshot_Descriptors_Released < Natural'Last then
+            Snapshot_Descriptors_Released := Snapshot_Descriptors_Released + 1;
+         end if;
+      end Snapshot_Descriptor_Released;
+
+      procedure Snapshot_Descriptor_Counts
+        (Attached : out Natural;
+         Released : out Natural) is
+      begin
+         Attached := Snapshot_Descriptors_Attached;
+         Released := Snapshot_Descriptors_Released;
+      end Snapshot_Descriptor_Counts;
+
+      procedure Snapshot_Block_Allocated is
+      begin
+         if Snapshot_Block_Allocations < Natural'Last then
+            Snapshot_Block_Allocations := Snapshot_Block_Allocations + 1;
+         end if;
+      end Snapshot_Block_Allocated;
+
+      procedure Snapshot_Block_Released is
+      begin
+         if Snapshot_Block_Releases < Natural'Last then
+            Snapshot_Block_Releases := Snapshot_Block_Releases + 1;
+         end if;
+      end Snapshot_Block_Released;
+
+      procedure Snapshot_Path_Allocated is
+      begin
+         if Snapshot_Path_Allocations < Natural'Last then
+            Snapshot_Path_Allocations := Snapshot_Path_Allocations + 1;
+         end if;
+      end Snapshot_Path_Allocated;
+
+      procedure Snapshot_Path_Released is
+      begin
+         if Snapshot_Path_Releases < Natural'Last then
+            Snapshot_Path_Releases := Snapshot_Path_Releases + 1;
+         end if;
+      end Snapshot_Path_Released;
+
+      procedure Snapshot_Payload_Allocated is
+      begin
+         if Snapshot_Payload_Allocations < Natural'Last then
+            Snapshot_Payload_Allocations := Snapshot_Payload_Allocations + 1;
+         end if;
+      end Snapshot_Payload_Allocated;
+
+      procedure Snapshot_Payload_Released is
+      begin
+         if Snapshot_Payload_Releases < Natural'Last then
+            Snapshot_Payload_Releases := Snapshot_Payload_Releases + 1;
+         end if;
+      end Snapshot_Payload_Released;
+
+      procedure Snapshot_Counts
+        (Blocks_Allocated   : out Natural;
+         Blocks_Released    : out Natural;
+         Paths_Allocated    : out Natural;
+         Paths_Released     : out Natural;
+         Payloads_Allocated : out Natural;
+         Payloads_Released  : out Natural) is
+      begin
+         Blocks_Allocated := Snapshot_Block_Allocations;
+         Blocks_Released := Snapshot_Block_Releases;
+         Paths_Allocated := Snapshot_Path_Allocations;
+         Paths_Released := Snapshot_Path_Releases;
+         Payloads_Allocated := Snapshot_Payload_Allocations;
+         Payloads_Released := Snapshot_Payload_Releases;
+      end Snapshot_Counts;
 
       procedure Arm_Request_Storage_Failure is
       begin
@@ -369,6 +521,91 @@ package body Flyology_Serde_Generator.Build_Attestation_Test_Hooks is
          end case;
       end if;
    end Raise_If_Source_Failure;
+
+   procedure Arm_Snapshot_Failure
+     (Point : Snapshot_Failure_Point;
+      Occurrence : Positive := 1) is
+   begin
+      Control.Arm_Snapshot_Failure (Point, Occurrence);
+   end Arm_Snapshot_Failure;
+
+   procedure Reset_Snapshot_Failures is
+   begin
+      Control.Reset_Snapshot_Failures;
+   end Reset_Snapshot_Failures;
+
+   function Snapshot_Failure_Remaining (Point : Snapshot_Failure_Point) return Natural is
+     (Control.Snapshot_Failure_Remaining (Point));
+
+   function Snapshot_Failures_Clear return Boolean is
+     (Control.Snapshot_Failures_Clear);
+
+   procedure Take_Snapshot_Failure
+     (Point : Snapshot_Failure_Point;
+      Armed : out Boolean) is
+   begin
+      Control.Take_Snapshot_Failure (Point, Armed);
+   end Take_Snapshot_Failure;
+
+   procedure Note_Snapshot_Descriptor_Attached is
+   begin
+      Control.Snapshot_Descriptor_Attached;
+   end Note_Snapshot_Descriptor_Attached;
+
+   procedure Note_Snapshot_Descriptor_Released is
+   begin
+      Control.Snapshot_Descriptor_Released;
+   end Note_Snapshot_Descriptor_Released;
+
+   procedure Snapshot_Descriptor_Counts
+     (Attached : out Natural;
+      Released : out Natural) is
+   begin
+      Control.Snapshot_Descriptor_Counts (Attached, Released);
+   end Snapshot_Descriptor_Counts;
+
+   procedure Note_Snapshot_Block_Allocated is
+   begin
+      Control.Snapshot_Block_Allocated;
+   end Note_Snapshot_Block_Allocated;
+
+   procedure Note_Snapshot_Block_Released is
+   begin
+      Control.Snapshot_Block_Released;
+   end Note_Snapshot_Block_Released;
+
+   procedure Note_Snapshot_Path_Allocated is
+   begin
+      Control.Snapshot_Path_Allocated;
+   end Note_Snapshot_Path_Allocated;
+
+   procedure Note_Snapshot_Path_Released is
+   begin
+      Control.Snapshot_Path_Released;
+   end Note_Snapshot_Path_Released;
+
+   procedure Note_Snapshot_Payload_Allocated is
+   begin
+      Control.Snapshot_Payload_Allocated;
+   end Note_Snapshot_Payload_Allocated;
+
+   procedure Note_Snapshot_Payload_Released is
+   begin
+      Control.Snapshot_Payload_Released;
+   end Note_Snapshot_Payload_Released;
+
+   procedure Snapshot_Allocation_Counts
+     (Blocks_Allocated   : out Natural;
+      Blocks_Released    : out Natural;
+      Paths_Allocated    : out Natural;
+      Paths_Released     : out Natural;
+      Payloads_Allocated : out Natural;
+      Payloads_Released  : out Natural) is
+   begin
+      Control.Snapshot_Counts
+        (Blocks_Allocated, Blocks_Released, Paths_Allocated, Paths_Released,
+         Payloads_Allocated, Payloads_Released);
+   end Snapshot_Allocation_Counts;
 
    procedure Arm_Request_Storage_Failure is
    begin

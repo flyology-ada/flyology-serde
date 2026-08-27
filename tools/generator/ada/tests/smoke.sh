@@ -15,6 +15,10 @@ build_attestations_tests="$generator_root/tests/bin/build_attestations_tests"
 build_attestations_abort_test="$generator_root/tests/bin/flyology_serde_generator-build_attestations-abort_test"
 source_lists_test="$generator_root/tests/bin/flyology_serde_generator-build_attestations-source_lists-test"
 source_lists_abort_test="$generator_root/tests/bin/flyology_serde_generator-build_attestations-source_lists-abort_test"
+local_snapshots_test="$generator_root/tests/bin/"
+local_snapshots_test="${local_snapshots_test}flyology_serde_generator-build_attestations-local_snapshots-test"
+local_snapshots_abort_test="$generator_root/tests/bin/"
+local_snapshots_abort_test="${local_snapshots_abort_test}flyology_serde_generator-build_attestations-local_snapshots-abort_test"
 build_budget_session_test="$generator_root/tests/bin/flyology_serde_generator-build_budgets-session_exhaustion_test"
 build_processes_tests="$generator_root/tests/bin/build_processes_tests"
 build_process_exception_test="$generator_root/tests/bin/flyology_serde_generator-build_processes-exceptional_release_test"
@@ -42,6 +46,10 @@ source_list_hook_object="$generator_root/tests/obj/attestation_hook_elision/"
 source_list_hook_object="${source_list_hook_object}flyology_serde_generator-build_attestations-source_lists.o"
 source_list_hook_ali="$generator_root/tests/obj/attestation_hook_elision/"
 source_list_hook_ali="${source_list_hook_ali}flyology_serde_generator-build_attestations-source_lists.ali"
+snapshot_hook_object="$generator_root/tests/obj/attestation_hook_elision/"
+snapshot_hook_object="${snapshot_hook_object}flyology_serde_generator-build_attestations-local_snapshots.o"
+snapshot_hook_ali="$generator_root/tests/obj/attestation_hook_elision/"
+snapshot_hook_ali="${snapshot_hook_ali}flyology_serde_generator-build_attestations-local_snapshots.ali"
 overlay_fixture="$generator_root/../tests/fixtures/wire-record-overlay.json"
 policy_overlay_fixture="$generator_root/../tests/fixtures/wire-record-overlay-policy.json"
 type_ir_fixture="$generator_root/../vendor/type_ir/fixtures/wire-record-shape.json"
@@ -49,11 +57,6 @@ golden_root="$generator_root/../tests/golden"
 test_root=$(mktemp -d)
 trap 'rm -rf -- "$test_root"' EXIT HUP INT TERM
 limits=4096,1048576,2097152,4096,32,8,64,4096,100000,10000,1048576,2097152,3,64,256,4194304
-
-alr -C "$generator_root" exec -- gprbuild -f -p -c -gnatc -P \
-  flyology_serde_generator.gpr \
-  src/flyology_serde_generator-build_attestations-file_abi.ads \
-  src/flyology_serde_generator-build_attestations-local_snapshots.ads >/dev/null
 
 for query_spec in \
   "$generator_root/src/flyology_serde_generator-requests.ads" \
@@ -78,6 +81,15 @@ if nm "$generator" | grep -Eqi 'test_fixtures|production_shapes'; then
    echo "test-only production-shape symbol escaped into the production generator binary" >&2
    exit 1
 fi
+if nm "$generator" | grep -Eqi 'local_snapshots|attestations__file_abi'; then
+   echo "transitional local-snapshot capture escaped into the production generator binary" >&2
+   exit 1
+fi
+if rg -ni 'local_snapshots|attestations[.]file_abi' \
+  "$generator_root"/obj/*/b__flyology_serde_generate.* >/dev/null; then
+   echo "transitional local-snapshot capture escaped into the production binder closure" >&2
+   exit 1
+fi
 "$build_sha_256_tests"
 "$build_budgets_tests"
 "$atomic_ledgers_tests"
@@ -85,6 +97,20 @@ fi
 "$build_attestations_abort_test"
 "$source_lists_test" "$generator_root/provenance-files-v2.txt"
 "$source_lists_abort_test"
+snapshot_root="$test_root/snapshot-root"
+mkdir -p "$snapshot_root/directory"
+cp "$generator_root/src/flyology_serde_generator-build_attestations-local_snapshots.adb" \
+  "$snapshot_root/large.bin"
+: >"$snapshot_root/empty.bin"
+printf 'abc' >"$snapshot_root/known.bin"
+cp "$snapshot_root/large.bin" \
+  "$snapshot_root/long_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnop.bin"
+cp "$snapshot_root/large.bin" "$snapshot_root/directory/file.bin"
+ln -s large.bin "$snapshot_root/link.bin"
+ln -s directory "$snapshot_root/directory-link"
+mkfifo "$snapshot_root/fifo"
+"$local_snapshots_test" "$snapshot_root"
+"$local_snapshots_abort_test" "$snapshot_root"
 "$build_budget_session_test"
 "$build_processes_tests"
 "$build_process_exception_test"
@@ -163,6 +189,50 @@ for hook_optimization in -O0 -O2; do
       exit 1
    fi
 done
+for hook_optimization in -O0 -O2; do
+   alr -C "$generator_root" exec -- gprbuild -f -p -u -P "$attestation_hook_project" \
+     -XHOOK_OPT="$hook_optimization" \
+     flyology_serde_generator-build_attestations-local_snapshots.adb >/dev/null
+   if ! test -r "$snapshot_hook_object" || ! test -r "$snapshot_hook_ali"; then
+      echo "local-snapshot hook artifacts are missing after $hook_optimization compilation" >&2
+      exit 1
+   fi
+   if nm "$snapshot_hook_object" | grep -qi flyology_serde_disabled; then
+      echo "disabled local-snapshot test hook survived $hook_optimization compilation" >&2
+      exit 1
+   fi
+   if nm "$snapshot_hook_object" | grep -Eqi 'json|type_ir|libadalang|flyology_wire'; then
+      echo "local-snapshot capture gained a forbidden dependency under $hook_optimization" >&2
+      exit 1
+   fi
+   if ! awk '
+     $1 == "W" && $2 !~ /^(ada|ada[.]finalization|ada[.]streams|ada[.]unchecked_deallocation|interfaces|interfaces[.]c|system|system[.]soft_links|flyology_serde_generator|flyology_serde_generator[.]build_attestation_test_hooks|flyology_serde_generator[.]build_attestations|flyology_serde_generator[.]build_attestations[.]file_abi|flyology_serde_generator[.]build_sha_256)%s$/ { bad = 1 }
+     END { exit bad }
+   ' "$snapshot_hook_ali"
+   then
+      echo "local-snapshot capture gained a non-allowlisted direct unit under $hook_optimization" >&2
+      exit 1
+   fi
+done
+if awk '
+  /Commit_Started := True/ { commit = 1 }
+  commit && /Test_Hooks/ { bad = 1 }
+  commit && /Abort_Undefer/ { commit = 0 }
+  END { exit bad }
+' "$generator_root/src/flyology_serde_generator-build_attestations-local_snapshots.adb"
+then
+   :
+else
+   echo "local-snapshot post-latch commit contains a test-hook reference" >&2
+   exit 1
+fi
+if rg -ni 'local_snapshots|attestations[.]file_abi' "$generator_root/src" \
+  --glob '!flyology_serde_generator-build_attestations-local_snapshots.*' \
+  --glob '!flyology_serde_generator-build_attestations-file_abi.*' >/dev/null
+then
+   echo "local-snapshot checkpoint escaped into a production generator unit" >&2
+   exit 1
+fi
 "$scaffold_tests" "$overlay_fixture"
 python3 "$generator_root/../generate.py" --type-ir "$type_ir_fixture" \
   --overlay "$overlay_fixture" --output "$test_root/python" --test-fixture-shape

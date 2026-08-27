@@ -13,7 +13,12 @@ private package Flyology_Serde_Generator.Build_Attestation_Test_Hooks is
       Source_Payload_Publication,
       Source_Owner_Publication,
       Source_Visit_Latch,
-      Source_Callback);
+      Source_Callback,
+      Snapshot_After_Initial_Identity,
+      Snapshot_After_Read,
+      Snapshot_Root_Precommit,
+      Snapshot_Capture_Precommit,
+      Snapshot_Copy_Precommit);
 
    type Source_Failure_Point is
      (Source_Path_Storage,
@@ -24,6 +29,25 @@ private package Flyology_Serde_Generator.Build_Attestation_Test_Hooks is
       Source_Node_Release,
       Source_Payload_Release,
       Source_Visit_Release);
+
+   type Snapshot_Failure_Point is
+     (Snapshot_Open_Interrupted,
+      Snapshot_Open_Failed,
+      Snapshot_Identity_Failed,
+      Snapshot_Read_Interrupted,
+      Snapshot_Read_Failed,
+      Snapshot_Read_Short,
+      Snapshot_Premature_EOF,
+      Snapshot_Impossible_Positive_Result,
+      Snapshot_Close_Failed,
+      Snapshot_Block_Storage,
+      Snapshot_Path_Storage,
+      Snapshot_Payload_Storage,
+      Snapshot_Block_Release,
+      Snapshot_Path_Release,
+      Snapshot_Payload_Release,
+      Snapshot_Copy_Invariant,
+      Snapshot_Copy_Storage);
 
    procedure Arm (Point : Transfer_Point) with
      Import, Convention => Ada, External_Name => "flyology_serde_disabled_attestation_arm";
@@ -81,6 +105,49 @@ private package Flyology_Serde_Generator.Build_Attestation_Test_Hooks is
      Import, Convention => Ada, External_Name => "flyology_serde_disabled_attestation_arm_source_failure";
    procedure Raise_If_Source_Failure (Point : Source_Failure_Point) with
      Import, Convention => Ada, External_Name => "flyology_serde_disabled_attestation_raise_source_failure";
+
+   procedure Arm_Snapshot_Failure
+     (Point      : Snapshot_Failure_Point;
+      Occurrence : Positive := 1) with
+     Import, Convention => Ada, External_Name => "flyology_serde_disabled_snapshot_arm_failure";
+   procedure Reset_Snapshot_Failures with
+     Import, Convention => Ada, External_Name => "flyology_serde_disabled_snapshot_reset_failures";
+   function Snapshot_Failure_Remaining (Point : Snapshot_Failure_Point) return Natural with
+     Import, Convention => Ada, External_Name => "flyology_serde_disabled_snapshot_failure_remaining";
+   function Snapshot_Failures_Clear return Boolean with
+     Import, Convention => Ada, External_Name => "flyology_serde_disabled_snapshot_failures_clear";
+   procedure Take_Snapshot_Failure
+     (Point : Snapshot_Failure_Point;
+      Armed : out Boolean) with
+     Import, Convention => Ada, External_Name => "flyology_serde_disabled_snapshot_take_failure";
+   procedure Note_Snapshot_Descriptor_Attached with
+     Import, Convention => Ada, External_Name => "flyology_serde_disabled_snapshot_descriptor_attached";
+   procedure Note_Snapshot_Descriptor_Released with
+     Import, Convention => Ada, External_Name => "flyology_serde_disabled_snapshot_descriptor_released";
+   procedure Snapshot_Descriptor_Counts
+     (Attached : out Natural;
+      Released : out Natural) with
+     Import, Convention => Ada, External_Name => "flyology_serde_disabled_snapshot_descriptor_counts";
+   procedure Note_Snapshot_Block_Allocated with
+     Import, Convention => Ada, External_Name => "flyology_serde_disabled_snapshot_block_allocated";
+   procedure Note_Snapshot_Block_Released with
+     Import, Convention => Ada, External_Name => "flyology_serde_disabled_snapshot_block_released";
+   procedure Note_Snapshot_Path_Allocated with
+     Import, Convention => Ada, External_Name => "flyology_serde_disabled_snapshot_path_allocated";
+   procedure Note_Snapshot_Path_Released with
+     Import, Convention => Ada, External_Name => "flyology_serde_disabled_snapshot_path_released";
+   procedure Note_Snapshot_Payload_Allocated with
+     Import, Convention => Ada, External_Name => "flyology_serde_disabled_snapshot_payload_allocated";
+   procedure Note_Snapshot_Payload_Released with
+     Import, Convention => Ada, External_Name => "flyology_serde_disabled_snapshot_payload_released";
+   procedure Snapshot_Allocation_Counts
+     (Blocks_Allocated   : out Natural;
+      Blocks_Released    : out Natural;
+      Paths_Allocated    : out Natural;
+      Paths_Released     : out Natural;
+      Payloads_Allocated : out Natural;
+      Payloads_Released  : out Natural) with
+     Import, Convention => Ada, External_Name => "flyology_serde_disabled_snapshot_counts";
 
    procedure Arm_Request_Storage_Failure with
      Import, Convention => Ada, External_Name => "flyology_serde_disabled_attestation_arm_storage";

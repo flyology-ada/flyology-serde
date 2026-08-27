@@ -2,14 +2,15 @@
 
 Date: 2026-08-26
 
-Status: declaration-level implementation checkpoint under mandatory review. It selects no production limits and
-creates no production generation authority. Bodies, tests, and integration remain pending.
+Status: private implementation checkpoint under mandatory change review. It selects no production limits and
+creates no production generation authority. The body and focused normal/fault/abort tests exist; parent-stage
+integration remains absent and fail-closed.
 
-The concrete private declaration checkpoint is in
+The concrete private checkpoint is in
 `flyology_serde_generator-build_attestations-local_snapshots.ads` and
-`flyology_serde_generator-build_attestations-file_abi.ads`; the corresponding header-dependent C declarations are
-staged in `native/open_regular.c`. No parent operation references these units, and `Create_Checked_Stage` remains
-fail-closed while this checkpoint is reviewed.
+`flyology_serde_generator-build_attestations-file_abi.ads`, with the implementation in the matching body and the
+header-dependent C declarations in `native/open_regular.c`. No parent operation references these units, and
+`Create_Checked_Stage` remains fail-closed while this checkpoint is reviewed.
 
 ## Scope
 
@@ -55,7 +56,9 @@ defensive check cannot grant membership to an independently supplied string.
 The package exposes retained path, byte length, bytes, and digest only through scalar-length and caller-buffer copy
 queries. Byte-copy uses a zero-based `Unsigned_64` offset and an arbitrary-bound caller stream-element array; path
 copy uses an arbitrary-bound caller `String`. A query changes its status output but preserves every data output on
-non-success. The package exposes no descriptor, access value, borrowed view, allocating `String` getter,
+a normally returned non-success status. If the final commit raises or a pending task abort is delivered immediately
+after its abort-deferred publication region, the caller outputs are unspecified and must be discarded. The package
+exposes no descriptor, access value, borrowed view, allocating `String` getter,
 pathname-based reopen helper, trust Boolean, or caller-mintable checked marker. File identity remains private; a
 later reviewed parent may receive an owner-to-owner equality query, never its native representation.
 
@@ -74,6 +77,8 @@ Both limited owner types have a nonnull `Budget` access discriminant and retain 
 then verifies each retained payload's stored session before reading another field. A default/failed owner is not
 observable. Caller-buffer queries create no cursor, view, callback latch, or reusable lease, so cross-owner, stale,
 nested, and reentrant observation cannot be expressed.
+The existing `Build_Budgets` contract forbids concurrent use of one budget from multiple tasks. Root, capture, and
+query operations inherit that serialization boundary; this private package adds no lock or alternate task owner.
 
 The private statuses distinguish prelatched no-op, foreign budget/session, nonempty owner, path-length limit,
 malformed relative path, root/open/type/read/close/changed failures, directory-depth, per-file, or aggregate limit
@@ -164,15 +169,52 @@ The v1 operation trace is:
    attempt.
 5. Every positive returned batch reserves its exact length once in `Input_Bytes` before append or hash. This debit
    occurs before the per-file and aggregate cap checks, so a denied extra batch is observable and never refunded.
-   Per-file limit failure has precedence when the same batch crosses both limits; aggregate failure is otherwise
-   next. Equality succeeds, so an empty file still performs its charged EOF read when the aggregate equals its cap.
+   Aggregate remaining subtracts both the root's previously accepted bytes and the current unpublished file's
+   running total. Per-file limit failure has precedence when the same batch crosses both limits; aggregate failure
+   is otherwise next. Equality succeeds, so an empty file still performs its charged EOF read when the aggregate
+   equals its cap.
 6. An accepted positive batch reserves its exact length once in `Work_Units` before copying it from the transient
    read buffer into unpublished fixed blocks and updating SHA-256. No zero-byte reservation is made.
 7. Every final same-handle or verifier metadata observation and every verifier open follows the attempt rule above.
    Close and cleanup are uncharged, but successful close of every transient descriptor is mandatory for publication.
-8. Each scalar or retained-length query reserves one `Work_Units`. A path, digest, or byte-copy query reserves one
-   probe, validates caller capacity/range, then reserves the exact nonzero copied bytes before materialization. A
-   too-small buffer or end offset reports its specific status after the probe and performs no byte reservation.
+8. Each scalar or retained-length query reserves one `Work_Units`. A path or digest copy reserves one probe,
+   validates caller capacity, then reserves the exact nonzero copied bytes before materialization. A byte copy
+   reserves one probe and validates range/capacity. Cost-model v1 fixes `Block_Bytes = 4_096`; zero retained bytes
+   use no block, every nonfinal block is exactly `Block_Bytes`, and a final block contains `1 .. Block_Bytes`
+   bytes. Let `L = Byte_Length`, `O = Offset`, and
+`R = L - O` after establishing `O < L` and a nonnull buffer. It first computes
+`C = min (Into'Length, R)` without converting an oversized length. The body has compile-time requirements that
+`Stream_Element_Offset'Size <= Unsigned_64'Size`, `Stream_Element_Offset'First < 0`, and
+`Stream_Element_Offset'Last >= 0`. The signed type's positive Last is therefore strictly below `Unsigned_64'Last`,
+so `Unsigned_64 (Last) + 1` is representable. If `Into'First` and
+`Into'Last` span that subtype's complete range, the implementation computes
+`Negative_Count = Unsigned_64 (-(Stream_Element_Offset'First + 1)) + 1` and
+`Nonnegative_Count = Unsigned_64 (Stream_Element_Offset'Last) + 1`. Both conversions occur before the final
+additions, so the minimum signed bound is never directly negated and neither `+ 1` is evaluated in the signed type.
+It checks their sum against `Unsigned_64'Last`. Only an overflowing sum denotes a mathematical cardinality of
+`Unsigned_64'Last + 1`, in which case `C = R`; a representable sum participates in the ordinary minimum. Every
+proper subrange has at least one fewer element than the complete range, fits `Unsigned_64`, and is converted
+directly. Before any further reservation, `C - 1` must fit `Stream_Element_Offset`; failure reports
+`Allocation_Failed` without poisoning. Checked endpoint arithmetic then proves
+`Into'First + Stream_Element_Offset (C - 1) <= Into'Last`. It computes
+   `Last_Byte = O + C - 1`, which cannot overflow because `C <= L - O` and therefore `Last_Byte < L`, and
+   `V = 1 + Last_Byte / Block_Bytes`. `V` counts every linked node examined from the head through the last copied
+   block. The operation atomically reserves exactly `V` `Work_Units`, then exactly `C` staging `Work_Units`, then
+   exactly `C` publication `Work_Units`, with no coalescing or refund. All three grants precede allocation,
+   traversal, or output mutation. Visit denial performs no byte reservation; staging denial retains the visit
+   debit; publication denial retains both earlier debits. None of those denials traverses or writes output. It
+   neither traverses nor charges a block when the offset is at the retained end or invalid. A
+   too-small buffer or end offset reports its specific status after the probe and performs no traversal or further
+   reservation. `V` and `C` are checked before conversion to `Charge_Amount`. The exact-`C` unpublished automatic
+   scratch has bounds `0 .. Stream_Element_Offset (C - 1)`. An already initialized Boolean lives in an enclosing
+   handled scope. An inner block contains Scratch as its sole dynamic declaration and sets the outer Boolean in its
+   first statement. Ada propagates a `Storage_Error` raised while elaborating that inner declaration to the outer
+   handler while the Boolean remains false, which maps to `Allocation_Failed`. A later `Storage_Error` reaches the
+   same handler with the Boolean true, is an internal failure, and poisons the session. Scratch
+   elements are elementary and the scope has no access owner, explicit deallocation, controlled object, finalizer,
+   or cleanup hook. Scope exit therefore performs no user cleanup that could fail, leak heap ownership, or revise a
+   published result. Traversal fills and validates exactly `C` elements under the `V + C` debit. The final `C`
+   debit covers publication into the already validated caller prefix.
 
 All reservations are atomic, ordered, and never refunded. Denial precedes the named effect and leaves the
 destination owner empty. Already consumed input and work remain charged after any later failure. The parent, not
@@ -181,15 +223,26 @@ charges.
 
 Status-only failures and nonraising cleanup use no ledger charge. A query reserves its complete required work before
 copying; denial leaves every caller data output and the owner unchanged while publishing its status result. Accepted
-reservations remain consumed after any later failure.
+reservations remain consumed after any later failure. After every potentially failing operation, byte copy performs one
+abort-deferred assignment to
+`Into (Into'First .. Into'First + Stream_Element_Offset (C - 1))`, followed by `Written`, `Complete`, and
+success-status commit with no calls or hooks. The earlier endpoint proof establishes that the target last bound is
+within `Into'Last`. Abort is deferred, test-only precommit observation completes, and then the body sets
+`Commit_Started` immediately before the first persistent mutation. Every exception before that phase may be
+classified into a normally returned failure only while outputs remain unchanged. Once the phase is
+set, the enclosing handler propagates every exception instead of translating it to a status. A commit exception or
+a pending abort delivered immediately after that region is therefore an abnormal transfer and does not promise
+output rollback. Leaving the automatic elementary scratch scope performs no product cleanup call or hook.
 
 ## Ownership and failures
 
 Every allocation and descriptor is attached immediately to a local limited controlled candidate. Abort is deferred
 before each `open`/`openat` call and remains deferred through attaching a successful descriptor. Every `close` call
 and descriptor-to-invalid transition is likewise one abort-deferred `Close_Once` commit, so finalization cannot
-double-close a reused descriptor. Candidate-to-owner and aggregate-count transfers are one final abort-deferred
-commit with no later fallible work. Task abort otherwise propagates after nonraising finalization closes descriptors
+double-close a reused descriptor. Candidate-to-owner and aggregate-count transfers are one final abort-deferred,
+hook-free, call-free commit with no later fallible work. Capture assigns the conservative aggregate first, publishes
+the snapshot second, and detaches the guard last. An abnormal transfer after that commit starts makes both root and
+snapshot discard-only. Task abort otherwise propagates after nonraising finalization closes descriptors
 and frees unpublished storage. A failed replacement preserves an earlier snapshot; this initial API instead
 requires an empty destination so accidental reuse is explicit.
 
@@ -204,9 +257,12 @@ Stale-session cleanup is still nonraising, performs no ledger operation, and ret
 cannot delete or publish filesystem objects. A later stage cleanup must retain an ambiguous by-name artifact rather
 than delete it when identity cannot be proven.
 
-Retained bytes use a linked sequence of body-private fixed-capacity blocks. A positive read first lands in a
-transient fixed buffer; after input and work reservations, bytes are copied exactly once into unpublished blocks.
-There is no growth reallocation or uncharged recopy. The initial signed `st_size` is only a hint and must be
+Retained bytes use a linked sequence of body-private blocks whose cost-model-v1 capacity is exactly 4,096 bytes.
+Append fills the current tail before allocating another block, so every nonfinal block is full and only the final
+block may contain 1 .. 4,096 bytes. A positive read first lands in a transient fixed buffer; after input and work
+reservations, bytes are copied exactly once into unpublished blocks. There is no growth reallocation or uncharged
+recopy. Block capacity is offline cost-model geometry, not a public storage, schema, or authority value. The
+initial signed `st_size` is only a hint and must be
 nonnegative and representable as `Unsigned_64`; no allocation trusts it. Read request sizing takes the minimum of
 the transient buffer and one beyond the smaller remaining limit without speculative addition: when the remaining
 value is at least the transient capacity, request exactly that capacity; otherwise compute checked
@@ -214,7 +270,8 @@ value is at least the transient capacity, request exactly that capacity; otherwi
 
 ## Required verification
 
-Tests cover null and arbitrary Ada bounds; exact and one-extra path, directory-depth, per-file, aggregate-input, and
+The freeze gate requires tests covering null and arbitrary Ada bounds; exact and one-extra path, directory-depth,
+per-file, aggregate-input, and
 work limits; aggregate equality with an empty file; empty and binary files; non-UTF-8 octets; final and intermediate
 symlinks; a final FIFO with no writer returning promptly; a final terminal device rejected without changing
 controlling-terminal state; promptly rejected known special-file finals without a universal device-open latency
@@ -228,6 +285,29 @@ stale-owner finalization after reinitializing the same budget session; pending a
 close commit, allocation, aggregate update, and owner transfer. The focused native ABI test verifies the
 compile-time `ssize_t`/Ada `C.long` match and `off_t`/`dev_t`/`ino_t` conversions, fixed scalar identity widths,
 nanosecond-domain rejection, errno classification, and file-type classification on macOS and Linux.
+
+Copy trace tests include offsets 0, `Block_Bytes - 1`, `Block_Bytes`, `Block_Bytes + 1`, and the final byte; a
+partial caller buffer crossing a block; null buffer; end and invalid offsets; denial at each of the `V`, staging
+`C`, and publication `C` reservation prefixes; allocation failure after all three grants; invariant failure after
+staging; a source gate proving there is no scratch deallocation/finalization/cleanup hook; exact successful
+`1 + V + 2 * C` total work including the query probe; exact and one-less budgets; arbitrary and
+`Positive'Last` destination bounds; task abort before and during the final publication region; caller discard after
+post-commit abort; and the `Unsigned_64`, `Stream_Element_Offset`, and `C - 1` conversion boundaries. Every normally
+returned rejected query preserves the caller buffer, Written, and Complete.
+
+The current focused tests cover normal large/empty/known-answer captures, independent SHA-256 for `abc`, exact and
+one-less path/depth/per-file/aggregate/input/work limits, aggregate equality with an empty file, normally returned
+root/capture owner and aggregate preservation, prior-owner preservation, open/fstat/read/close/allocation faults,
+exact baseline and one-less `open`/`read` `EINTR` charges, exact capped-short-read attempt charges, reset/consumption
+of occurrence-indexed hooks, descriptor/block/path/payload allocation-release parity, continue-through-chain
+cleanup after injected release damage, stale-session cleanup, byte-boundary copies, V/C/C denial, and
+root/capture/copy precommit abort with task-termination, retained-owner cleanup, and matching-session evidence.
+
+The remaining freeze gates include concurrent platform mutation/replacement/truncation/growth, terminal and other
+special devices, cross-budget and cross-session calls, intermediate-directory open/close fault positions, every
+descriptor-attach/close/allocation abort edge, path/digest and remaining scalar-query exact/one-less budgets, real
+allocator/deallocator and invariant failures beyond the static hooks, ABI-width and extreme conversion boundaries,
+and the rest of the platform matrix above. This document does not treat the present diff as frozen.
 
 Implementation and every corrective diff receive independent P0/P1/P2 review. P0/P1 must be fixed, and P2 is
 fix-by-default. Only a later reviewed parent transaction may connect this owner to `Create_Checked_Stage`.
