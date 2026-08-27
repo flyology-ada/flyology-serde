@@ -7,11 +7,9 @@ with Flyology_Serde.JSON_Event_Drivers;
 with Flyology_Serde.Policies;
 with Interfaces;
 
---  Private Flyology JSON event-to-Serde reader. The public handwritten Reader
---  remains authoritative until the complete event-backed data model passes
---  the reviewed differential cutover gate.
+--  Private Flyology JSON event-to-Serde reader used by the public JSON facade.
 
-private package Flyology_Serde.Deserializers.JSON.Event_Readers is
+private package Flyology_Serde.Deserializers.JSON_Event_Readers is
    package Budgets renames Flyology_Serde.Budgets;
    package Data_Model renames Flyology_Serde.Data_Model;
    package Errors renames Flyology_Serde.Errors;
@@ -29,6 +27,14 @@ private package Flyology_Serde.Deserializers.JSON.Event_Readers is
      (Self   : in out Reader;
       Policy : Policies.Decode_Policy;
       Error  : in out Errors.Error_Info);
+
+   --  Public-JSON compatibility seam. Unlike Initialize, this operation may
+   --  restart a nonfailed prior state. Allow_Failed is true only for Reset.
+   procedure Reinitialize
+     (Self         : in out Reader;
+      Policy       : Policies.Decode_Policy;
+      Allow_Failed : Boolean;
+      Error        : in out Errors.Error_Info);
 
    function Is_Complete (Self : Reader) return Boolean;
    function Input_Offset (Self : Reader) return Natural;
@@ -247,4 +253,4 @@ private
       Document_Begin_Seen : Boolean := False;
       Document_End_Seen   : Boolean := False;
    end record;
-end Flyology_Serde.Deserializers.JSON.Event_Readers;
+end Flyology_Serde.Deserializers.JSON_Event_Readers;

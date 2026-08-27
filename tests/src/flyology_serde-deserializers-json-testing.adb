@@ -9,7 +9,9 @@ with Flyology_Serde.Adapters.Unsigned_Integers;
 with Flyology_Serde.Adapters.Variants;
 with Flyology_Serde.Deserialization;
 with Flyology_Serde.Deserialization_Adapters;
-with Flyology_Serde.Deserializers.JSON.Event_Readers;
+with Flyology_Serde.Deserializers.JSON_Event_Readers;
+with Flyology_Serde.Deserializers.JSON_Handwritten_Oracle;
+with Flyology_Serde.JSON_Event_Drivers;
 with Flyology_Serde.JSON_Event_Driver_Test_Hooks;
 with Flyology_Serde.JSON_Preflights;
 with Flyology_Serde.Serialization;
@@ -19,7 +21,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
    package Parsing renames JSON_Event_Drivers.Parsing;
    package JSON_Errors renames Flyology_JSON.Errors;
    package Event_Readers renames
-     Flyology_Serde.Deserializers.JSON.Event_Readers;
+     Flyology_Serde.Deserializers.JSON_Event_Readers;
+   package Handwritten_Oracle renames
+     Flyology_Serde.Deserializers.JSON_Handwritten_Oracle;
    package Preflights renames Flyology_Serde.JSON_Preflights;
    package Test_Hooks renames Flyology_Serde.JSON_Event_Driver_Test_Hooks;
 
@@ -43,21 +47,22 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
    use type Preflights.Number_Summary;
    use type Preflights.String_Summary;
    use type Test_Hooks.Failure_Point;
+   use Handwritten_Oracle;
 
    function Syntax_Input_Offset (Self : Reader) return Natural
-   is (JSON_Event_Drivers.Input_Offset (Self.Syntax));
+   is (Event_Readers.Input_Offset (Self.Implementation));
 
    function Budget_Input_Consumed (Self : Reader) return Natural
-   is (Budgets.Input_Consumed (Self.Budget));
+   is (Event_Readers.Input_Consumed (Self.Implementation));
 
    function Budget_Values_Consumed (Self : Reader) return Natural
-   is (Budgets.Values_Consumed (Self.Budget));
+   is (Event_Readers.Values_Consumed (Self.Implementation));
 
    function Logical_Depth (Self : Reader) return Natural
-   is (Self.Depth);
+   is (Event_Readers.Container_Depth (Self.Implementation));
 
    function Budget_Depth (Self : Reader) return Natural
-   is (Budgets.Depth (Self.Budget));
+   is (Event_Readers.Budget_Depth (Self.Implementation));
 
    procedure Assert_JSON_Event_Contract is
       type Event_Set is array (Parsing.Event_Kind) of Boolean;
@@ -2092,8 +2097,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       Policy : constant Policies.Decode_Policy := (others => <>);
 
       procedure Assert_Same
-        (Oracle         : Reader;
-         Parallel       : Event_Readers.Reader;
+        (Oracle         : Handwritten_Oracle.Reader;
+         Parallel       : Reader;
          Oracle_Error   : Errors.Error_Info;
          Parallel_Error : Errors.Error_Info) is
       begin
@@ -2104,29 +2109,26 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                 and then Parallel_Error.Offset_Unit = Oracle_Error.Offset_Unit
                 and then Parallel_Error.Path_Length
                          = Oracle_Error.Path_Length);
+         pragma Assert (Input_Offset (Parallel) = Input_Offset (Oracle));
          pragma
            Assert
-             (Event_Readers.Input_Offset (Parallel) = Input_Offset (Oracle));
+             (Budget_Input_Consumed (Parallel)
+                = Handwritten_Oracle.Input_Consumed (Oracle));
          pragma
            Assert
-             (Event_Readers.Input_Consumed (Parallel)
-                = Budgets.Input_Consumed (Oracle.Budget));
+             (Budget_Values_Consumed (Parallel)
+                = Handwritten_Oracle.Values_Consumed (Oracle));
          pragma
            Assert
-             (Event_Readers.Values_Consumed (Parallel)
-                = Budgets.Values_Consumed (Oracle.Budget));
-         pragma
-           Assert
-             (Event_Readers.Container_Depth (Parallel) = Oracle.Depth
-                and then Event_Readers.Budget_Depth (Parallel)
-                         = Budgets.Depth (Oracle.Budget),
-              Event_Readers.Container_Depth (Parallel)'Image
-                & Oracle.Depth'Image
-                & Event_Readers.Budget_Depth (Parallel)'Image
-                & Budgets.Depth (Oracle.Budget)'Image);
-         pragma
-           Assert
-             (Event_Readers.Is_Complete (Parallel) = Is_Complete (Oracle));
+             (Logical_Depth (Parallel)
+                = Handwritten_Oracle.Container_Depth (Oracle)
+                and then Budget_Depth (Parallel)
+                         = Handwritten_Oracle.Budget_Depth (Oracle),
+              Logical_Depth (Parallel)'Image
+                & Handwritten_Oracle.Container_Depth (Oracle)'Image
+                & Budget_Depth (Parallel)'Image
+                & Handwritten_Oracle.Budget_Depth (Oracle)'Image);
+         pragma Assert (Is_Complete (Parallel) = Is_Complete (Oracle));
       end Assert_Same;
 
       procedure Check_Null
@@ -2135,8 +2137,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Maximum_Values : Natural := Natural'Last)
       is
          Input          : aliased constant String := Source;
-         Oracle         : Reader (Input'Access);
-         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle         : Handwritten_Oracle.Reader (Input'Access);
+         Parallel       : Reader (Input'Access);
          Oracle_Error   : Errors.Error_Info;
          Parallel_Error : Errors.Error_Info;
          Local_Policy   : Policies.Decode_Policy := Policy;
@@ -2144,15 +2146,15 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
          Local_Policy.Limits.Maximum_Logical_Values := Maximum_Values;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          pragma Assert (Parallel_Error.Code = Errors.No_Error);
 
          Read_Null (Oracle, Oracle_Error);
-         Event_Readers.Read_Null (Parallel, Parallel_Error);
+         Read_Null (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          if Oracle_Error.Code = Errors.No_Error then
             Finish_Document (Oracle, Oracle_Error);
-            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Finish_Document (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          end if;
       end Check_Null;
@@ -2161,8 +2163,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
         (Source : String; Maximum_Input : Natural := Natural'Last)
       is
          Input          : aliased constant String := Source;
-         Oracle         : Reader (Input'Access);
-         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle         : Handwritten_Oracle.Reader (Input'Access);
+         Parallel       : Reader (Input'Access);
          Oracle_Error   : Errors.Error_Info;
          Parallel_Error : Errors.Error_Info;
          Oracle_Value   : Boolean;
@@ -2171,16 +2173,16 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       begin
          Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          pragma Assert (Parallel_Error.Code = Errors.No_Error);
 
          Read_Boolean (Oracle, Oracle_Value, Oracle_Error);
-         Event_Readers.Read_Boolean (Parallel, Parallel_Value, Parallel_Error);
+         Read_Boolean (Parallel, Parallel_Value, Parallel_Error);
          pragma Assert (Parallel_Value = Oracle_Value);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          if Oracle_Error.Code = Errors.No_Error then
             Finish_Document (Oracle, Oracle_Error);
-            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Finish_Document (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          end if;
       end Check_Boolean;
@@ -2189,8 +2191,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
         (Source : String; Maximum_Input : Natural := Natural'Last)
       is
          Input           : aliased constant String := Source;
-         Oracle          : Reader (Input'Access);
-         Parallel        : Event_Readers.Reader (Input'Access);
+         Oracle          : Handwritten_Oracle.Reader (Input'Access);
+         Parallel        : Reader (Input'Access);
          Oracle_Error    : Errors.Error_Info;
          Parallel_Error  : Errors.Error_Info;
          Oracle_Value    : String (3 .. 34);
@@ -2201,12 +2203,11 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       begin
          Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          pragma Assert (Parallel_Error.Code = Errors.No_Error);
 
          Read_Text (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
-         Event_Readers.Read_Text
-           (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
+         Read_Text (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
          pragma Assert (Parallel_Length = Oracle_Length);
          pragma
            Assert
@@ -2224,29 +2225,29 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          if Oracle_Error.Code = Errors.No_Error then
             Finish_Document (Oracle, Oracle_Error);
-            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Finish_Document (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          end if;
       end Check_Text;
 
       procedure Check_Signed (Source : String) is
          Input          : aliased constant String := Source;
-         Oracle         : Reader (Input'Access);
-         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle         : Handwritten_Oracle.Reader (Input'Access);
+         Parallel       : Reader (Input'Access);
          Oracle_Error   : Errors.Error_Info;
          Parallel_Error : Errors.Error_Info;
          Oracle_Value   : Interfaces.Integer_64;
          Parallel_Value : Interfaces.Integer_64;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Read_Signed (Oracle, Oracle_Value, Oracle_Error);
-         Event_Readers.Read_Signed (Parallel, Parallel_Value, Parallel_Error);
+         Read_Signed (Parallel, Parallel_Value, Parallel_Error);
          pragma Assert (Parallel_Value = Oracle_Value);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          if Oracle_Error.Code = Errors.No_Error then
             Finish_Document (Oracle, Oracle_Error);
-            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Finish_Document (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          end if;
       end Check_Signed;
@@ -2255,8 +2256,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
         (Source : String; Maximum_Input : Natural := Natural'Last)
       is
          Input          : aliased constant String := Source;
-         Oracle         : Reader (Input'Access);
-         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle         : Handwritten_Oracle.Reader (Input'Access);
+         Parallel       : Reader (Input'Access);
          Oracle_Error   : Errors.Error_Info;
          Parallel_Error : Errors.Error_Info;
          Oracle_Value   : Interfaces.Unsigned_64;
@@ -2265,33 +2266,31 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       begin
          Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          Read_Unsigned (Oracle, Oracle_Value, Oracle_Error);
-         Event_Readers.Read_Unsigned
-           (Parallel, Parallel_Value, Parallel_Error);
+         Read_Unsigned (Parallel, Parallel_Value, Parallel_Error);
          pragma Assert (Parallel_Value = Oracle_Value);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          if Oracle_Error.Code = Errors.No_Error then
             Finish_Document (Oracle, Oracle_Error);
-            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Finish_Document (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          end if;
       end Check_Unsigned;
 
       procedure Check_Float (Source : String) is
          Input          : aliased constant String := Source;
-         Oracle         : Reader (Input'Access);
-         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle         : Handwritten_Oracle.Reader (Input'Access);
+         Parallel       : Reader (Input'Access);
          Oracle_Error   : Errors.Error_Info;
          Parallel_Error : Errors.Error_Info;
          Oracle_Value   : Data_Model.Float_64_Value;
          Parallel_Value : Data_Model.Float_64_Value;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Read_Float_64 (Oracle, Oracle_Value, Oracle_Error);
-         Event_Readers.Read_Float_64
-           (Parallel, Parallel_Value, Parallel_Error);
+         Read_Float_64 (Parallel, Parallel_Value, Parallel_Error);
          pragma
            Assert
              (Data_Model.Category (Parallel_Value)
@@ -2307,30 +2306,29 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          if Oracle_Error.Code = Errors.No_Error then
             Finish_Document (Oracle, Oracle_Error);
-            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Finish_Document (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          end if;
       end Check_Float;
 
       procedure Check_Peek (Source : String) is
          Input          : aliased constant String := Source;
-         Oracle         : Reader (Input'Access);
-         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle         : Handwritten_Oracle.Reader (Input'Access);
+         Parallel       : Reader (Input'Access);
          Oracle_Error   : Errors.Error_Info;
          Parallel_Error : Errors.Error_Info;
          Oracle_Kind    : Data_Model.Value_Kind;
          Parallel_Kind  : Data_Model.Value_Kind;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Oracle_Kind := Peek_Kind (Oracle, Oracle_Error);
-         Parallel_Kind := Event_Readers.Peek_Kind (Parallel, Parallel_Error);
+         Parallel_Kind := Peek_Kind (Parallel, Parallel_Error);
          pragma Assert (Parallel_Kind = Oracle_Kind);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          if Oracle_Error.Code = Errors.No_Error then
             Oracle_Kind := Peek_Kind (Oracle, Oracle_Error);
-            Parallel_Kind :=
-              Event_Readers.Peek_Kind (Parallel, Parallel_Error);
+            Parallel_Kind := Peek_Kind (Parallel, Parallel_Error);
             pragma Assert (Parallel_Kind = Oracle_Kind);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          end if;
@@ -2342,8 +2340,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Maximum_Text : Natural := Natural'Last)
       is
          Input           : aliased constant String := Source;
-         Oracle          : Reader (Input'Access);
-         Parallel        : Event_Readers.Reader (Input'Access);
+         Oracle          : Handwritten_Oracle.Reader (Input'Access);
+         Parallel        : Reader (Input'Access);
          Oracle_Error    : Errors.Error_Info;
          Parallel_Error  : Errors.Error_Info;
          Oracle_Value    : String (5 .. 4 + Capacity);
@@ -2354,10 +2352,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       begin
          Local_Policy.Limits.Maximum_Text_Length := Maximum_Text;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          Read_Text (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
-         Event_Readers.Read_Text
-           (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
+         Read_Text (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
          pragma
            Assert
              (Parallel_Length = Oracle_Length
@@ -2371,8 +2368,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Maximum_Text : Natural := Natural'Last)
       is
          Input           : aliased constant String := Source;
-         Oracle          : Reader (Input'Access);
-         Parallel        : Event_Readers.Reader (Input'Access);
+         Oracle          : Handwritten_Oracle.Reader (Input'Access);
+         Parallel        : Reader (Input'Access);
          Oracle_Error    : Errors.Error_Info;
          Parallel_Error  : Errors.Error_Info;
          Oracle_Value    : String (5 .. 4 + Capacity);
@@ -2383,10 +2380,10 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       begin
          Local_Policy.Limits.Maximum_Text_Length := Maximum_Text;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          Read_Enumeration
            (Oracle, "Color", Oracle_Value, Oracle_Length, Oracle_Error);
-         Event_Readers.Read_Enumeration
+         Read_Enumeration
            (Parallel,
             "Color",
             Parallel_Value,
@@ -2407,7 +2404,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          if Oracle_Error.Code = Errors.No_Error then
             Finish_Document (Oracle, Oracle_Error);
-            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Finish_Document (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          end if;
       end Check_Enumeration_Parity;
@@ -2462,8 +2459,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Name_Capacity : Natural := 16)
       is
          Input              : aliased constant String := Source;
-         Oracle             : Reader (Input'Access);
-         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle             : Handwritten_Oracle.Reader (Input'Access);
+         Parallel           : Reader (Input'Access);
          Oracle_Error       : Errors.Error_Info;
          Parallel_Error     : Errors.Error_Info;
          Oracle_Name        : String (3 .. 2 + Name_Capacity);
@@ -2481,7 +2478,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          end Compare;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Variant
            (Oracle,
             "Choice",
@@ -2489,7 +2486,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Oracle_Length,
             Oracle_Info,
             Oracle_Error);
-         Event_Readers.Begin_Variant
+         Begin_Variant
            (Parallel,
             "Choice",
             Parallel_Name,
@@ -2517,7 +2514,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Oracle_Length,
             Oracle_Available,
             Oracle_Error);
-         Event_Readers.Next_Field
+         Next_Field
            (Parallel,
             Parallel_Name,
             Parallel_Length,
@@ -2536,7 +2533,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                    and then Oracle_Name (Oracle_Name'First) = 'x'
                    and then Parallel_Name (Parallel_Name'First) = 'x');
             Read_Null (Oracle, Oracle_Error);
-            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Read_Null (Parallel, Parallel_Error);
             Compare;
             Next_Field
               (Oracle,
@@ -2544,7 +2541,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                Oracle_Length,
                Oracle_Available,
                Oracle_Error);
-            Event_Readers.Next_Field
+            Next_Field
               (Parallel,
                Parallel_Name,
                Parallel_Length,
@@ -2555,15 +2552,15 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Compare;
          end if;
          End_Variant (Oracle, Oracle_Error);
-         Event_Readers.End_Variant (Parallel, Parallel_Error);
+         End_Variant (Parallel, Parallel_Error);
          Compare;
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Compare;
          pragma
            Assert
              (Oracle_Error.Code = Errors.No_Error
-                and then Event_Readers.Is_Complete (Parallel));
+                and then Is_Complete (Parallel));
       end Check_Variant_Parity;
 
       procedure Check_Variant_Failure
@@ -2581,8 +2578,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
            Policies.Nesting_Limit (Policies.Maximum_Supported_Nesting))
       is
          Input              : aliased constant String := Source;
-         Oracle             : Reader (Input'Access);
-         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle             : Handwritten_Oracle.Reader (Input'Access);
+         Parallel           : Reader (Input'Access);
          Oracle_Error       : Errors.Error_Info;
          Parallel_Error     : Errors.Error_Info;
          Oracle_Name        : String (3 .. 2 + Name_Capacity);
@@ -2606,7 +2603,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Local_Policy.Limits.Maximum_Logical_Values := Maximum_Values;
          Local_Policy.Limits.Maximum_Nesting_Depth := Maximum_Depth;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          Begin_Variant
            (Oracle,
             "Choice",
@@ -2614,7 +2611,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Oracle_Length,
             Oracle_Info,
             Oracle_Error);
-         Event_Readers.Begin_Variant
+         Begin_Variant
            (Parallel,
             "Choice",
             Parallel_Name,
@@ -2642,7 +2639,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                Oracle_Length,
                Oracle_Available,
                Oracle_Error);
-            Event_Readers.Next_Field
+            Next_Field
               (Parallel,
                Parallel_Name,
                Parallel_Length,
@@ -2652,7 +2649,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          end if;
          if Oracle_Error.Code = Errors.No_Error and then Oracle_Available then
             Read_Null (Oracle, Oracle_Error);
-            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Read_Null (Parallel, Parallel_Error);
             Compare;
          end if;
          if Oracle_Error.Code = Errors.No_Error and then Oracle_Available then
@@ -2662,7 +2659,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                Oracle_Length,
                Oracle_Available,
                Oracle_Error);
-            Event_Readers.Next_Field
+            Next_Field
               (Parallel,
                Parallel_Name,
                Parallel_Length,
@@ -2672,7 +2669,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          end if;
          if Oracle_Error.Code = Errors.No_Error then
             End_Variant (Oracle, Oracle_Error);
-            Event_Readers.End_Variant (Parallel, Parallel_Error);
+            End_Variant (Parallel, Parallel_Error);
             Compare;
          end if;
          pragma
@@ -2680,18 +2677,18 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
              (Parallel_Error.Code = Expected_Code
                 and then Parallel_Error.Input_Offset = Expected_Offset
                 and then (Expected_Input_Consumed = Natural'Last
-                          or else Event_Readers.Input_Consumed (Parallel)
+                          or else Budget_Input_Consumed (Parallel)
                                   = Expected_Input_Consumed)
                 and then (Expected_Values_Consumed = Natural'Last
-                          or else Event_Readers.Values_Consumed (Parallel)
+                          or else Budget_Values_Consumed (Parallel)
                                   = Expected_Values_Consumed)
-                and then Event_Readers.Container_Depth (Parallel) = 0
-                and then Event_Readers.Budget_Depth (Parallel) = 0,
+                and then Logical_Depth (Parallel) = 0
+                and then Budget_Depth (Parallel) = 0,
               Source
                 & Parallel_Error.Code'Image
                 & Parallel_Error.Input_Offset'Image
-                & Event_Readers.Input_Consumed (Parallel)'Image
-                & Event_Readers.Values_Consumed (Parallel)'Image);
+                & Budget_Input_Consumed (Parallel)'Image
+                & Budget_Values_Consumed (Parallel)'Image);
       end Check_Variant_Failure;
 
       procedure Check_Variant_Container_Parity is
@@ -2700,8 +2697,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          declare
             Input              : aliased constant String :=
               "[""Some"",{""x"":[null]}]";
-            Oracle             : Reader (Input'Access);
-            Parallel           : Event_Readers.Reader (Input'Access);
+            Oracle             : Handwritten_Oracle.Reader (Input'Access);
+            Parallel           : Reader (Input'Access);
             Oracle_Error       : Errors.Error_Info;
             Parallel_Error     : Errors.Error_Info;
             Oracle_Name        : String (3 .. 10);
@@ -2719,7 +2716,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             end Compare;
          begin
             Initialize (Oracle, Policy);
-            Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+            Initialize (Parallel, Policy);
             Begin_Variant
               (Oracle,
                "Choice",
@@ -2727,7 +2724,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                Oracle_Length,
                Oracle_Info,
                Oracle_Error);
-            Event_Readers.Begin_Variant
+            Begin_Variant
               (Parallel,
                "Choice",
                Parallel_Name,
@@ -2741,7 +2738,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                Oracle_Length,
                Oracle_Available,
                Oracle_Error);
-            Event_Readers.Next_Field
+            Next_Field
               (Parallel,
                Parallel_Name,
                Parallel_Length,
@@ -2750,25 +2747,22 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             pragma Assert (Oracle_Available and then Parallel_Available);
             Compare;
             Begin_Sequence (Oracle, Oracle_Info, Oracle_Error);
-            Event_Readers.Begin_Sequence
-              (Parallel, Parallel_Info, Parallel_Error);
+            Begin_Sequence (Parallel, Parallel_Info, Parallel_Error);
             Compare;
             Next_Element (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Element
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Element (Parallel, Parallel_Available, Parallel_Error);
             pragma Assert (Oracle_Available and then Parallel_Available);
             Compare;
             Read_Null (Oracle, Oracle_Error);
-            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Read_Null (Parallel, Parallel_Error);
             Compare;
             Next_Element (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Element
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Element (Parallel, Parallel_Available, Parallel_Error);
             pragma
               Assert (not Oracle_Available and then not Parallel_Available);
             Compare;
             End_Sequence (Oracle, Oracle_Error);
-            Event_Readers.End_Sequence (Parallel, Parallel_Error);
+            End_Sequence (Parallel, Parallel_Error);
             Compare;
             Next_Field
               (Oracle,
@@ -2776,7 +2770,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                Oracle_Length,
                Oracle_Available,
                Oracle_Error);
-            Event_Readers.Next_Field
+            Next_Field
               (Parallel,
                Parallel_Name,
                Parallel_Length,
@@ -2786,10 +2780,10 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
               Assert (not Oracle_Available and then not Parallel_Available);
             Compare;
             End_Variant (Oracle, Oracle_Error);
-            Event_Readers.End_Variant (Parallel, Parallel_Error);
+            End_Variant (Parallel, Parallel_Error);
             Compare;
             Finish_Document (Oracle, Oracle_Error);
-            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Finish_Document (Parallel, Parallel_Error);
             Compare;
          end;
 
@@ -2797,8 +2791,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          declare
             Input              : aliased constant String :=
               "[[[""None"",{}],[""Some"",{}]]]";
-            Oracle             : Reader (Input'Access);
-            Parallel           : Event_Readers.Reader (Input'Access);
+            Oracle             : Handwritten_Oracle.Reader (Input'Access);
+            Parallel           : Reader (Input'Access);
             Oracle_Error       : Errors.Error_Info;
             Parallel_Error     : Errors.Error_Info;
             Oracle_Name        : String (3 .. 10);
@@ -2824,7 +2818,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                   Oracle_Length,
                   Oracle_Info,
                   Oracle_Error);
-               Event_Readers.Begin_Variant
+               Begin_Variant
                  (Parallel,
                   "Choice",
                   Parallel_Name,
@@ -2838,7 +2832,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                   Oracle_Length,
                   Oracle_Available,
                   Oracle_Error);
-               Event_Readers.Next_Field
+               Next_Field
                  (Parallel,
                   Parallel_Name,
                   Parallel_Length,
@@ -2848,33 +2842,31 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                  Assert (not Oracle_Available and then not Parallel_Available);
                Compare;
                End_Variant (Oracle, Oracle_Error);
-               Event_Readers.End_Variant (Parallel, Parallel_Error);
+               End_Variant (Parallel, Parallel_Error);
                Compare;
             end Read_Nullary_Variant;
          begin
             Initialize (Oracle, Policy);
-            Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+            Initialize (Parallel, Policy);
             Begin_Map (Oracle, Oracle_Info, Oracle_Error);
-            Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+            Begin_Map (Parallel, Parallel_Info, Parallel_Error);
             Compare;
             Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Map_Entry
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
             pragma Assert (Oracle_Available and then Parallel_Available);
             Compare;
             Read_Nullary_Variant;
             Read_Nullary_Variant;
             Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Map_Entry
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
             pragma
               Assert (not Oracle_Available and then not Parallel_Available);
             Compare;
             End_Map (Oracle, Oracle_Error);
-            Event_Readers.End_Map (Parallel, Parallel_Error);
+            End_Map (Parallel, Parallel_Error);
             Compare;
             Finish_Document (Oracle, Oracle_Error);
-            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Finish_Document (Parallel, Parallel_Error);
             Compare;
          end;
       end Check_Variant_Container_Parity;
@@ -2889,8 +2881,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Positive'Last - 2 => '{',
             Positive'Last - 1 => '}',
             Positive'Last     => ']'];
-         Oracle             : Reader (Input'Access);
-         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle             : Handwritten_Oracle.Reader (Input'Access);
+         Parallel           : Reader (Input'Access);
          Oracle_Error       : Errors.Error_Info;
          Parallel_Error     : Errors.Error_Info;
          Oracle_Name        : String (Positive'Last - 3 .. Positive'Last);
@@ -2903,7 +2895,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Parallel_Available : Boolean;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Variant
            (Oracle,
             "Choice",
@@ -2911,7 +2903,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Oracle_Length,
             Oracle_Info,
             Oracle_Error);
-         Event_Readers.Begin_Variant
+         Begin_Variant
            (Parallel,
             "Choice",
             Parallel_Name,
@@ -2931,7 +2923,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Oracle_Length,
             Oracle_Available,
             Oracle_Error);
-         Event_Readers.Next_Field
+         Next_Field
            (Parallel,
             Parallel_Name,
             Parallel_Length,
@@ -2940,10 +2932,10 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          pragma Assert (not Oracle_Available and then not Parallel_Available);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          End_Variant (Oracle, Oracle_Error);
-         Event_Readers.End_Variant (Parallel, Parallel_Error);
+         End_Variant (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
       end Check_Variant_Arbitrary_Bound;
 
@@ -3040,8 +3032,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
               when End_Variant_On_Record               => "{}",
               when others                              => "[""A"",{}]");
          Input              : aliased constant String := Source;
-         Oracle             : Reader (Input'Access);
-         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle             : Handwritten_Oracle.Reader (Input'Access);
+         Parallel           : Reader (Input'Access);
          Oracle_Error       : Errors.Error_Info;
          Parallel_Error     : Errors.Error_Info;
          Oracle_Name        : String (3 .. 10);
@@ -3054,11 +3046,10 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Parallel_Available : Boolean;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          if Test_Case = End_Variant_On_Record then
             Begin_Record (Oracle, "R", Oracle_Info, Oracle_Error);
-            Event_Readers.Begin_Record
-              (Parallel, "R", Parallel_Info, Parallel_Error);
+            Begin_Record (Parallel, "R", Parallel_Info, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          else
             Begin_Variant
@@ -3068,7 +3059,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                Oracle_Length,
                Oracle_Info,
                Oracle_Error);
-            Event_Readers.Begin_Variant
+            Begin_Variant
               (Parallel,
                "Choice",
                Parallel_Name,
@@ -3080,7 +3071,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          case Test_Case is
             when End_Before_Variant_Exhaustion       =>
                End_Variant (Oracle, Oracle_Error);
-               Event_Readers.End_Variant (Parallel, Parallel_Error);
+               End_Variant (Parallel, Parallel_Error);
 
             when End_While_Variant_Child_Ready       =>
                Next_Field
@@ -3089,7 +3080,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                   Oracle_Length,
                   Oracle_Available,
                   Oracle_Error);
-               Event_Readers.Next_Field
+               Next_Field
                  (Parallel,
                   Parallel_Name,
                   Parallel_Length,
@@ -3097,7 +3088,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                   Parallel_Error);
                Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
                End_Variant (Oracle, Oracle_Error);
-               Event_Readers.End_Variant (Parallel, Parallel_Error);
+               End_Variant (Parallel, Parallel_Error);
 
             when End_While_Variant_Child_In_Progress =>
                Next_Field
@@ -3106,40 +3097,39 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                   Oracle_Length,
                   Oracle_Available,
                   Oracle_Error);
-               Event_Readers.Next_Field
+               Next_Field
                  (Parallel,
                   Parallel_Name,
                   Parallel_Length,
                   Parallel_Available,
                   Parallel_Error);
                Begin_Sequence (Oracle, Oracle_Info, Oracle_Error);
-               Event_Readers.Begin_Sequence
-                 (Parallel, Parallel_Info, Parallel_Error);
+               Begin_Sequence (Parallel, Parallel_Info, Parallel_Error);
                Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
                End_Variant (Oracle, Oracle_Error);
-               Event_Readers.End_Variant (Parallel, Parallel_Error);
+               End_Variant (Parallel, Parallel_Error);
 
             when End_Record_On_Variant               =>
                End_Record (Oracle, Oracle_Error);
-               Event_Readers.End_Record (Parallel, Parallel_Error);
+               End_Record (Parallel, Parallel_Error);
 
             when End_Variant_On_Record               =>
                End_Variant (Oracle, Oracle_Error);
-               Event_Readers.End_Variant (Parallel, Parallel_Error);
+               End_Variant (Parallel, Parallel_Error);
          end case;
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          pragma
            Assert
              (Parallel_Error.Code = Errors.Invalid_State
-                and then Event_Readers.Container_Depth (Parallel) = 0
-                and then Event_Readers.Budget_Depth (Parallel) = 0,
+                and then Logical_Depth (Parallel) = 0
+                and then Budget_Depth (Parallel) = 0,
               Test_Case'Image);
          Errors.Reset (Oracle_Error);
          Errors.Reset (Parallel_Error);
          Reset (Oracle, Policy);
-         Event_Readers.Reset (Parallel, Policy, Parallel_Error);
+         Reset (Parallel, Policy);
          Abort_Document (Oracle, Oracle_Error);
-         Event_Readers.Abort_Document (Parallel, Parallel_Error);
+         Abort_Document (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
       end Check_Variant_Misuse;
 
@@ -3271,8 +3261,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Maximum_Items    : Natural := Natural'Last)
       is
          Input            : aliased constant String := Source;
-         Oracle           : Reader (Input'Access);
-         Parallel         : Event_Readers.Reader (Input'Access);
+         Oracle           : Handwritten_Oracle.Reader (Input'Access);
+         Parallel         : Reader (Input'Access);
          Oracle_Error     : Errors.Error_Info;
          Parallel_Error   : Errors.Error_Info;
          Oracle_Present   : Boolean := not Expected_Present;
@@ -3281,10 +3271,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       begin
          Local_Policy.Limits.Maximum_Container_Items := Maximum_Items;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          Begin_Optional (Oracle, Oracle_Present, Oracle_Error);
-         Event_Readers.Begin_Optional
-           (Parallel, Parallel_Present, Parallel_Error);
+         Begin_Optional (Parallel, Parallel_Present, Parallel_Error);
          pragma
            Assert
              (Oracle_Present = Expected_Present
@@ -3292,25 +3281,25 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          if Expected_Present then
             Read_Null (Oracle, Oracle_Error);
-            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Read_Null (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          end if;
          End_Optional (Oracle, Oracle_Error);
-         Event_Readers.End_Optional (Parallel, Parallel_Error);
+         End_Optional (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          pragma
            Assert
              (Oracle_Error.Code = Errors.No_Error
-                and then Event_Readers.Is_Complete (Parallel));
+                and then Is_Complete (Parallel));
       end Check_Optional_Parity;
 
       procedure Check_Nested_Optional_Parity is
          Input            : aliased constant String := "[ 1 , [ 0 ] ]";
-         Oracle           : Reader (Input'Access);
-         Parallel         : Event_Readers.Reader (Input'Access);
+         Oracle           : Handwritten_Oracle.Reader (Input'Access);
+         Parallel         : Reader (Input'Access);
          Oracle_Error     : Errors.Error_Info;
          Parallel_Error   : Errors.Error_Info;
          Oracle_Present   : Boolean;
@@ -3322,27 +3311,25 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          end Compare;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Optional (Oracle, Oracle_Present, Oracle_Error);
-         Event_Readers.Begin_Optional
-           (Parallel, Parallel_Present, Parallel_Error);
+         Begin_Optional (Parallel, Parallel_Present, Parallel_Error);
          pragma Assert (Oracle_Present and then Parallel_Present);
          Compare;
          Begin_Optional (Oracle, Oracle_Present, Oracle_Error);
-         Event_Readers.Begin_Optional
-           (Parallel, Parallel_Present, Parallel_Error);
+         Begin_Optional (Parallel, Parallel_Present, Parallel_Error);
          pragma Assert (not Oracle_Present and then not Parallel_Present);
          Compare;
          End_Optional (Oracle, Oracle_Error);
-         Event_Readers.End_Optional (Parallel, Parallel_Error);
+         End_Optional (Parallel, Parallel_Error);
          Compare;
          End_Optional (Oracle, Oracle_Error);
-         Event_Readers.End_Optional (Parallel, Parallel_Error);
+         End_Optional (Parallel, Parallel_Error);
          Compare;
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Compare;
-         pragma Assert (Event_Readers.Is_Complete (Parallel));
+         pragma Assert (Is_Complete (Parallel));
       end Check_Nested_Optional_Parity;
 
       procedure Check_Optional_Container_Parity is
@@ -3350,8 +3337,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          --  Optional -> sequence -> optional.
          declare
             Input              : aliased constant String := "[1,[[0]]]";
-            Oracle             : Reader (Input'Access);
-            Parallel           : Event_Readers.Reader (Input'Access);
+            Oracle             : Handwritten_Oracle.Reader (Input'Access);
+            Parallel           : Reader (Input'Access);
             Oracle_Error       : Errors.Error_Info;
             Parallel_Error     : Errors.Error_Info;
             Oracle_Present     : Boolean;
@@ -3367,51 +3354,46 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             end Compare;
          begin
             Initialize (Oracle, Policy);
-            Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+            Initialize (Parallel, Policy);
             Begin_Optional (Oracle, Oracle_Present, Oracle_Error);
-            Event_Readers.Begin_Optional
-              (Parallel, Parallel_Present, Parallel_Error);
+            Begin_Optional (Parallel, Parallel_Present, Parallel_Error);
             pragma Assert (Oracle_Present and then Parallel_Present);
             Compare;
             Begin_Sequence (Oracle, Oracle_Info, Oracle_Error);
-            Event_Readers.Begin_Sequence
-              (Parallel, Parallel_Info, Parallel_Error);
+            Begin_Sequence (Parallel, Parallel_Info, Parallel_Error);
             Compare;
             Next_Element (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Element
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Element (Parallel, Parallel_Available, Parallel_Error);
             pragma Assert (Oracle_Available and then Parallel_Available);
             Compare;
             Begin_Optional (Oracle, Oracle_Present, Oracle_Error);
-            Event_Readers.Begin_Optional
-              (Parallel, Parallel_Present, Parallel_Error);
+            Begin_Optional (Parallel, Parallel_Present, Parallel_Error);
             pragma Assert (not Oracle_Present and then not Parallel_Present);
             Compare;
             End_Optional (Oracle, Oracle_Error);
-            Event_Readers.End_Optional (Parallel, Parallel_Error);
+            End_Optional (Parallel, Parallel_Error);
             Compare;
             Next_Element (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Element
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Element (Parallel, Parallel_Available, Parallel_Error);
             pragma
               Assert (not Oracle_Available and then not Parallel_Available);
             Compare;
             End_Sequence (Oracle, Oracle_Error);
-            Event_Readers.End_Sequence (Parallel, Parallel_Error);
+            End_Sequence (Parallel, Parallel_Error);
             Compare;
             End_Optional (Oracle, Oracle_Error);
-            Event_Readers.End_Optional (Parallel, Parallel_Error);
+            End_Optional (Parallel, Parallel_Error);
             Compare;
             Finish_Document (Oracle, Oracle_Error);
-            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Finish_Document (Parallel, Parallel_Error);
             Compare;
          end;
 
          --  Optional -> record -> optional.
          declare
             Input              : aliased constant String := "[1,{""x"":[0]}]";
-            Oracle             : Reader (Input'Access);
-            Parallel           : Event_Readers.Reader (Input'Access);
+            Oracle             : Handwritten_Oracle.Reader (Input'Access);
+            Parallel           : Reader (Input'Access);
             Oracle_Error       : Errors.Error_Info;
             Parallel_Error     : Errors.Error_Info;
             Oracle_Present     : Boolean;
@@ -3431,15 +3413,13 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             end Compare;
          begin
             Initialize (Oracle, Policy);
-            Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+            Initialize (Parallel, Policy);
             Begin_Optional (Oracle, Oracle_Present, Oracle_Error);
-            Event_Readers.Begin_Optional
-              (Parallel, Parallel_Present, Parallel_Error);
+            Begin_Optional (Parallel, Parallel_Present, Parallel_Error);
             pragma Assert (Oracle_Present and then Parallel_Present);
             Compare;
             Begin_Record (Oracle, "T", Oracle_Info, Oracle_Error);
-            Event_Readers.Begin_Record
-              (Parallel, "T", Parallel_Info, Parallel_Error);
+            Begin_Record (Parallel, "T", Parallel_Info, Parallel_Error);
             Compare;
             Next_Field
               (Oracle,
@@ -3447,7 +3427,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                Oracle_Length,
                Oracle_Available,
                Oracle_Error);
-            Event_Readers.Next_Field
+            Next_Field
               (Parallel,
                Parallel_Name,
                Parallel_Length,
@@ -3463,12 +3443,11 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                    and then Parallel_Name (Parallel_Name'First) = 'x');
             Compare;
             Begin_Optional (Oracle, Oracle_Present, Oracle_Error);
-            Event_Readers.Begin_Optional
-              (Parallel, Parallel_Present, Parallel_Error);
+            Begin_Optional (Parallel, Parallel_Present, Parallel_Error);
             pragma Assert (not Oracle_Present and then not Parallel_Present);
             Compare;
             End_Optional (Oracle, Oracle_Error);
-            Event_Readers.End_Optional (Parallel, Parallel_Error);
+            End_Optional (Parallel, Parallel_Error);
             Compare;
             Next_Field
               (Oracle,
@@ -3476,7 +3455,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                Oracle_Length,
                Oracle_Available,
                Oracle_Error);
-            Event_Readers.Next_Field
+            Next_Field
               (Parallel,
                Parallel_Name,
                Parallel_Length,
@@ -3486,13 +3465,13 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
               Assert (not Oracle_Available and then not Parallel_Available);
             Compare;
             End_Record (Oracle, Oracle_Error);
-            Event_Readers.End_Record (Parallel, Parallel_Error);
+            End_Record (Parallel, Parallel_Error);
             Compare;
             End_Optional (Oracle, Oracle_Error);
-            Event_Readers.End_Optional (Parallel, Parallel_Error);
+            End_Optional (Parallel, Parallel_Error);
             Compare;
             Finish_Document (Oracle, Oracle_Error);
-            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Finish_Document (Parallel, Parallel_Error);
             Compare;
          end;
 
@@ -3500,8 +3479,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          declare
             Input              : aliased constant String :=
               "[1,[[[0],[1,null]]]]";
-            Oracle             : Reader (Input'Access);
-            Parallel           : Event_Readers.Reader (Input'Access);
+            Oracle             : Handwritten_Oracle.Reader (Input'Access);
+            Parallel           : Reader (Input'Access);
             Oracle_Error       : Errors.Error_Info;
             Parallel_Error     : Errors.Error_Info;
             Oracle_Present     : Boolean;
@@ -3517,53 +3496,48 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             end Compare;
          begin
             Initialize (Oracle, Policy);
-            Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+            Initialize (Parallel, Policy);
             Begin_Optional (Oracle, Oracle_Present, Oracle_Error);
-            Event_Readers.Begin_Optional
-              (Parallel, Parallel_Present, Parallel_Error);
+            Begin_Optional (Parallel, Parallel_Present, Parallel_Error);
             pragma Assert (Oracle_Present and then Parallel_Present);
             Compare;
             Begin_Map (Oracle, Oracle_Info, Oracle_Error);
-            Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+            Begin_Map (Parallel, Parallel_Info, Parallel_Error);
             Compare;
             Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Map_Entry
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
             pragma Assert (Oracle_Available and then Parallel_Available);
             Compare;
             Begin_Optional (Oracle, Oracle_Present, Oracle_Error);
-            Event_Readers.Begin_Optional
-              (Parallel, Parallel_Present, Parallel_Error);
+            Begin_Optional (Parallel, Parallel_Present, Parallel_Error);
             pragma Assert (not Oracle_Present and then not Parallel_Present);
             Compare;
             End_Optional (Oracle, Oracle_Error);
-            Event_Readers.End_Optional (Parallel, Parallel_Error);
+            End_Optional (Parallel, Parallel_Error);
             Compare;
             Begin_Optional (Oracle, Oracle_Present, Oracle_Error);
-            Event_Readers.Begin_Optional
-              (Parallel, Parallel_Present, Parallel_Error);
+            Begin_Optional (Parallel, Parallel_Present, Parallel_Error);
             pragma Assert (Oracle_Present and then Parallel_Present);
             Compare;
             Read_Null (Oracle, Oracle_Error);
-            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Read_Null (Parallel, Parallel_Error);
             Compare;
             End_Optional (Oracle, Oracle_Error);
-            Event_Readers.End_Optional (Parallel, Parallel_Error);
+            End_Optional (Parallel, Parallel_Error);
             Compare;
             Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Map_Entry
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
             pragma
               Assert (not Oracle_Available and then not Parallel_Available);
             Compare;
             End_Map (Oracle, Oracle_Error);
-            Event_Readers.End_Map (Parallel, Parallel_Error);
+            End_Map (Parallel, Parallel_Error);
             Compare;
             End_Optional (Oracle, Oracle_Error);
-            Event_Readers.End_Optional (Parallel, Parallel_Error);
+            End_Optional (Parallel, Parallel_Error);
             Compare;
             Finish_Document (Oracle, Oracle_Error);
-            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Finish_Document (Parallel, Parallel_Error);
             Compare;
          end;
       end Check_Optional_Container_Parity;
@@ -3584,8 +3558,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             then Expected_Offset
             else Expected_Consumed);
          Input             : aliased constant String := Source;
-         Oracle            : Reader (Input'Access);
-         Parallel          : Event_Readers.Reader (Input'Access);
+         Oracle            : Handwritten_Oracle.Reader (Input'Access);
+         Parallel          : Reader (Input'Access);
          Oracle_Error      : Errors.Error_Info;
          Parallel_Error    : Errors.Error_Info;
          Oracle_Present    : Boolean := True;
@@ -3597,10 +3571,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Local_Policy.Limits.Maximum_Container_Items := Maximum_Items;
          Local_Policy.Limits.Maximum_Nesting_Depth := Maximum_Depth;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          Begin_Optional (Oracle, Oracle_Present, Oracle_Error);
-         Event_Readers.Begin_Optional
-           (Parallel, Parallel_Present, Parallel_Error);
+         Begin_Optional (Parallel, Parallel_Present, Parallel_Error);
          pragma Assert (Oracle_Present = Parallel_Present);
          if Oracle_Error.Code /= Errors.No_Error then
             pragma Assert (not Oracle_Present and then not Parallel_Present);
@@ -3608,26 +3581,25 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          if Oracle_Error.Code = Errors.No_Error and then Oracle_Present then
             Read_Null (Oracle, Oracle_Error);
-            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Read_Null (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          end if;
          if Oracle_Error.Code = Errors.No_Error then
             End_Optional (Oracle, Oracle_Error);
-            Event_Readers.End_Optional (Parallel, Parallel_Error);
+            End_Optional (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          end if;
          pragma
            Assert
              (Parallel_Error.Code = Expected_Code
                 and then Parallel_Error.Input_Offset = Expected_Offset
-                and then Event_Readers.Input_Consumed (Parallel)
-                         = Retained_Consumed
-                and then Event_Readers.Container_Depth (Parallel) = 0
-                and then Event_Readers.Budget_Depth (Parallel) = 0,
+                and then Budget_Input_Consumed (Parallel) = Retained_Consumed
+                and then Logical_Depth (Parallel) = 0
+                and then Budget_Depth (Parallel) = 0,
               Source
                 & Parallel_Error.Code'Image
                 & Parallel_Error.Input_Offset'Image
-                & Event_Readers.Input_Consumed (Parallel)'Image);
+                & Budget_Input_Consumed (Parallel)'Image);
       end Check_Optional_Failure;
 
       procedure Check_Optional_Arbitrary_Bound is
@@ -3635,25 +3607,24 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
            [Positive'Last - 2 => '[',
             Positive'Last - 1 => '0',
             Positive'Last     => ']'];
-         Oracle           : Reader (Input'Access);
-         Parallel         : Event_Readers.Reader (Input'Access);
+         Oracle           : Handwritten_Oracle.Reader (Input'Access);
+         Parallel         : Reader (Input'Access);
          Oracle_Error     : Errors.Error_Info;
          Parallel_Error   : Errors.Error_Info;
          Oracle_Present   : Boolean := True;
          Parallel_Present : Boolean := True;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Optional (Oracle, Oracle_Present, Oracle_Error);
-         Event_Readers.Begin_Optional
-           (Parallel, Parallel_Present, Parallel_Error);
+         Begin_Optional (Parallel, Parallel_Present, Parallel_Error);
          pragma Assert (not Oracle_Present and then not Parallel_Present);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          End_Optional (Oracle, Oracle_Error);
-         Event_Readers.End_Optional (Parallel, Parallel_Error);
+         End_Optional (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
       end Check_Optional_Arbitrary_Bound;
 
@@ -3731,8 +3702,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             then "[1,[]]"
             else "[1,null]");
          Input            : aliased constant String := Source;
-         Oracle           : Reader (Input'Access);
-         Parallel         : Event_Readers.Reader (Input'Access);
+         Oracle           : Handwritten_Oracle.Reader (Input'Access);
+         Parallel         : Reader (Input'Access);
          Oracle_Error     : Errors.Error_Info;
          Parallel_Error   : Errors.Error_Info;
          Oracle_Present   : Boolean;
@@ -3741,49 +3712,46 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Parallel_Info    : Data_Model.Length_Information;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Optional (Oracle, Oracle_Present, Oracle_Error);
-         Event_Readers.Begin_Optional
-           (Parallel, Parallel_Present, Parallel_Error);
+         Begin_Optional (Parallel, Parallel_Present, Parallel_Error);
          pragma Assert (Oracle_Present and then Parallel_Present);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          case Test_Case is
             when End_While_Child_Ready       =>
                End_Optional (Oracle, Oracle_Error);
-               Event_Readers.End_Optional (Parallel, Parallel_Error);
+               End_Optional (Parallel, Parallel_Error);
 
             when End_While_Child_In_Progress =>
                Begin_Sequence (Oracle, Oracle_Info, Oracle_Error);
-               Event_Readers.Begin_Sequence
-                 (Parallel, Parallel_Info, Parallel_Error);
+               Begin_Sequence (Parallel, Parallel_Info, Parallel_Error);
                Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
                End_Optional (Oracle, Oracle_Error);
-               Event_Readers.End_Optional (Parallel, Parallel_Error);
+               End_Optional (Parallel, Parallel_Error);
 
             when Read_Second_Child           =>
                Read_Null (Oracle, Oracle_Error);
-               Event_Readers.Read_Null (Parallel, Parallel_Error);
+               Read_Null (Parallel, Parallel_Error);
                Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
                Read_Null (Oracle, Oracle_Error);
-               Event_Readers.Read_Null (Parallel, Parallel_Error);
+               Read_Null (Parallel, Parallel_Error);
          end case;
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          pragma
            Assert
              (Parallel_Error.Code = Errors.Invalid_State
-                and then Event_Readers.Container_Depth (Parallel) = 0
-                and then Event_Readers.Budget_Depth (Parallel) = 0,
+                and then Logical_Depth (Parallel) = 0
+                and then Budget_Depth (Parallel) = 0,
               Test_Case'Image);
          Errors.Reset (Oracle_Error);
          Errors.Reset (Parallel_Error);
          Reset (Oracle, Policy);
-         Event_Readers.Reset (Parallel, Policy, Parallel_Error);
+         Reset (Parallel, Policy);
          Begin_Optional (Oracle, Oracle_Present, Oracle_Error);
-         Event_Readers.Begin_Optional
-           (Parallel, Parallel_Present, Parallel_Error);
+         Begin_Optional (Parallel, Parallel_Present, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Abort_Document (Oracle, Oracle_Error);
-         Event_Readers.Abort_Document (Parallel, Parallel_Error);
+         Abort_Document (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
       end Check_Optional_Misuse;
 
@@ -3958,8 +3926,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
         (Source : String; Expected : Ada.Streams.Stream_Element_Array)
       is
          Input           : aliased constant String := Source;
-         Oracle          : Reader (Input'Access);
-         Parallel        : Event_Readers.Reader (Input'Access);
+         Oracle          : Handwritten_Oracle.Reader (Input'Access);
+         Parallel        : Reader (Input'Access);
          Oracle_Error    : Errors.Error_Info;
          Parallel_Error  : Errors.Error_Info;
          Oracle_Value    :
@@ -3972,9 +3940,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Parallel_Length : Natural := Natural'Last;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Read_Bytes (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
-         Event_Readers.Read_Bytes
+         Read_Bytes
            (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
          pragma
            Assert
@@ -3986,12 +3954,12 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                 and then Parallel_Value = Expected);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          pragma
            Assert
              (Oracle_Error.Code = Errors.No_Error
-                and then Event_Readers.Is_Complete (Parallel));
+                and then Is_Complete (Parallel));
       end Check_Bytes_Parity;
 
       procedure Check_Bytes_Failure
@@ -4004,8 +3972,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Maximum_Values  : Natural := Natural'Last)
       is
          Input           : aliased constant String := Source;
-         Oracle          : Reader (Input'Access);
-         Parallel        : Event_Readers.Reader (Input'Access);
+         Oracle          : Handwritten_Oracle.Reader (Input'Access);
+         Parallel        : Reader (Input'Access);
          Oracle_Error    : Errors.Error_Info;
          Parallel_Error  : Errors.Error_Info;
          Local_Policy    : Policies.Decode_Policy := Policy;
@@ -4024,9 +3992,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Local_Policy.Limits.Maximum_Byte_Length := Maximum_Bytes;
          Local_Policy.Limits.Maximum_Logical_Values := Maximum_Values;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          Read_Bytes (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
-         Event_Readers.Read_Bytes
+         Read_Bytes
            (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
          pragma
            Assert
@@ -4046,18 +4014,18 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                 & Oracle_Error.Input_Offset'Image
                 & Parallel_Error.Input_Offset'Image
                 & Input_Offset (Oracle)'Image
-                & Event_Readers.Input_Offset (Parallel)'Image);
+                & Input_Offset (Parallel)'Image);
          pragma
            Assert
-             (Event_Readers.Input_Offset (Parallel) = Input_Offset (Oracle),
+             (Input_Offset (Parallel) = Input_Offset (Oracle),
               Source
                 & Input_Offset (Oracle)'Image
-                & Event_Readers.Input_Offset (Parallel)'Image);
+                & Input_Offset (Parallel)'Image);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          pragma
            Assert
-             (Event_Readers.Container_Depth (Parallel) = 0
-                and then Event_Readers.Budget_Depth (Parallel) = 0);
+             (Logical_Depth (Parallel) = 0
+                and then Budget_Depth (Parallel) = 0);
       end Check_Bytes_Failure;
 
       procedure Check_Bytes_Input_Limit (Maximum_Input : Natural) is
@@ -4065,8 +4033,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Expected_Consumed : constant Input_Trace :=
            [0, 1, 1, 1, 1, 1, 1, 1, 1, 9, 10, 11, 11, 11, 14, 15];
          Input             : aliased constant String := "{""$bytes"":""00""}";
-         Oracle            : Reader (Input'Access);
-         Parallel          : Event_Readers.Reader (Input'Access);
+         Oracle            : Handwritten_Oracle.Reader (Input'Access);
+         Parallel          : Reader (Input'Access);
          Oracle_Error      : Errors.Error_Info;
          Parallel_Error    : Errors.Error_Info;
          Local_Policy      : Policies.Decode_Policy := Policy;
@@ -4079,25 +4047,25 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       begin
          Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          Read_Bytes (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
-         Event_Readers.Read_Bytes
+         Read_Bytes
            (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          pragma
            Assert
-             (Budgets.Input_Consumed (Oracle.Budget)
+             (Handwritten_Oracle.Input_Consumed (Oracle)
                 = Expected_Consumed (Maximum_Input)
-                and then Event_Readers.Input_Consumed (Parallel)
+                and then Budget_Input_Consumed (Parallel)
                          = Expected_Consumed (Maximum_Input)
-                and then Budgets.Values_Consumed (Oracle.Budget) = 1
-                and then Event_Readers.Values_Consumed (Parallel) = 1,
+                and then Handwritten_Oracle.Values_Consumed (Oracle) = 1
+                and then Budget_Values_Consumed (Parallel) = 1,
               Maximum_Input'Image
                 & Expected_Consumed (Maximum_Input)'Image
-                & Budgets.Input_Consumed (Oracle.Budget)'Image
-                & Event_Readers.Input_Consumed (Parallel)'Image
-                & Budgets.Values_Consumed (Oracle.Budget)'Image
-                & Event_Readers.Values_Consumed (Parallel)'Image);
+                & Handwritten_Oracle.Input_Consumed (Oracle)'Image
+                & Budget_Input_Consumed (Parallel)'Image
+                & Handwritten_Oracle.Values_Consumed (Oracle)'Image
+                & Budget_Values_Consumed (Parallel)'Image);
          if Maximum_Input < Input'Length then
             pragma
               Assert
@@ -4111,7 +4079,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                    & Oracle_Error.Code'Image
                    & Oracle_Error.Input_Offset'Image
                    & Input_Offset (Oracle)'Image
-                   & Event_Readers.Input_Offset (Parallel)'Image);
+                   & Input_Offset (Parallel)'Image);
          else
             pragma
               Assert
@@ -4121,7 +4089,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                    and then Oracle_Value = [5 => 0]
                    and then Parallel_Value = [5 => 0]);
             Finish_Document (Oracle, Oracle_Error);
-            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Finish_Document (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          end if;
       end Check_Bytes_Input_Limit;
@@ -4130,8 +4098,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          procedure Check_Sequence is
             Input              : aliased constant String :=
               "[{""$bytes"":""00""}]";
-            Oracle             : Reader (Input'Access);
-            Parallel           : Event_Readers.Reader (Input'Access);
+            Oracle             : Handwritten_Oracle.Reader (Input'Access);
+            Parallel           : Reader (Input'Access);
             Oracle_Error       : Errors.Error_Info;
             Parallel_Error     : Errors.Error_Info;
             Oracle_Info        : Data_Model.Length_Information;
@@ -4144,18 +4112,16 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Parallel_Length    : Natural;
          begin
             Initialize (Oracle, Policy);
-            Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+            Initialize (Parallel, Policy);
             Begin_Sequence (Oracle, Oracle_Info, Oracle_Error);
-            Event_Readers.Begin_Sequence
-              (Parallel, Parallel_Info, Parallel_Error);
+            Begin_Sequence (Parallel, Parallel_Info, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
             Next_Element (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Element
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Element (Parallel, Parallel_Available, Parallel_Error);
             pragma Assert (Oracle_Available and then Parallel_Available);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
             Read_Bytes (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
-            Event_Readers.Read_Bytes
+            Read_Bytes
               (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
             pragma
               Assert
@@ -4165,24 +4131,23 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                    and then Parallel_Length = 1);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
             Next_Element (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Element
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Element (Parallel, Parallel_Available, Parallel_Error);
             pragma
               Assert (not Oracle_Available and then not Parallel_Available);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
             End_Sequence (Oracle, Oracle_Error);
-            Event_Readers.End_Sequence (Parallel, Parallel_Error);
+            End_Sequence (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
             Finish_Document (Oracle, Oracle_Error);
-            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Finish_Document (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          end Check_Sequence;
 
          procedure Check_Map is
             Input              : aliased constant String :=
               "[[{""$bytes"":""00""},{""$bytes"":""01""}]]";
-            Oracle             : Reader (Input'Access);
-            Parallel           : Event_Readers.Reader (Input'Access);
+            Oracle             : Handwritten_Oracle.Reader (Input'Access);
+            Parallel           : Reader (Input'Access);
             Oracle_Error       : Errors.Error_Info;
             Parallel_Error     : Errors.Error_Info;
             Oracle_Info        : Data_Model.Length_Information;
@@ -4195,17 +4160,16 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Parallel_Length    : Natural;
          begin
             Initialize (Oracle, Policy);
-            Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+            Initialize (Parallel, Policy);
             Begin_Map (Oracle, Oracle_Info, Oracle_Error);
-            Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+            Begin_Map (Parallel, Parallel_Info, Parallel_Error);
             Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Map_Entry
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
             pragma Assert (Oracle_Available and then Parallel_Available);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
             for Expected in Ada.Streams.Stream_Element range 0 .. 1 loop
                Read_Bytes (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
-               Event_Readers.Read_Bytes
+               Read_Bytes
                  (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
                pragma
                  Assert
@@ -4216,15 +4180,14 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
             end loop;
             Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Map_Entry
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
             pragma
               Assert (not Oracle_Available and then not Parallel_Available);
             End_Map (Oracle, Oracle_Error);
-            Event_Readers.End_Map (Parallel, Parallel_Error);
+            End_Map (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
             Finish_Document (Oracle, Oracle_Error);
-            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Finish_Document (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          end Check_Map;
       begin
@@ -4244,8 +4207,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Maximum_Input     : Natural := Natural'Last)
       is
          Input              : aliased constant String := Source;
-         Oracle             : Reader (Input'Access);
-         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle             : Handwritten_Oracle.Reader (Input'Access);
+         Parallel           : Reader (Input'Access);
          Oracle_Error       : Errors.Error_Info;
          Parallel_Error     : Errors.Error_Info;
          Local_Policy       : Policies.Decode_Policy := Policy;
@@ -4262,15 +4225,14 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       begin
          Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          Begin_Map (Oracle, Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+         Begin_Map (Parallel, Parallel_Info, Parallel_Error);
          Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Map_Entry
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (Oracle_Available and then Parallel_Available);
          Read_Bytes (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
-         Event_Readers.Read_Bytes
+         Read_Bytes
            (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
          if Stage = Value_Finalization then
             pragma
@@ -4282,7 +4244,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                    and then Oracle_Length = 1
                    and then Parallel_Length = 1);
             Read_Bytes (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
-            Event_Readers.Read_Bytes
+            Read_Bytes
               (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
          end if;
          pragma
@@ -4295,14 +4257,12 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                 and then Parallel_Length = 0
                 and then Oracle_Value = [5 => 0]
                 and then Parallel_Value = [5 => 0]
-                and then Budgets.Input_Consumed (Oracle.Budget)
+                and then Handwritten_Oracle.Input_Consumed (Oracle)
                          = Expected_Consumed
-                and then Event_Readers.Input_Consumed (Parallel)
-                         = Expected_Consumed
-                and then Budgets.Values_Consumed (Oracle.Budget)
+                and then Budget_Input_Consumed (Parallel) = Expected_Consumed
+                and then Handwritten_Oracle.Values_Consumed (Oracle)
                          = Expected_Values
-                and then Event_Readers.Values_Consumed (Parallel)
-                         = Expected_Values,
+                and then Budget_Values_Consumed (Parallel) = Expected_Values,
               Stage'Image
                 & Source
                 & Oracle_Error.Code'Image
@@ -4310,19 +4270,19 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                 & Oracle_Error.Input_Offset'Image
                 & Parallel_Error.Input_Offset'Image
                 & Input_Offset (Oracle)'Image
-                & Event_Readers.Input_Offset (Parallel)'Image
-                & Budgets.Input_Consumed (Oracle.Budget)'Image
-                & Event_Readers.Input_Consumed (Parallel)'Image
-                & Budgets.Values_Consumed (Oracle.Budget)'Image
-                & Event_Readers.Values_Consumed (Parallel)'Image);
+                & Input_Offset (Parallel)'Image
+                & Handwritten_Oracle.Input_Consumed (Oracle)'Image
+                & Budget_Input_Consumed (Parallel)'Image
+                & Handwritten_Oracle.Values_Consumed (Oracle)'Image
+                & Budget_Values_Consumed (Parallel)'Image);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          pragma
            Assert
-             (Event_Readers.Container_Depth (Parallel) = 0
-                and then Event_Readers.Budget_Depth (Parallel) = 0);
+             (Logical_Depth (Parallel) = 0
+                and then Budget_Depth (Parallel) = 0);
          Errors.Reset (Parallel_Error);
-         Event_Readers.Reset (Parallel, Policy, Parallel_Error);
-         Event_Readers.Abort_Document (Parallel, Parallel_Error);
+         Reset (Parallel, Policy);
+         Abort_Document (Parallel, Parallel_Error);
          pragma Assert (Parallel_Error.Code = Errors.No_Error);
       end Check_Bytes_Map_Failure;
 
@@ -4343,8 +4303,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Positive'Last - 2  => '1',
             Positive'Last - 1  => '"',
             Positive'Last      => '}'];
-         Oracle          : Reader (Input'Access);
-         Parallel        : Event_Readers.Reader (Input'Access);
+         Oracle          : Handwritten_Oracle.Reader (Input'Access);
+         Parallel        : Reader (Input'Access);
          Oracle_Error    : Errors.Error_Info;
          Parallel_Error  : Errors.Error_Info;
          Oracle_Value    :
@@ -4359,9 +4319,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Parallel_Length : Natural;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Read_Bytes (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
-         Event_Readers.Read_Bytes
+         Read_Bytes
            (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
          pragma
            Assert
@@ -4371,7 +4331,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                 and then Parallel_Length = 1);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
       end Check_Bytes_Arbitrary_Bounds;
 
@@ -4951,27 +4911,27 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Finish       : Boolean := True)
       is
          Input          : aliased constant String := Source;
-         Oracle         : Reader (Input'Access);
-         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle         : Handwritten_Oracle.Reader (Input'Access);
+         Parallel       : Reader (Input'Access);
          Oracle_Error   : Errors.Error_Info;
          Parallel_Error : Errors.Error_Info;
       begin
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          Skip_Value (Oracle, Oracle_Error);
-         Event_Readers.Skip_Value (Parallel, Parallel_Error);
+         Skip_Value (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          if Finish and then Oracle_Error.Code = Errors.No_Error then
             Finish_Document (Oracle, Oracle_Error);
-            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Finish_Document (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          end if;
       end Check_Skip_Parity;
 
       procedure Check_Skip_Sequence is
          Input          : aliased constant String := "[{""x"":[1,true]}]";
-         Oracle         : Reader (Input'Access);
-         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle         : Handwritten_Oracle.Reader (Input'Access);
+         Parallel       : Reader (Input'Access);
          Oracle_Error   : Errors.Error_Info;
          Parallel_Error : Errors.Error_Info;
          Oracle_Info    : Data_Model.Length_Information;
@@ -4980,33 +4940,32 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Parallel_Item  : Boolean;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Sequence (Oracle, Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Sequence
-           (Parallel, Parallel_Info, Parallel_Error);
+         Begin_Sequence (Parallel, Parallel_Info, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Next_Element (Oracle, Oracle_Item, Oracle_Error);
-         Event_Readers.Next_Element (Parallel, Parallel_Item, Parallel_Error);
+         Next_Element (Parallel, Parallel_Item, Parallel_Error);
          pragma Assert (Oracle_Item and then Parallel_Item);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Skip_Value (Oracle, Oracle_Error);
-         Event_Readers.Skip_Value (Parallel, Parallel_Error);
+         Skip_Value (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Next_Element (Oracle, Oracle_Item, Oracle_Error);
-         Event_Readers.Next_Element (Parallel, Parallel_Item, Parallel_Error);
+         Next_Element (Parallel, Parallel_Item, Parallel_Error);
          pragma Assert (not Oracle_Item and then not Parallel_Item);
          End_Sequence (Oracle, Oracle_Error);
-         Event_Readers.End_Sequence (Parallel, Parallel_Error);
+         End_Sequence (Parallel, Parallel_Error);
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
       end Check_Skip_Sequence;
 
       procedure Check_Skip_Map is
          Input          : aliased constant String :=
            "[[{""k"":[1]},[true,false]]]";
-         Oracle         : Reader (Input'Access);
-         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle         : Handwritten_Oracle.Reader (Input'Access);
+         Parallel       : Reader (Input'Access);
          Oracle_Error   : Errors.Error_Info;
          Parallel_Error : Errors.Error_Info;
          Oracle_Info    : Data_Model.Length_Information;
@@ -5015,34 +4974,32 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Parallel_Item  : Boolean;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Map (Oracle, Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+         Begin_Map (Parallel, Parallel_Info, Parallel_Error);
          Next_Map_Entry (Oracle, Oracle_Item, Oracle_Error);
-         Event_Readers.Next_Map_Entry
-           (Parallel, Parallel_Item, Parallel_Error);
+         Next_Map_Entry (Parallel, Parallel_Item, Parallel_Error);
          pragma Assert (Oracle_Item and then Parallel_Item);
          Skip_Value (Oracle, Oracle_Error);
-         Event_Readers.Skip_Value (Parallel, Parallel_Error);
+         Skip_Value (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Skip_Value (Oracle, Oracle_Error);
-         Event_Readers.Skip_Value (Parallel, Parallel_Error);
+         Skip_Value (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Next_Map_Entry (Oracle, Oracle_Item, Oracle_Error);
-         Event_Readers.Next_Map_Entry
-           (Parallel, Parallel_Item, Parallel_Error);
+         Next_Map_Entry (Parallel, Parallel_Item, Parallel_Error);
          pragma Assert (not Oracle_Item and then not Parallel_Item);
          End_Map (Oracle, Oracle_Error);
-         Event_Readers.End_Map (Parallel, Parallel_Error);
+         End_Map (Parallel, Parallel_Error);
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
       end Check_Skip_Map;
 
       procedure Check_Skip_Record is
          Input           : aliased constant String := "{""a"":{""x"":[1]}}";
-         Oracle          : Reader (Input'Access);
-         Parallel        : Event_Readers.Reader (Input'Access);
+         Oracle          : Handwritten_Oracle.Reader (Input'Access);
+         Parallel        : Reader (Input'Access);
          Oracle_Error    : Errors.Error_Info;
          Parallel_Error  : Errors.Error_Info;
          Oracle_Info     : Data_Model.Length_Information;
@@ -5055,13 +5012,12 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Parallel_Item   : Boolean;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Record (Oracle, "T", Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Record
-           (Parallel, "T", Parallel_Info, Parallel_Error);
+         Begin_Record (Parallel, "T", Parallel_Info, Parallel_Error);
          Next_Field
            (Oracle, Oracle_Name, Oracle_Length, Oracle_Item, Oracle_Error);
-         Event_Readers.Next_Field
+         Next_Field
            (Parallel,
             Parallel_Name,
             Parallel_Length,
@@ -5074,11 +5030,11 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                 and then Oracle_Name = "a"
                 and then Parallel_Name = "a");
          Skip_Value (Oracle, Oracle_Error);
-         Event_Readers.Skip_Value (Parallel, Parallel_Error);
+         Skip_Value (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Next_Field
            (Oracle, Oracle_Name, Oracle_Length, Oracle_Item, Oracle_Error);
-         Event_Readers.Next_Field
+         Next_Field
            (Parallel,
             Parallel_Name,
             Parallel_Length,
@@ -5086,41 +5042,40 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Parallel_Error);
          pragma Assert (not Oracle_Item and then not Parallel_Item);
          End_Record (Oracle, Oracle_Error);
-         Event_Readers.End_Record (Parallel, Parallel_Error);
+         End_Record (Parallel, Parallel_Error);
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
       end Check_Skip_Record;
 
       procedure Check_Skip_Optional is
          Input            : aliased constant String := "[1,{""x"":[1]}]";
-         Oracle           : Reader (Input'Access);
-         Parallel         : Event_Readers.Reader (Input'Access);
+         Oracle           : Handwritten_Oracle.Reader (Input'Access);
+         Parallel         : Reader (Input'Access);
          Oracle_Error     : Errors.Error_Info;
          Parallel_Error   : Errors.Error_Info;
          Oracle_Present   : Boolean;
          Parallel_Present : Boolean;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Optional (Oracle, Oracle_Present, Oracle_Error);
-         Event_Readers.Begin_Optional
-           (Parallel, Parallel_Present, Parallel_Error);
+         Begin_Optional (Parallel, Parallel_Present, Parallel_Error);
          pragma Assert (Oracle_Present and then Parallel_Present);
          Skip_Value (Oracle, Oracle_Error);
-         Event_Readers.Skip_Value (Parallel, Parallel_Error);
+         Skip_Value (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          End_Optional (Oracle, Oracle_Error);
-         Event_Readers.End_Optional (Parallel, Parallel_Error);
+         End_Optional (Parallel, Parallel_Error);
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
       end Check_Skip_Optional;
 
       procedure Check_Skip_Variant is
          Input           : aliased constant String := "[""Alt"",{""x"":[1]}]";
-         Oracle          : Reader (Input'Access);
-         Parallel        : Event_Readers.Reader (Input'Access);
+         Oracle          : Handwritten_Oracle.Reader (Input'Access);
+         Parallel        : Reader (Input'Access);
          Oracle_Error    : Errors.Error_Info;
          Parallel_Error  : Errors.Error_Info;
          Oracle_Info     : Data_Model.Length_Information;
@@ -5133,7 +5088,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Parallel_Item   : Boolean;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Variant
            (Oracle,
             "T",
@@ -5141,7 +5096,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Oracle_Length,
             Oracle_Info,
             Oracle_Error);
-         Event_Readers.Begin_Variant
+         Begin_Variant
            (Parallel,
             "T",
             Parallel_Name,
@@ -5156,7 +5111,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                 and then Parallel_Length = 3);
          Next_Field
            (Oracle, Oracle_Name, Oracle_Length, Oracle_Item, Oracle_Error);
-         Event_Readers.Next_Field
+         Next_Field
            (Parallel,
             Parallel_Name,
             Parallel_Length,
@@ -5169,11 +5124,11 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                 and then Oracle_Name (1) = 'x'
                 and then Parallel_Name (1) = 'x');
          Skip_Value (Oracle, Oracle_Error);
-         Event_Readers.Skip_Value (Parallel, Parallel_Error);
+         Skip_Value (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Next_Field
            (Oracle, Oracle_Name, Oracle_Length, Oracle_Item, Oracle_Error);
-         Event_Readers.Next_Field
+         Next_Field
            (Parallel,
             Parallel_Name,
             Parallel_Length,
@@ -5181,9 +5136,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Parallel_Error);
          pragma Assert (not Oracle_Item and then not Parallel_Item);
          End_Variant (Oracle, Oracle_Error);
-         Event_Readers.End_Variant (Parallel, Parallel_Error);
+         End_Variant (Parallel, Parallel_Error);
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
       end Check_Skip_Variant;
 
@@ -5198,18 +5153,18 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Positive'Last - 2 => '1',
             Positive'Last - 1 => ']',
             Positive'Last     => '}'];
-         Oracle         : Reader (Input'Access);
-         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle         : Handwritten_Oracle.Reader (Input'Access);
+         Parallel       : Reader (Input'Access);
          Oracle_Error   : Errors.Error_Info;
          Parallel_Error : Errors.Error_Info;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Skip_Value (Oracle, Oracle_Error);
-         Event_Readers.Skip_Value (Parallel, Parallel_Error);
+         Skip_Value (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
       end Check_Skip_Arbitrary_Bounds;
 
@@ -6031,8 +5986,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       procedure Check_Map_Parity (Maximum_Items : Natural := Natural'Last) is
          Input              : aliased constant String :=
            "[ [ 1 , true ] , [ null , [ 2 ] ] ]";
-         Oracle             : Reader (Input'Access);
-         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle             : Handwritten_Oracle.Reader (Input'Access);
+         Parallel           : Reader (Input'Access);
          Oracle_Error       : Errors.Error_Info;
          Parallel_Error     : Errors.Error_Info;
          Oracle_Length      : Data_Model.Length_Information;
@@ -6052,77 +6007,68 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       begin
          Local_Policy.Limits.Maximum_Container_Items := Maximum_Items;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          Begin_Map (Oracle, Oracle_Length, Oracle_Error);
-         Event_Readers.Begin_Map (Parallel, Parallel_Length, Parallel_Error);
+         Begin_Map (Parallel, Parallel_Length, Parallel_Error);
          Compare;
          pragma
            Assert (not Oracle_Length.Known and then not Parallel_Length.Known);
 
          Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Map_Entry
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
          Compare;
          pragma Assert (Oracle_Available and then Parallel_Available);
          Read_Unsigned (Oracle, Oracle_Unsigned, Oracle_Error);
-         Event_Readers.Read_Unsigned
-           (Parallel, Parallel_Unsigned, Parallel_Error);
+         Read_Unsigned (Parallel, Parallel_Unsigned, Parallel_Error);
          Compare;
          pragma Assert (Oracle_Unsigned = 1 and then Parallel_Unsigned = 1);
          Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
-         Event_Readers.Read_Boolean
-           (Parallel, Parallel_Boolean, Parallel_Error);
+         Read_Boolean (Parallel, Parallel_Boolean, Parallel_Error);
          Compare;
          pragma Assert (Oracle_Boolean and then Parallel_Boolean);
 
          Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Map_Entry
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
          Compare;
          pragma Assert (Oracle_Available and then Parallel_Available);
          Read_Null (Oracle, Oracle_Error);
-         Event_Readers.Read_Null (Parallel, Parallel_Error);
+         Read_Null (Parallel, Parallel_Error);
          Compare;
          Begin_Sequence (Oracle, Oracle_Length, Oracle_Error);
-         Event_Readers.Begin_Sequence
-           (Parallel, Parallel_Length, Parallel_Error);
+         Begin_Sequence (Parallel, Parallel_Length, Parallel_Error);
          Compare;
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          Compare;
          Read_Unsigned (Oracle, Oracle_Unsigned, Oracle_Error);
-         Event_Readers.Read_Unsigned
-           (Parallel, Parallel_Unsigned, Parallel_Error);
+         Read_Unsigned (Parallel, Parallel_Unsigned, Parallel_Error);
          Compare;
          pragma Assert (Oracle_Unsigned = 2 and then Parallel_Unsigned = 2);
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          Compare;
          pragma Assert (not Oracle_Available and then not Parallel_Available);
          End_Sequence (Oracle, Oracle_Error);
-         Event_Readers.End_Sequence (Parallel, Parallel_Error);
+         End_Sequence (Parallel, Parallel_Error);
          Compare;
 
          Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Map_Entry
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
          Compare;
          pragma Assert (not Oracle_Available and then not Parallel_Available);
          End_Map (Oracle, Oracle_Error);
-         Event_Readers.End_Map (Parallel, Parallel_Error);
+         End_Map (Parallel, Parallel_Error);
          Compare;
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Compare;
-         pragma Assert (Event_Readers.Is_Complete (Parallel));
+         pragma Assert (Is_Complete (Parallel));
       end Check_Map_Parity;
 
       procedure Check_Empty_Map_Parity is
          Input              : aliased constant String := "[ ]";
-         Oracle             : Reader (Input'Access);
-         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle             : Handwritten_Oracle.Reader (Input'Access);
+         Parallel           : Reader (Input'Access);
          Oracle_Error       : Errors.Error_Info;
          Parallel_Error     : Errors.Error_Info;
          Oracle_Info        : Data_Model.Length_Information;
@@ -6131,27 +6077,26 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Parallel_Available : Boolean := True;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Map (Oracle, Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+         Begin_Map (Parallel, Parallel_Info, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Map_Entry
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (not Oracle_Available and then not Parallel_Available);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          End_Map (Oracle, Oracle_Error);
-         Event_Readers.End_Map (Parallel, Parallel_Error);
+         End_Map (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
       end Check_Empty_Map_Parity;
 
       procedure Check_Map_Container_Key_Parity is
          Input              : aliased constant String := "[[[null],false]]";
-         Oracle             : Reader (Input'Access);
-         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle             : Handwritten_Oracle.Reader (Input'Access);
+         Parallel           : Reader (Input'Access);
          Oracle_Error       : Errors.Error_Info;
          Parallel_Error     : Errors.Error_Info;
          Oracle_Length      : Data_Model.Length_Information;
@@ -6167,46 +6112,40 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          end Compare;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Map (Oracle, Oracle_Length, Oracle_Error);
-         Event_Readers.Begin_Map (Parallel, Parallel_Length, Parallel_Error);
+         Begin_Map (Parallel, Parallel_Length, Parallel_Error);
          Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Map_Entry
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
          Compare;
          Begin_Sequence (Oracle, Oracle_Length, Oracle_Error);
-         Event_Readers.Begin_Sequence
-           (Parallel, Parallel_Length, Parallel_Error);
+         Begin_Sequence (Parallel, Parallel_Length, Parallel_Error);
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          Read_Null (Oracle, Oracle_Error);
-         Event_Readers.Read_Null (Parallel, Parallel_Error);
+         Read_Null (Parallel, Parallel_Error);
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          End_Sequence (Oracle, Oracle_Error);
-         Event_Readers.End_Sequence (Parallel, Parallel_Error);
+         End_Sequence (Parallel, Parallel_Error);
          Compare;
          Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
-         Event_Readers.Read_Boolean
-           (Parallel, Parallel_Boolean, Parallel_Error);
+         Read_Boolean (Parallel, Parallel_Boolean, Parallel_Error);
          Compare;
          pragma Assert (not Oracle_Boolean and then not Parallel_Boolean);
          Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Map_Entry
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
          End_Map (Oracle, Oracle_Error);
-         Event_Readers.End_Map (Parallel, Parallel_Error);
+         End_Map (Parallel, Parallel_Error);
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Compare;
       end Check_Map_Container_Key_Parity;
 
       procedure Check_Sequence_Map_Parity is
          Input              : aliased constant String := "[[[null,true]]]";
-         Oracle             : Reader (Input'Access);
-         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle             : Handwritten_Oracle.Reader (Input'Access);
+         Parallel           : Reader (Input'Access);
          Oracle_Error       : Errors.Error_Info;
          Parallel_Error     : Errors.Error_Info;
          Oracle_Length      : Data_Model.Length_Information;
@@ -6222,49 +6161,43 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          end Compare;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Sequence (Oracle, Oracle_Length, Oracle_Error);
-         Event_Readers.Begin_Sequence
-           (Parallel, Parallel_Length, Parallel_Error);
+         Begin_Sequence (Parallel, Parallel_Length, Parallel_Error);
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          Begin_Map (Oracle, Oracle_Length, Oracle_Error);
-         Event_Readers.Begin_Map (Parallel, Parallel_Length, Parallel_Error);
+         Begin_Map (Parallel, Parallel_Length, Parallel_Error);
          Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Map_Entry
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
          Read_Null (Oracle, Oracle_Error);
-         Event_Readers.Read_Null (Parallel, Parallel_Error);
+         Read_Null (Parallel, Parallel_Error);
          Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
-         Event_Readers.Read_Boolean
-           (Parallel, Parallel_Boolean, Parallel_Error);
+         Read_Boolean (Parallel, Parallel_Boolean, Parallel_Error);
          Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Map_Entry
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (not Oracle_Available and then not Parallel_Available);
          End_Map (Oracle, Oracle_Error);
-         Event_Readers.End_Map (Parallel, Parallel_Error);
+         End_Map (Parallel, Parallel_Error);
          Compare;
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (not Oracle_Available and then not Parallel_Available);
          End_Sequence (Oracle, Oracle_Error);
-         Event_Readers.End_Sequence (Parallel, Parallel_Error);
+         End_Sequence (Parallel, Parallel_Error);
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Compare;
          pragma
            Assert
              (Oracle_Error.Code = Errors.No_Error
-                and then Event_Readers.Is_Complete (Parallel));
+                and then Is_Complete (Parallel));
       end Check_Sequence_Map_Parity;
 
       procedure Check_Nested_Map_Parity is
          Input              : aliased constant String := "[[[],[]]]";
-         Oracle             : Reader (Input'Access);
-         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle             : Handwritten_Oracle.Reader (Input'Access);
+         Parallel           : Reader (Input'Access);
          Oracle_Error       : Errors.Error_Info;
          Parallel_Error     : Errors.Error_Info;
          Oracle_Info        : Data_Model.Length_Information;
@@ -6280,23 +6213,22 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          procedure Begin_Next is
          begin
             Begin_Map (Oracle, Oracle_Info, Oracle_Error);
-            Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+            Begin_Map (Parallel, Parallel_Info, Parallel_Error);
             Compare;
             Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Map_Entry
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
             Compare;
          end Begin_Next;
 
          procedure End_Current is
          begin
             End_Map (Oracle, Oracle_Error);
-            Event_Readers.End_Map (Parallel, Parallel_Error);
+            End_Map (Parallel, Parallel_Error);
             Compare;
          end End_Current;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Next;
          pragma Assert (Oracle_Available and then Parallel_Available);
          Begin_Next;
@@ -6306,13 +6238,12 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          pragma Assert (not Oracle_Available and then not Parallel_Available);
          End_Current;
          Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Map_Entry
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
          Compare;
          pragma Assert (not Oracle_Available and then not Parallel_Available);
          End_Current;
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Compare;
       end Check_Nested_Map_Parity;
 
@@ -6346,8 +6277,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                    when Late_Syntax   => "[[null," & Token & " x]]",
                    when Late_Capacity => "[[null," & Token & "]]"));
          Input              : aliased constant String := Source;
-         Oracle             : Reader (Input'Access);
-         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle             : Handwritten_Oracle.Reader (Input'Access);
+         Parallel           : Reader (Input'Access);
          Oracle_Error       : Errors.Error_Info;
          Parallel_Error     : Errors.Error_Info;
          Oracle_Info        : Data_Model.Length_Information;
@@ -6377,45 +6308,40 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                  when Map_Value => 7 + Token'Length);
          end if;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          Begin_Map (Oracle, Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+         Begin_Map (Parallel, Parallel_Info, Parallel_Error);
          Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Map_Entry
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (Oracle_Available and then Parallel_Available);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          if Position = Map_Value then
             Read_Null (Oracle, Oracle_Error);
-            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Read_Null (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          end if;
 
          case Operation is
             when Map_Boolean  =>
                Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
-               Event_Readers.Read_Boolean
-                 (Parallel, Parallel_Boolean, Parallel_Error);
+               Read_Boolean (Parallel, Parallel_Boolean, Parallel_Error);
                pragma
                  Assert (not Oracle_Boolean and then not Parallel_Boolean);
 
             when Map_Signed   =>
                Read_Signed (Oracle, Oracle_Signed, Oracle_Error);
-               Event_Readers.Read_Signed
-                 (Parallel, Parallel_Signed, Parallel_Error);
+               Read_Signed (Parallel, Parallel_Signed, Parallel_Error);
                pragma Assert (Oracle_Signed = 0 and then Parallel_Signed = 0);
 
             when Map_Unsigned =>
                Read_Unsigned (Oracle, Oracle_Unsigned, Oracle_Error);
-               Event_Readers.Read_Unsigned
-                 (Parallel, Parallel_Unsigned, Parallel_Error);
+               Read_Unsigned (Parallel, Parallel_Unsigned, Parallel_Error);
                pragma
                  Assert (Oracle_Unsigned = 0 and then Parallel_Unsigned = 0);
 
             when Map_Float    =>
                Read_Float_64 (Oracle, Oracle_Float, Oracle_Error);
-               Event_Readers.Read_Float_64
-                 (Parallel, Parallel_Float, Parallel_Error);
+               Read_Float_64 (Parallel, Parallel_Float, Parallel_Error);
                pragma
                  Assert
                    (Data_Model.Category (Oracle_Float)
@@ -6430,7 +6356,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
 
             when Map_Text     =>
                Read_Text (Oracle, Oracle_Text, Oracle_Length, Oracle_Error);
-               Event_Readers.Read_Text
+               Read_Text
                  (Parallel, Parallel_Text, Parallel_Length, Parallel_Error);
                pragma
                  Assert
@@ -6466,8 +6392,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
               when Map_Key   => "[[" & Token & ",null]]",
               when Map_Value => "[[null," & Token & "]]");
          Input              : aliased constant String := Source;
-         Oracle             : Reader (Input'Access);
-         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle             : Handwritten_Oracle.Reader (Input'Access);
+         Parallel           : Reader (Input'Access);
          Oracle_Error       : Errors.Error_Info;
          Parallel_Error     : Errors.Error_Info;
          Oracle_Info        : Data_Model.Length_Information;
@@ -6488,37 +6414,33 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
               when Map_Value => 7 + Token'Length);
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Map (Oracle, Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+         Begin_Map (Parallel, Parallel_Info, Parallel_Error);
          Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Map_Entry
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (Oracle_Available and then Parallel_Available);
          if Position = Map_Value then
             Read_Null (Oracle, Oracle_Error);
-            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Read_Null (Parallel, Parallel_Error);
             Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          end if;
 
          case Operation is
             when Map_Signed_Range   =>
                Read_Signed (Oracle, Oracle_Signed, Oracle_Error);
-               Event_Readers.Read_Signed
-                 (Parallel, Parallel_Signed, Parallel_Error);
+               Read_Signed (Parallel, Parallel_Signed, Parallel_Error);
                pragma Assert (Oracle_Signed = 0 and then Parallel_Signed = 0);
 
             when Map_Unsigned_Range =>
                Read_Unsigned (Oracle, Oracle_Unsigned, Oracle_Error);
-               Event_Readers.Read_Unsigned
-                 (Parallel, Parallel_Unsigned, Parallel_Error);
+               Read_Unsigned (Parallel, Parallel_Unsigned, Parallel_Error);
                pragma
                  Assert (Oracle_Unsigned = 0 and then Parallel_Unsigned = 0);
 
             when Map_Float_Range    =>
                Read_Float_64 (Oracle, Oracle_Float, Oracle_Error);
-               Event_Readers.Read_Float_64
-                 (Parallel, Parallel_Float, Parallel_Error);
+               Read_Float_64 (Parallel, Parallel_Float, Parallel_Error);
                pragma
                  Assert
                    (Data_Model.Category (Oracle_Float)
@@ -6533,8 +6455,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
            Assert
              (Oracle_Error.Code = Errors.Out_Of_Range
                 and then Input_Offset (Oracle) = Expected_Offset
-                and then Event_Readers.Input_Offset (Parallel)
-                         = Expected_Offset,
+                and then Input_Offset (Parallel) = Expected_Offset,
               Operation'Image & Position'Image);
       end Check_Map_Scalar_Range_Failure;
 
@@ -6549,8 +6470,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       is
          Input              : aliased constant String :=
            "[[null,true],[false,null]]";
-         Oracle             : Reader (Input'Access);
-         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle             : Handwritten_Oracle.Reader (Input'Access);
+         Parallel           : Reader (Input'Access);
          Oracle_Error       : Errors.Error_Info;
          Parallel_Error     : Errors.Error_Info;
          Oracle_Info        : Data_Model.Length_Information;
@@ -6569,8 +6490,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          procedure Next_Entry is
          begin
             Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Map_Entry
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
             pragma Assert (Oracle_Available = Parallel_Available);
             Compare;
          end Next_Entry;
@@ -6580,22 +6500,21 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Local_Policy.Limits.Maximum_Container_Items := Maximum_Items;
          Local_Policy.Limits.Maximum_Nesting_Depth := Maximum_Depth;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          Begin_Map (Oracle, Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+         Begin_Map (Parallel, Parallel_Info, Parallel_Error);
          Compare;
          if Oracle_Error.Code = Errors.No_Error then
             Next_Entry;
          end if;
          if Oracle_Error.Code = Errors.No_Error then
             Read_Null (Oracle, Oracle_Error);
-            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Read_Null (Parallel, Parallel_Error);
             Compare;
          end if;
          if Oracle_Error.Code = Errors.No_Error then
             Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
-            Event_Readers.Read_Boolean
-              (Parallel, Parallel_Boolean, Parallel_Error);
+            Read_Boolean (Parallel, Parallel_Boolean, Parallel_Error);
             Compare;
          end if;
          if Oracle_Error.Code = Errors.No_Error then
@@ -6603,34 +6522,32 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          end if;
          if Oracle_Error.Code = Errors.No_Error then
             Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
-            Event_Readers.Read_Boolean
-              (Parallel, Parallel_Boolean, Parallel_Error);
+            Read_Boolean (Parallel, Parallel_Boolean, Parallel_Error);
             Compare;
          end if;
          if Oracle_Error.Code = Errors.No_Error then
             Read_Null (Oracle, Oracle_Error);
-            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Read_Null (Parallel, Parallel_Error);
             Compare;
          end if;
          pragma
            Assert
              (Parallel_Error.Code = Expected_Code
                 and then Parallel_Error.Input_Offset = Expected_Offset
-                and then Event_Readers.Input_Consumed (Parallel)
-                         = Expected_Offset,
+                and then Budget_Input_Consumed (Parallel) = Expected_Offset,
               Maximum_Input'Image
                 & Maximum_Values'Image
                 & Maximum_Items'Image
                 & Maximum_Depth'Image
                 & Parallel_Error.Code'Image
                 & Parallel_Error.Input_Offset'Image
-                & Event_Readers.Input_Consumed (Parallel)'Image);
+                & Budget_Input_Consumed (Parallel)'Image);
       end Check_Map_Limit_Parity;
 
       procedure Check_End_Map_Closer_Denial is
          Input              : aliased constant String := "[]";
-         Oracle             : Reader (Input'Access);
-         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle             : Handwritten_Oracle.Reader (Input'Access);
+         Parallel           : Reader (Input'Access);
          Oracle_Error       : Errors.Error_Info;
          Parallel_Error     : Errors.Error_Info;
          Oracle_Info        : Data_Model.Length_Information;
@@ -6641,25 +6558,24 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       begin
          Local_Policy.Limits.Maximum_Input_Units := 1;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          Begin_Map (Oracle, Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+         Begin_Map (Parallel, Parallel_Info, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Map_Entry
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (not Oracle_Available and then not Parallel_Available);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          End_Map (Oracle, Oracle_Error);
-         Event_Readers.End_Map (Parallel, Parallel_Error);
+         End_Map (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          pragma
            Assert
              (Oracle_Error.Code = Errors.Capacity_Exceeded
                 and then Input_Offset (Oracle) = 1
-                and then Event_Readers.Input_Offset (Parallel) = 1
-                and then Event_Readers.Container_Depth (Parallel) = 0
-                and then Event_Readers.Budget_Depth (Parallel) = 0);
+                and then Input_Offset (Parallel) = 1
+                and then Logical_Depth (Parallel) = 0
+                and then Budget_Depth (Parallel) = 0);
       end Check_End_Map_Closer_Denial;
 
       type Map_Syntax_Case is
@@ -6695,8 +6611,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             then Errors.Unexpected_Kind
             else Errors.Syntax_Error);
          Input              : aliased constant String := Source;
-         Oracle             : Reader (Input'Access);
-         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle             : Handwritten_Oracle.Reader (Input'Access);
+         Parallel           : Reader (Input'Access);
          Oracle_Error       : Errors.Error_Info;
          Parallel_Error     : Errors.Error_Info;
          Oracle_Info        : Data_Model.Length_Information;
@@ -6712,43 +6628,39 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          end Compare;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Map (Oracle, Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+         Begin_Map (Parallel, Parallel_Info, Parallel_Error);
          Compare;
          if Oracle_Error.Code = Errors.No_Error then
             Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Map_Entry
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
             Compare;
          end if;
          if Oracle_Error.Code = Errors.No_Error then
             Read_Null (Oracle, Oracle_Error);
-            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Read_Null (Parallel, Parallel_Error);
             Compare;
          end if;
          if Oracle_Error.Code = Errors.No_Error then
             Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
-            Event_Readers.Read_Boolean
-              (Parallel, Parallel_Boolean, Parallel_Error);
+            Read_Boolean (Parallel, Parallel_Boolean, Parallel_Error);
             Compare;
          end if;
          if Oracle_Error.Code = Errors.No_Error then
             Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Map_Entry
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Map_Entry (Parallel, Parallel_Available, Parallel_Error);
             Compare;
          end if;
          pragma
            Assert
              (Parallel_Error.Code = Expected_Code
                 and then Parallel_Error.Input_Offset = Expected_Offset
-                and then Event_Readers.Input_Consumed (Parallel)
-                         = Expected_Offset,
+                and then Budget_Input_Consumed (Parallel) = Expected_Offset,
               Test_Case'Image
                 & Parallel_Error.Code'Image
                 & Parallel_Error.Input_Offset'Image
-                & Event_Readers.Input_Consumed (Parallel)'Image);
+                & Budget_Input_Consumed (Parallel)'Image);
       end Check_Map_Syntax_Parity;
 
       type Map_Exception_Operation is
@@ -7097,8 +7009,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       procedure Check_Sequence_Parity is
          Input                : aliased constant String :=
            "[null, true, [-1, ""x""]]";
-         Oracle               : Reader (Input'Access);
-         Parallel             : Event_Readers.Reader (Input'Access);
+         Oracle               : Handwritten_Oracle.Reader (Input'Access);
+         Parallel             : Reader (Input'Access);
          Oracle_Error         : Errors.Error_Info;
          Parallel_Error       : Errors.Error_Info;
          Oracle_Length        : Data_Model.Length_Information;
@@ -7120,63 +7032,55 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          end Compare;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Compare;
 
          Begin_Sequence (Oracle, Oracle_Length, Oracle_Error);
-         Event_Readers.Begin_Sequence
-           (Parallel, Parallel_Length, Parallel_Error);
+         Begin_Sequence (Parallel, Parallel_Length, Parallel_Error);
          pragma Assert (Oracle_Length = Parallel_Length);
          Compare;
 
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (Oracle_Available = Parallel_Available);
          Compare;
          Read_Null (Oracle, Oracle_Error);
-         Event_Readers.Read_Null (Parallel, Parallel_Error);
+         Read_Null (Parallel, Parallel_Error);
          Compare;
 
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (Oracle_Available = Parallel_Available);
          Compare;
          Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
-         Event_Readers.Read_Boolean
-           (Parallel, Parallel_Boolean, Parallel_Error);
+         Read_Boolean (Parallel, Parallel_Boolean, Parallel_Error);
          pragma Assert (Oracle_Boolean = Parallel_Boolean);
          Compare;
 
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (Oracle_Available = Parallel_Available);
          Compare;
          Begin_Sequence (Oracle, Oracle_Length, Oracle_Error);
-         Event_Readers.Begin_Sequence
-           (Parallel, Parallel_Length, Parallel_Error);
+         Begin_Sequence (Parallel, Parallel_Length, Parallel_Error);
          pragma Assert (Oracle_Length = Parallel_Length);
          Compare;
 
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (Oracle_Available = Parallel_Available);
          Compare;
          Read_Signed (Oracle, Oracle_Signed, Oracle_Error);
-         Event_Readers.Read_Signed (Parallel, Parallel_Signed, Parallel_Error);
+         Read_Signed (Parallel, Parallel_Signed, Parallel_Error);
          pragma Assert (Oracle_Signed = Parallel_Signed);
          Compare;
 
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (Oracle_Available = Parallel_Available);
          Compare;
          Read_Text (Oracle, Oracle_Text, Oracle_Text_Length, Oracle_Error);
-         Event_Readers.Read_Text
+         Read_Text
            (Parallel, Parallel_Text, Parallel_Text_Length, Parallel_Error);
          pragma
            Assert
@@ -7185,33 +7089,31 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Compare;
 
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (Oracle_Available = Parallel_Available);
          Compare;
          End_Sequence (Oracle, Oracle_Error);
-         Event_Readers.End_Sequence (Parallel, Parallel_Error);
+         End_Sequence (Parallel, Parallel_Error);
          Compare;
 
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (Oracle_Available = Parallel_Available);
          Compare;
          End_Sequence (Oracle, Oracle_Error);
-         Event_Readers.End_Sequence (Parallel, Parallel_Error);
+         End_Sequence (Parallel, Parallel_Error);
          Compare;
 
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Compare;
       end Check_Sequence_Parity;
 
       procedure Check_Record_Parity is
          Input                : aliased constant String :=
            "{""a"":null,""b"":[true],""c"":{""d"":""x""},""a"":-1}";
-         Oracle               : Reader (Input'Access);
-         Parallel             : Event_Readers.Reader (Input'Access);
+         Oracle               : Handwritten_Oracle.Reader (Input'Access);
+         Parallel             : Reader (Input'Access);
          Oracle_Error         : Errors.Error_Info;
          Parallel_Error       : Errors.Error_Info;
          Oracle_Info          : Data_Model.Length_Information;
@@ -7259,7 +7161,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                Oracle_Name_Length,
                Oracle_Available,
                Oracle_Error);
-            Event_Readers.Next_Field
+            Next_Field
               (Parallel,
                Parallel_Name,
                Parallel_Name_Length,
@@ -7279,52 +7181,46 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          end Next_Name;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Compare;
 
          Begin_Record (Oracle, "T", Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Record
-           (Parallel, "T", Parallel_Info, Parallel_Error);
+         Begin_Record (Parallel, "T", Parallel_Info, Parallel_Error);
          pragma Assert (Oracle_Info = Parallel_Info);
          Compare;
 
          Next_Name ("a");
          Read_Null (Oracle, Oracle_Error);
-         Event_Readers.Read_Null (Parallel, Parallel_Error);
+         Read_Null (Parallel, Parallel_Error);
          Compare;
 
          Next_Name ("b");
          Begin_Sequence (Oracle, Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Sequence
-           (Parallel, Parallel_Info, Parallel_Error);
+         Begin_Sequence (Parallel, Parallel_Info, Parallel_Error);
          Compare;
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (Oracle_Available = Parallel_Available);
          Compare;
          Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
-         Event_Readers.Read_Boolean
-           (Parallel, Parallel_Boolean, Parallel_Error);
+         Read_Boolean (Parallel, Parallel_Boolean, Parallel_Error);
          pragma Assert (Oracle_Boolean = Parallel_Boolean);
          Compare;
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (Oracle_Available = Parallel_Available);
          Compare;
          End_Sequence (Oracle, Oracle_Error);
-         Event_Readers.End_Sequence (Parallel, Parallel_Error);
+         End_Sequence (Parallel, Parallel_Error);
          Compare;
 
          Next_Name ("c");
          Begin_Record (Oracle, "T", Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Record
-           (Parallel, "T", Parallel_Info, Parallel_Error);
+         Begin_Record (Parallel, "T", Parallel_Info, Parallel_Error);
          Compare;
          Next_Name ("d");
          Read_Text (Oracle, Oracle_Text, Oracle_Text_Length, Oracle_Error);
-         Event_Readers.Read_Text
+         Read_Text
            (Parallel, Parallel_Text, Parallel_Text_Length, Parallel_Error);
          pragma
            Assert
@@ -7338,7 +7234,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Oracle_Name_Length,
             Oracle_Available,
             Oracle_Error);
-         Event_Readers.Next_Field
+         Next_Field
            (Parallel,
             Parallel_Name,
             Parallel_Name_Length,
@@ -7348,12 +7244,12 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Compare_Name;
          Compare;
          End_Record (Oracle, Oracle_Error);
-         Event_Readers.End_Record (Parallel, Parallel_Error);
+         End_Record (Parallel, Parallel_Error);
          Compare;
 
          Next_Name ("a");
          Read_Signed (Oracle, Oracle_Signed, Oracle_Error);
-         Event_Readers.Read_Signed (Parallel, Parallel_Signed, Parallel_Error);
+         Read_Signed (Parallel, Parallel_Signed, Parallel_Error);
          pragma Assert (Oracle_Signed = Parallel_Signed);
          Compare;
 
@@ -7363,7 +7259,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Oracle_Name_Length,
             Oracle_Available,
             Oracle_Error);
-         Event_Readers.Next_Field
+         Next_Field
            (Parallel,
             Parallel_Name,
             Parallel_Name_Length,
@@ -7373,18 +7269,18 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Compare_Name;
          Compare;
          End_Record (Oracle, Oracle_Error);
-         Event_Readers.End_Record (Parallel, Parallel_Error);
+         End_Record (Parallel, Parallel_Error);
          Compare;
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Compare;
       end Check_Record_Parity;
 
       procedure Check_Sequence_Record_Parity is
          Input                : aliased constant String :=
            "[{""a"":null},true]";
-         Oracle               : Reader (Input'Access);
-         Parallel             : Event_Readers.Reader (Input'Access);
+         Oracle               : Handwritten_Oracle.Reader (Input'Access);
+         Parallel             : Reader (Input'Access);
          Oracle_Error         : Errors.Error_Info;
          Parallel_Error       : Errors.Error_Info;
          Oracle_Info          : Data_Model.Length_Information;
@@ -7404,19 +7300,16 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          end Compare;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Sequence (Oracle, Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Sequence
-           (Parallel, Parallel_Info, Parallel_Error);
+         Begin_Sequence (Parallel, Parallel_Info, Parallel_Error);
          Compare;
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (Oracle_Available and then Parallel_Available);
          Compare;
          Begin_Record (Oracle, "T", Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Record
-           (Parallel, "T", Parallel_Info, Parallel_Error);
+         Begin_Record (Parallel, "T", Parallel_Info, Parallel_Error);
          Compare;
          Next_Field
            (Oracle,
@@ -7424,7 +7317,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Oracle_Name_Length,
             Oracle_Available,
             Oracle_Error);
-         Event_Readers.Next_Field
+         Next_Field
            (Parallel,
             Parallel_Name,
             Parallel_Name_Length,
@@ -7438,7 +7331,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                 and then Parallel_Name_Length = 1);
          Compare;
          Read_Null (Oracle, Oracle_Error);
-         Event_Readers.Read_Null (Parallel, Parallel_Error);
+         Read_Null (Parallel, Parallel_Error);
          Compare;
          Next_Field
            (Oracle,
@@ -7446,7 +7339,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Oracle_Name_Length,
             Oracle_Available,
             Oracle_Error);
-         Event_Readers.Next_Field
+         Next_Field
            (Parallel,
             Parallel_Name,
             Parallel_Name_Length,
@@ -7455,27 +7348,24 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          pragma Assert (not Oracle_Available and then not Parallel_Available);
          Compare;
          End_Record (Oracle, Oracle_Error);
-         Event_Readers.End_Record (Parallel, Parallel_Error);
+         End_Record (Parallel, Parallel_Error);
          Compare;
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (Oracle_Available and then Parallel_Available);
          Compare;
          Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
-         Event_Readers.Read_Boolean
-           (Parallel, Parallel_Boolean, Parallel_Error);
+         Read_Boolean (Parallel, Parallel_Boolean, Parallel_Error);
          pragma Assert (Oracle_Boolean and then Parallel_Boolean);
          Compare;
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (not Oracle_Available and then not Parallel_Available);
          Compare;
          End_Sequence (Oracle, Oracle_Error);
-         Event_Readers.End_Sequence (Parallel, Parallel_Error);
+         End_Sequence (Parallel, Parallel_Error);
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Compare;
       end Check_Sequence_Record_Parity;
 
@@ -7485,8 +7375,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Expected_Consumed : Natural)
       is
          Input              : aliased constant String := Source;
-         Oracle             : Reader (Input'Access);
-         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle             : Handwritten_Oracle.Reader (Input'Access);
+         Parallel           : Reader (Input'Access);
          Oracle_Error       : Errors.Error_Info;
          Parallel_Error     : Errors.Error_Info;
          Oracle_Length      : Data_Model.Length_Information;
@@ -7495,38 +7385,34 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Parallel_Available : Boolean;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
 
          Begin_Sequence (Oracle, Oracle_Length, Oracle_Error);
-         Event_Readers.Begin_Sequence
-           (Parallel, Parallel_Length, Parallel_Error);
+         Begin_Sequence (Parallel, Parallel_Length, Parallel_Error);
          pragma Assert (Oracle_Length = Parallel_Length);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
 
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          pragma Assert (Oracle_Available = Parallel_Available);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
 
          Read_Null (Oracle, Oracle_Error);
-         Event_Readers.Read_Null (Parallel, Parallel_Error);
+         Read_Null (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
 
          Oracle_Available := True;
          Parallel_Available := True;
          Next_Element (Oracle, Oracle_Available, Oracle_Error);
-         Event_Readers.Next_Element
-           (Parallel, Parallel_Available, Parallel_Error);
+         Next_Element (Parallel, Parallel_Available, Parallel_Error);
          pragma
            Assert
              (not Oracle_Available
                 and then not Parallel_Available
                 and then Parallel_Error.Code = Errors.Syntax_Error
                 and then Parallel_Error.Input_Offset = Expected_Offset
-                and then Event_Readers.Input_Consumed (Parallel)
-                         = Expected_Consumed);
+                and then Budget_Input_Consumed (Parallel) = Expected_Consumed);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
       end Check_Sequence_Denial_Parity;
 
@@ -7538,8 +7424,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Expected_Consumed : Natural)
       is
          Input              : aliased constant String := Source;
-         Oracle             : Reader (Input'Access);
-         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle             : Handwritten_Oracle.Reader (Input'Access);
+         Parallel           : Reader (Input'Access);
          Oracle_Error       : Errors.Error_Info;
          Parallel_Error     : Errors.Error_Info;
          Oracle_Length      : Data_Model.Length_Information;
@@ -7558,41 +7444,37 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
          Local_Policy.Limits.Maximum_Logical_Values := Maximum_Values;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          Compare;
 
          Begin_Sequence (Oracle, Oracle_Length, Oracle_Error);
-         Event_Readers.Begin_Sequence
-           (Parallel, Parallel_Length, Parallel_Error);
+         Begin_Sequence (Parallel, Parallel_Length, Parallel_Error);
          pragma Assert (Oracle_Length = Parallel_Length);
          Compare;
 
          if Oracle_Error.Code = Errors.No_Error then
             Next_Element (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Element
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Element (Parallel, Parallel_Available, Parallel_Error);
             pragma Assert (Oracle_Available = Parallel_Available);
             Compare;
          end if;
 
          if Oracle_Error.Code = Errors.No_Error and then Oracle_Available then
             Read_Null (Oracle, Oracle_Error);
-            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Read_Null (Parallel, Parallel_Error);
             Compare;
          end if;
 
          if Oracle_Error.Code = Errors.No_Error then
             Next_Element (Oracle, Oracle_Available, Oracle_Error);
-            Event_Readers.Next_Element
-              (Parallel, Parallel_Available, Parallel_Error);
+            Next_Element (Parallel, Parallel_Available, Parallel_Error);
             pragma Assert (Oracle_Available = Parallel_Available);
             Compare;
          end if;
 
          if Oracle_Error.Code = Errors.No_Error and then Oracle_Available then
             Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
-            Event_Readers.Read_Boolean
-              (Parallel, Parallel_Boolean, Parallel_Error);
+            Read_Boolean (Parallel, Parallel_Boolean, Parallel_Error);
             pragma Assert (Oracle_Boolean = Parallel_Boolean);
             Compare;
          end if;
@@ -7601,12 +7483,11 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
            Assert
              (Parallel_Error.Code = Errors.Capacity_Exceeded
                 and then Parallel_Error.Input_Offset = Expected_Offset
-                and then Event_Readers.Input_Consumed (Parallel)
-                         = Expected_Consumed,
+                and then Budget_Input_Consumed (Parallel) = Expected_Consumed,
               Source
                 & Parallel_Error.Code'Image
                 & Parallel_Error.Input_Offset'Image
-                & Event_Readers.Input_Consumed (Parallel)'Image);
+                & Budget_Input_Consumed (Parallel)'Image);
       end Check_Sequence_Limit_Parity;
 
       procedure Check_Record_Limit_Parity
@@ -7620,8 +7501,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       is
          Input                : aliased constant String :=
            "{""a"":null,""b"":true}";
-         Oracle               : Reader (Input'Access);
-         Parallel             : Event_Readers.Reader (Input'Access);
+         Oracle               : Handwritten_Oracle.Reader (Input'Access);
+         Parallel             : Reader (Input'Access);
          Oracle_Error         : Errors.Error_Info;
          Parallel_Error       : Errors.Error_Info;
          Oracle_Info          : Data_Model.Length_Information;
@@ -7646,12 +7527,11 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Local_Policy.Limits.Maximum_Container_Items := Maximum_Items;
          Local_Policy.Limits.Maximum_Text_Length := Maximum_Text;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          Compare;
 
          Begin_Record (Oracle, "T", Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Record
-           (Parallel, "T", Parallel_Info, Parallel_Error);
+         Begin_Record (Parallel, "T", Parallel_Info, Parallel_Error);
          pragma Assert (Oracle_Info = Parallel_Info);
          Compare;
 
@@ -7662,7 +7542,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                Oracle_Name_Length,
                Oracle_Available,
                Oracle_Error);
-            Event_Readers.Next_Field
+            Next_Field
               (Parallel,
                Parallel_Name,
                Parallel_Name_Length,
@@ -7687,7 +7567,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
 
          if Oracle_Error.Code = Errors.No_Error and then Oracle_Available then
             Read_Null (Oracle, Oracle_Error);
-            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Read_Null (Parallel, Parallel_Error);
             Compare;
          end if;
 
@@ -7698,7 +7578,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                Oracle_Name_Length,
                Oracle_Available,
                Oracle_Error);
-            Event_Readers.Next_Field
+            Next_Field
               (Parallel,
                Parallel_Name,
                Parallel_Name_Length,
@@ -7723,8 +7603,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
 
          if Oracle_Error.Code = Errors.No_Error and then Oracle_Available then
             Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
-            Event_Readers.Read_Boolean
-              (Parallel, Parallel_Boolean, Parallel_Error);
+            Read_Boolean (Parallel, Parallel_Boolean, Parallel_Error);
             pragma Assert (Oracle_Boolean = Parallel_Boolean);
             Compare;
          end if;
@@ -7733,19 +7612,18 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
            Assert
              (Parallel_Error.Code = Errors.Capacity_Exceeded
                 and then Parallel_Error.Input_Offset = Expected_Offset
-                and then Event_Readers.Input_Consumed (Parallel)
-                         = Expected_Consumed,
+                and then Budget_Input_Consumed (Parallel) = Expected_Consumed,
               Parallel_Error.Code'Image
                 & Parallel_Error.Input_Offset'Image
-                & Event_Readers.Input_Consumed (Parallel)'Image);
+                & Budget_Input_Consumed (Parallel)'Image);
       end Check_Record_Limit_Parity;
 
       procedure Check_Record_Name_Follower_Limit
         (Source : String; Expected : Errors.Error_Code)
       is
          Input                : aliased constant String := Source;
-         Oracle               : Reader (Input'Access);
-         Parallel             : Event_Readers.Reader (Input'Access);
+         Oracle               : Handwritten_Oracle.Reader (Input'Access);
+         Parallel             : Reader (Input'Access);
          Oracle_Error         : Errors.Error_Info;
          Parallel_Error       : Errors.Error_Info;
          Oracle_Info          : Data_Model.Length_Information;
@@ -7760,10 +7638,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       begin
          Local_Policy.Limits.Maximum_Input_Units := 4;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Initialize (Parallel, Local_Policy);
          Begin_Record (Oracle, "T", Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Record
-           (Parallel, "T", Parallel_Info, Parallel_Error);
+         Begin_Record (Parallel, "T", Parallel_Info, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Next_Field
            (Oracle,
@@ -7771,7 +7648,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Oracle_Name_Length,
             Oracle_Available,
             Oracle_Error);
-         Event_Readers.Next_Field
+         Next_Field
            (Parallel,
             Parallel_Name,
             Parallel_Name_Length,
@@ -7781,7 +7658,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
            Assert
              (Parallel_Error.Code = Expected
                 and then Parallel_Error.Input_Offset = 4
-                and then Event_Readers.Input_Consumed (Parallel) = 4
+                and then Budget_Input_Consumed (Parallel) = 4
                 and then not Parallel_Available
                 and then Parallel_Name_Length = 0
                 and then (for all Value of Parallel_Name => Value = ' '));
@@ -7790,8 +7667,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
 
       procedure Check_Record_Syntax_Parity (Source : String) is
          Input                : aliased constant String := Source;
-         Oracle               : Reader (Input'Access);
-         Parallel             : Event_Readers.Reader (Input'Access);
+         Oracle               : Handwritten_Oracle.Reader (Input'Access);
+         Parallel             : Reader (Input'Access);
          Oracle_Error         : Errors.Error_Info;
          Parallel_Error       : Errors.Error_Info;
          Oracle_Info          : Data_Model.Length_Information;
@@ -7809,11 +7686,10 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          end Compare;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Compare;
          Begin_Record (Oracle, "T", Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Record
-           (Parallel, "T", Parallel_Info, Parallel_Error);
+         Begin_Record (Parallel, "T", Parallel_Info, Parallel_Error);
          Compare;
          if Oracle_Error.Code = Errors.No_Error then
             Next_Field
@@ -7822,7 +7698,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                Oracle_Name_Length,
                Oracle_Available,
                Oracle_Error);
-            Event_Readers.Next_Field
+            Next_Field
               (Parallel,
                Parallel_Name,
                Parallel_Name_Length,
@@ -7832,7 +7708,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          end if;
          if Oracle_Error.Code = Errors.No_Error and then Oracle_Available then
             Read_Null (Oracle, Oracle_Error);
-            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Read_Null (Parallel, Parallel_Error);
             Compare;
          end if;
          if Oracle_Error.Code = Errors.No_Error then
@@ -7842,7 +7718,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                Oracle_Name_Length,
                Oracle_Available,
                Oracle_Error);
-            Event_Readers.Next_Field
+            Next_Field
               (Parallel,
                Parallel_Name,
                Parallel_Name_Length,
@@ -7856,8 +7732,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       procedure Check_Record_Name_Parity (Source : String; Expected : String)
       is
          Input                : aliased constant String := Source;
-         Oracle               : Reader (Input'Access);
-         Parallel             : Event_Readers.Reader (Input'Access);
+         Oracle               : Handwritten_Oracle.Reader (Input'Access);
+         Parallel             : Reader (Input'Access);
          Oracle_Error         : Errors.Error_Info;
          Parallel_Error       : Errors.Error_Info;
          Oracle_Info          : Data_Model.Length_Information;
@@ -7870,10 +7746,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Parallel_Available   : Boolean;
       begin
          Initialize (Oracle, Policy);
-         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Initialize (Parallel, Policy);
          Begin_Record (Oracle, "T", Oracle_Info, Oracle_Error);
-         Event_Readers.Begin_Record
-           (Parallel, "T", Parallel_Info, Parallel_Error);
+         Begin_Record (Parallel, "T", Parallel_Info, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Next_Field
            (Oracle,
@@ -7881,7 +7756,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Oracle_Name_Length,
             Oracle_Available,
             Oracle_Error);
-         Event_Readers.Next_Field
+         Next_Field
            (Parallel,
             Parallel_Name,
             Parallel_Name_Length,
@@ -7913,7 +7788,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                 & Parallel_Name_Length'Image);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Read_Null (Oracle, Oracle_Error);
-         Event_Readers.Read_Null (Parallel, Parallel_Error);
+         Read_Null (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          Next_Field
            (Oracle,
@@ -7921,7 +7796,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
             Oracle_Name_Length,
             Oracle_Available,
             Oracle_Error);
-         Event_Readers.Next_Field
+         Next_Field
            (Parallel,
             Parallel_Name,
             Parallel_Name_Length,
@@ -7930,9 +7805,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          pragma Assert (not Oracle_Available and then not Parallel_Available);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
          End_Record (Oracle, Oracle_Error);
-         Event_Readers.End_Record (Parallel, Parallel_Error);
+         End_Record (Parallel, Parallel_Error);
          Finish_Document (Oracle, Oracle_Error);
-         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Finish_Document (Parallel, Parallel_Error);
          Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
       end Check_Record_Name_Parity;
 
@@ -8887,8 +8762,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
              (Error.Code = Errors.Capacity_Exceeded
                 and then Error.Input_Offset = 1
                 and then not Available
-                and then Item.Depth = 0
-                and then Budgets.Depth (Item.Budget) = 0);
+                and then Event_Readers.Container_Depth (Item.Implementation)
+                         = 0
+                and then Event_Readers.Budget_Depth (Item.Implementation) = 0);
       end;
 
       declare
@@ -8912,8 +8788,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                 and then not Available
                 and then Length = 0
                 and then (for all Value of Name => Value = ' ')
-                and then Item.Depth = 0
-                and then Budgets.Depth (Item.Budget) = 0);
+                and then Event_Readers.Container_Depth (Item.Implementation)
+                         = 0
+                and then Event_Readers.Budget_Depth (Item.Implementation) = 0);
       end;
 
       --  The first structural slice covers empty, mixed, and nested
@@ -10437,8 +10314,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
 
       declare
          Input        : aliased constant String := "{""$bytes"":""""}";
-         Oracle       : Reader (Input'Access);
-         Parallel     : Event_Readers.Reader (Input'Access);
+         Oracle       : Handwritten_Oracle.Reader (Input'Access);
+         Parallel     : Reader (Input'Access);
          Oracle_Error : Errors.Error_Info;
          Event_Error  : Errors.Error_Info;
          Local_Policy : Policies.Decode_Policy := Policy;
@@ -10449,10 +10326,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       begin
          Local_Policy.Limits.Maximum_Text_Length := 0;
          Initialize (Oracle, Local_Policy);
-         Event_Readers.Initialize (Parallel, Local_Policy, Event_Error);
+         Initialize (Parallel, Local_Policy);
          Read_Bytes (Oracle, Oracle_Value, Oracle_Count, Oracle_Error);
-         Event_Readers.Read_Bytes
-           (Parallel, Event_Value, Event_Count, Event_Error);
+         Read_Bytes (Parallel, Event_Value, Event_Count, Event_Error);
          pragma
            Assert
              (Oracle_Error.Code = Errors.No_Error
@@ -11154,6 +11030,185 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
              (Error.Code = Errors.No_Error
                 and then Event_Readers.Is_Complete (Item));
       end;
+
+      --  The public facade restarts every nonfailed prior state while failed
+      --  state remains Reset-only, as the visible contract requires.
+      declare
+         Input : aliased constant String := "null";
+         Item  : Reader (Input'Access);
+         Error : Errors.Error_Info;
+         Value : Boolean := True;
+      begin
+         Initialize (Item, Policy);
+         Initialize (Item, Policy); -- Ready
+         Read_Null (Item, Error);
+         Initialize (Item, Policy); -- Active, root value not yet finished
+         Read_Null (Item, Error);
+         Finish_Document (Item, Error);
+         pragma
+           Assert (Error.Code = Errors.No_Error and then Is_Complete (Item));
+
+         Initialize (Item, Policy); -- Complete
+         Read_Boolean (Item, Value, Error);
+         pragma
+           Assert (Error.Code = Errors.Unexpected_Kind and then not Value);
+         Initialize (Item, Policy); -- Failed remains failed
+         Errors.Reset (Error);
+         Read_Null (Item, Error);
+         pragma Assert (Error.Code = Errors.Invalid_State);
+
+         Reset (Item, Policy);
+         Errors.Reset (Error);
+         Read_Null (Item, Error);
+         Finish_Document (Item, Error);
+         pragma
+           Assert (Error.Code = Errors.No_Error and then Is_Complete (Item));
+
+         Reset (Item, Policy);
+         Read_Null (Item, Error);
+         Finish_Document (Item, Error);
+         pragma
+           Assert (Error.Code = Errors.No_Error and then Is_Complete (Item));
+      end;
+
+      --  Ordinary hidden initialization failure leaves only a failed latch;
+      --  the next error-bearing operation reports Invalid_State. Reset uses
+      --  the same rule and a later clean restart recovers.
+      declare
+         Input : aliased constant String := "null";
+         Item  : Reader (Input'Access);
+         Error : Errors.Error_Info;
+      begin
+         Test_Hooks.Reset_Abort_Count;
+         Test_Hooks.Arm_Kind_Override (Natural'Last);
+         Initialize (Item, Policy);
+         Read_Null (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then Test_Hooks.Abort_Count = 1);
+
+         Reset (Item, Policy);
+         Errors.Reset (Error);
+         Read_Null (Item, Error);
+         Finish_Document (Item, Error);
+         pragma
+           Assert (Error.Code = Errors.No_Error and then Is_Complete (Item));
+
+         Test_Hooks.Arm_Kind_Override (Natural'Last);
+         Reset (Item, Policy);
+         Errors.Reset (Error);
+         Read_Null (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then Test_Hooks.Abort_Count = 2);
+         Reset (Item, Policy);
+         Errors.Reset (Error);
+         Read_Null (Item, Error);
+         Finish_Document (Item, Error);
+         pragma
+           Assert (Error.Code = Errors.No_Error and then Is_Complete (Item));
+      end;
+
+      --  Abnormal initialization and Reset propagate only after one
+      --  event-owned abort, leave the facade failed, and permit recovery.
+      for Reset_Path in Boolean loop
+         declare
+            Input  : aliased constant String := "null";
+            Item   : Reader (Input'Access);
+            Error  : Errors.Error_Info;
+            Raised : Boolean := False;
+         begin
+            if Reset_Path then
+               Initialize (Item, Policy);
+            end if;
+            Test_Hooks.Reset_Abort_Count;
+            Test_Hooks.Arm (Test_Hooks.Before_Step);
+            begin
+               if Reset_Path then
+                  Reset (Item, Policy);
+               else
+                  Initialize (Item, Policy);
+               end if;
+            exception
+               when Constraint_Error =>
+                  Raised := True;
+            end;
+            pragma
+              Assert
+                (Raised
+                   and then Test_Hooks.Abort_Count = 1
+                   and then not Is_Complete (Item));
+            Read_Null (Item, Error);
+            pragma Assert (Error.Code = Errors.Invalid_State);
+            Reset (Item, Policy);
+            Errors.Reset (Error);
+            Read_Null (Item, Error);
+            Finish_Document (Item, Error);
+            pragma
+              Assert
+                (Error.Code = Errors.No_Error and then Is_Complete (Item));
+         end;
+      end loop;
+
+      --  Reinitialization from an active container unwinds the event and
+      --  budget scopes before propagating. Both public entry points retain
+      --  one failed owner and recover only through a clean Reset.
+      for Reset_Path in Boolean loop
+         declare
+            Input     : aliased constant String := "[]";
+            Item      : Reader (Input'Access);
+            Error     : Errors.Error_Info;
+            Info      : Data_Model.Length_Information;
+            Available : Boolean := True;
+            Raised    : Boolean := False;
+         begin
+            Initialize (Item, Policy);
+            Begin_Sequence (Item, Info, Error);
+            pragma
+              Assert
+                (Error.Code = Errors.No_Error
+                   and then Logical_Depth (Item) = 1
+                   and then Budget_Depth (Item) = 1);
+            Test_Hooks.Reset_Abort_Count;
+            Test_Hooks.Arm (Test_Hooks.Before_Step);
+            begin
+               if Reset_Path then
+                  Reset (Item, Policy);
+               else
+                  Initialize (Item, Policy);
+               end if;
+            exception
+               when Constraint_Error =>
+                  Raised := True;
+            end;
+            pragma
+              Assert
+                (Raised
+                   and then Test_Hooks.Abort_Count = 1
+                   and then Logical_Depth (Item) = 0
+                   and then Budget_Depth (Item) = 0
+                   and then Budget_Input_Consumed (Item) = 0
+                   and then Budget_Values_Consumed (Item) = 0
+                   and then Input_Offset (Item) = 0
+                   and then not Is_Complete (Item));
+            Begin_Sequence (Item, Info, Error);
+            pragma Assert (Error.Code = Errors.Invalid_State);
+
+            Reset (Item, Policy);
+            Errors.Reset (Error);
+            Begin_Sequence (Item, Info, Error);
+            Next_Element (Item, Available, Error);
+            End_Sequence (Item, Error);
+            Finish_Document (Item, Error);
+            pragma
+              Assert
+                (Error.Code = Errors.No_Error
+                   and then not Available
+                   and then Is_Complete (Item));
+         end;
+      end loop;
 
       Test_Hooks.Disarm;
    end Assert_JSON_Event_Scalar_Reader;

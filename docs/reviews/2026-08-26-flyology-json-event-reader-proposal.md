@@ -5,6 +5,10 @@ Date: 2026-08-26
 Status: pre-implementation architecture proposal. The committed syntax gate remains authoritative until this
 proposal and its implementation pass separate P0/P1/P2 reviews.
 
+Historical package-name note (2026-08-27): the reviewed private child named below became the private sibling
+`Flyology_Serde.Deserializers.JSON_Event_Readers` at the public-reader cutover. The earlier name remains in this
+record only to describe the reviewed slice.
+
 ## Scope
 
 Add a private `Flyology_Serde.Deserializers.JSON.Event_Readers` implementation of the existing bounded

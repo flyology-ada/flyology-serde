@@ -6,6 +6,11 @@ Status: accepted private root-scalar milestone after architecture, change, and
 fix re-review. This narrows, and does not complete,
 `2026-08-26-flyology-json-event-reader-proposal.md`.
 
+Historical package-name note (2026-08-27): the reviewed private child named
+below became the private sibling
+`Flyology_Serde.Deserializers.JSON_Event_Readers` at the public-reader cutover.
+The earlier name remains in this record only to describe the reviewed slice.
+
 ## Boundary
 
 Add the private child `Flyology_Serde.Deserializers.JSON.Event_Readers`. Its

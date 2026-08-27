@@ -7,6 +7,11 @@ record, map, and optional slices are reviewed; the remaining container scope
 is pending. It extends the accepted private root-scalar milestone and grants
 no public backend-selection authority.
 
+Historical package-name note (2026-08-27): the reviewed private child named
+below became the private sibling
+`Flyology_Serde.Deserializers.JSON_Event_Readers` at the public-reader cutover.
+The earlier name remains in this record only to describe the reviewed slice.
+
 ## Scope and authority
 
 Extend `Flyology_Serde.Deserializers.JSON.Event_Readers` from root scalars to

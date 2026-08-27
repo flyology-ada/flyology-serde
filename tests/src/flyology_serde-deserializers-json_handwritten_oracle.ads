@@ -3,13 +3,14 @@ with Flyology_Serde.Budgets;
 with Flyology_Serde.Data_Model;
 with Flyology_Serde.Deserialization;
 with Flyology_Serde.Errors;
-private with Flyology_Serde.Deserializers.JSON_Event_Readers;
+private with Flyology_Serde.JSON_Event_Drivers;
 with Flyology_Serde.Policies;
 with Interfaces;
 
---  Bounded pull reader for the lossless JSON mapping emitted by the JSON writer.
+--  Test-only handwritten semantic scanner retained during the event-reader
+--  cutover. It shares the low-level JSON event driver and is not installed.
 
-package Flyology_Serde.Deserializers.JSON is
+private package Flyology_Serde.Deserializers.JSON_Handwritten_Oracle is
    package Budgets renames Flyology_Serde.Budgets;
    package Data_Model renames Flyology_Serde.Data_Model;
    package Errors renames Flyology_Serde.Errors;
@@ -44,6 +45,10 @@ package Flyology_Serde.Deserializers.JSON is
 
    function Is_Complete (Self : Reader) return Boolean;
    function Input_Offset (Self : Reader) return Natural;
+   function Input_Consumed (Self : Reader) return Natural;
+   function Values_Consumed (Self : Reader) return Natural;
+   function Container_Depth (Self : Reader) return Natural;
+   function Budget_Depth (Self : Reader) return Natural;
 
    overriding
    function Capabilities (Self : Reader) return Data_Model.Format_Capabilities;
@@ -181,9 +186,47 @@ package Flyology_Serde.Deserializers.JSON is
      (Self : in out Reader; Error : in out Errors.Error_Info);
 
 private
+   type Container_Kind is
+     (Optional_Container,
+      Sequence_Container,
+      Map_Container,
+      Record_Container,
+      Variant_Container);
+
+   type Child_State is (No_Child, Child_Ready, Child_In_Progress);
+   type Map_State is
+     (Map_Needs_Entry,
+      Map_Key_Ready,
+      Map_Key_In_Progress,
+      Map_Value_Ready,
+      Map_Value_In_Progress);
+
+   type Container_Frame is record
+      Kind       : Container_Kind := Sequence_Container;
+      Child      : Child_State := No_Child;
+      Map_Phase  : Map_State := Map_Needs_Entry;
+      First_Item : Boolean := True;
+      Exhausted  : Boolean := False;
+   end record;
+
+   type Container_Stack is
+     array (Positive range 1 .. Policies.Maximum_Supported_Nesting)
+     of Container_Frame;
+
+   type Root_State is (Root_Ready, Root_In_Progress, Root_Complete);
+
    type Reader (Source : not null access constant String) is limited
      new Deserialization.Deserializer
    with record
-      Implementation : JSON_Event_Readers.Reader (Source);
+      Policy            : Policies.Decode_Policy;
+      Budget            : Budgets.Decode_Budget;
+      Stack             : Container_Stack := [others => <>];
+      Syntax            : JSON_Event_Drivers.Driver (Source);
+      Depth             : Natural := 0;
+      Cursor            : Natural := 0;
+      Root              : Root_State := Root_Ready;
+      Initialized       : Boolean := False;
+      Failed            : Boolean := False;
+      Document_Complete : Boolean := False;
    end record;
-end Flyology_Serde.Deserializers.JSON;
+end Flyology_Serde.Deserializers.JSON_Handwritten_Oracle;

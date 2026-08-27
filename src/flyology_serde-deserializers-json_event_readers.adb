@@ -4,7 +4,7 @@ with Flyology_Serde.JSON_Event_Driver_Test_Hooks;
 with Flyology_Serde.JSON_Preflights;
 with Flyology_Serde.UTF_8_Validation;
 
-package body Flyology_Serde.Deserializers.JSON.Event_Readers is
+package body Flyology_Serde.Deserializers.JSON_Event_Readers is
    package Drivers renames Flyology_Serde.JSON_Event_Drivers;
    package Preflights renames Flyology_Serde.JSON_Preflights;
    package Test_Hooks renames Flyology_Serde.JSON_Event_Driver_Test_Hooks;
@@ -541,6 +541,21 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       Drivers.Abort_Document (Self.Syntax);
       Apply_New_Operation (Self, Policy, Reset => True, Error => Error);
    end Reset;
+
+   procedure Reinitialize
+     (Self         : in out Reader;
+      Policy       : Policies.Decode_Policy;
+      Allow_Failed : Boolean;
+      Error        : in out Errors.Error_Info) is
+   begin
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Self.Operation = Failed and then not Allow_Failed then
+         Reject (Self, Errors.Invalid_State, Error);
+         return;
+      end if;
+      Apply_New_Operation (Self, Policy, Reset => False, Error => Error);
+   end Reinitialize;
 
    procedure Commit_Leading_Whitespace
      (Self : in out Reader; Error : in out Errors.Error_Info)
@@ -3906,4 +3921,4 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          Poison_After_Exception (Self);
          raise;
    end End_Variant;
-end Flyology_Serde.Deserializers.JSON.Event_Readers;
+end Flyology_Serde.Deserializers.JSON_Event_Readers;
