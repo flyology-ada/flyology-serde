@@ -13,6 +13,7 @@ project Scaffold_Tests is
       "renderer_tests.adb",
       "build_sha_256_tests.adb",
       "build_budgets_tests.adb",
+      "atomic_ledgers_tests.adb",
       "build_attestations_tests.adb",
       "flyology_serde_generator-build_attestations-abort_test.adb",
       "flyology_serde_generator-build_attestations-source_lists-test.adb",

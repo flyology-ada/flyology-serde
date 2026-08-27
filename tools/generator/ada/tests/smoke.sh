@@ -7,6 +7,7 @@ scaffold_tests="$generator_root/tests/bin/scaffold_tests"
 renderer_tests="$generator_root/tests/bin/renderer_tests"
 build_sha_256_tests="$generator_root/tests/bin/build_sha_256_tests"
 build_budgets_tests="$generator_root/tests/bin/build_budgets_tests"
+atomic_ledgers_tests="$generator_root/tests/bin/atomic_ledgers_tests"
 build_attestations_tests="$generator_root/tests/bin/build_attestations_tests"
 build_attestations_abort_test="$generator_root/tests/bin/flyology_serde_generator-build_attestations-abort_test"
 source_lists_test="$generator_root/tests/bin/flyology_serde_generator-build_attestations-source_lists-test"
@@ -62,6 +63,7 @@ done
 test "$("$generator" --version)" = "serde-generator-v2"
 "$build_sha_256_tests"
 "$build_budgets_tests"
+"$atomic_ledgers_tests"
 "$build_attestations_tests"
 "$build_attestations_abort_test"
 "$source_lists_test" "$generator_root/provenance-files-v2.txt"
@@ -84,6 +86,19 @@ test "$("$generator" --version)" = "serde-generator-v2"
 "$build_process_setup_failure_test"
 "$build_process_close_failure_test"
 "$build_process_abi_tests" "$build_process_signal_child"
+if alr -C "$generator_root" exec -- gprbuild -f -p -u -P \
+  "$generator_root/tests/atomic_ledgers_visibility.gpr" atomic_ledgers_visibility_probe.adb \
+  >"$test_root/atomic-ledgers-visibility.stdout" \
+  2>"$test_root/atomic-ledgers-visibility.stderr"
+then
+   echo "non-descendant unit unexpectedly imported the private atomic-ledger child" >&2
+   exit 1
+fi
+if ! grep -Eqi 'private child|private unit' "$test_root/atomic-ledgers-visibility.stderr"; then
+   echo "atomic-ledger visibility probe failed for an unrelated reason" >&2
+   cat "$test_root/atomic-ledgers-visibility.stderr" >&2
+   exit 1
+fi
 for hook_optimization in -O0 -O2; do
    alr -C "$generator_root" exec -- gprbuild -f -p -u -P "$hook_elision_project" \
      -XHOOK_OPT="$hook_optimization" \
