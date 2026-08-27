@@ -86,12 +86,13 @@ later public operation. Optional-some uses the same local rule, while optional-
 none alone binds its tag terminal to the published optional frame for
 `End_Optional`.
 
-The private driver terminal selector is extended with `Name_Terminal` solely
-for this synchronous name/colon path. Its legal uncharged follower is strict
-whitespace or colon; the existing string/number/literal selectors retain their
-own closed delimiter sets. The selector and follower classification remain
-private Serde implementation details and never enter Flyology JSON or the
-format-neutral traversal API.
+The installed Flyology JSON grammar emits `Name_End` while consuming the
+closing quote, so the private driver has no `Name_Terminal` selector. The
+record reader validates strict whitespace and the colon directly after the
+complete name transcript, before either can be admitted. The existing
+string/number/literal selectors retain their closed value-delimiter set. This
+follower classification remains a private Serde implementation detail and
+never enters Flyology JSON or the format-neutral traversal API.
 
 Resolution is context-sensitive. Uncharged source classification comes first.
 A delimiter is charged/replayed only when it is whitespace or the valid

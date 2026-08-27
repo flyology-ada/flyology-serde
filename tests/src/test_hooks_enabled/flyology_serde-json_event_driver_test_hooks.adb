@@ -1,16 +1,23 @@
 package body Flyology_Serde.JSON_Event_Driver_Test_Hooks is
-   Armed                  : Boolean := False;
-   Armed_Point            : Failure_Point := Before_Step;
-   Boolean_Override_Armed : Boolean := False;
-   Boolean_Override_Value : Boolean := False;
-   Source_Override_Armed  : Boolean := False;
-   Source_Override_Skip   : Natural := 0;
-   Source_Override_Value  : Natural := 0;
-   Kind_Override_Armed    : Boolean := False;
-   Kind_Override_Value    : Natural := 0;
-   Payload_Override_Armed : Boolean := False;
-   Payload_Override_Skip  : Natural := 0;
-   Aborts                 : Natural := 0;
+   Armed                   : Boolean := False;
+   Armed_Point             : Failure_Point := Before_Step;
+   Boolean_Override_Armed  : Boolean := False;
+   Boolean_Override_Value  : Boolean := False;
+   Source_Override_Armed   : Boolean := False;
+   Source_Override_Skip    : Natural := 0;
+   Source_Override_Value   : Natural := 0;
+   Kind_Override_Armed     : Boolean := False;
+   Kind_Override_Value     : Natural := 0;
+   Payload_Override_Armed  : Boolean := False;
+   Payload_Override_Skip   : Natural := 0;
+   Fragment_Override_Armed : Boolean := False;
+   Fragment_Override_Skip  : Natural := 0;
+   Fragment_Raw_Value      : Ada.Streams.Stream_Element := 0;
+   Fragment_Decoded_Value  : Ada.Streams.Stream_Element := 0;
+   Form_Override_Armed     : Boolean := False;
+   Form_Override_Skip      : Natural := 0;
+   Form_Override_Value     : Natural := 0;
+   Aborts                  : Natural := 0;
 
    procedure Disarm is
    begin
@@ -25,6 +32,13 @@ package body Flyology_Serde.JSON_Event_Driver_Test_Hooks is
       Kind_Override_Value := 0;
       Payload_Override_Armed := False;
       Payload_Override_Skip := 0;
+      Fragment_Override_Armed := False;
+      Fragment_Override_Skip := 0;
+      Fragment_Raw_Value := 0;
+      Fragment_Decoded_Value := 0;
+      Form_Override_Armed := False;
+      Form_Override_Skip := 0;
+      Form_Override_Value := 0;
    end Disarm;
 
    procedure Arm (Point : Failure_Point) is
@@ -116,6 +130,50 @@ package body Flyology_Serde.JSON_Event_Driver_Test_Hooks is
          Payload_Override_Armed := False;
       end if;
    end Apply_Payload_Contamination;
+
+   procedure Arm_Fragment_Byte_Override
+     (Summaries_To_Skip : Natural;
+      Raw_Byte          : Ada.Streams.Stream_Element;
+      Decoded_Byte      : Ada.Streams.Stream_Element) is
+   begin
+      Disarm;
+      Fragment_Override_Skip := Summaries_To_Skip;
+      Fragment_Raw_Value := Raw_Byte;
+      Fragment_Decoded_Value := Decoded_Byte;
+      Fragment_Override_Armed := True;
+   end Arm_Fragment_Byte_Override;
+
+   procedure Apply_Fragment_Byte_Override
+     (Raw_Byte : in out Ada.Streams.Stream_Element;
+      Decoded  : in out Ada.Streams.Stream_Element_Array) is
+   begin
+      if Fragment_Override_Armed and then Fragment_Override_Skip > 0 then
+         Fragment_Override_Skip := Fragment_Override_Skip - 1;
+      elsif Fragment_Override_Armed then
+         Raw_Byte := Fragment_Raw_Value;
+         Decoded (Decoded'First) := Fragment_Decoded_Value;
+         Fragment_Override_Armed := False;
+      end if;
+   end Apply_Fragment_Byte_Override;
+
+   procedure Arm_Decoded_Form_Override
+     (Summaries_To_Skip : Natural; Value : Natural) is
+   begin
+      Disarm;
+      Form_Override_Skip := Summaries_To_Skip;
+      Form_Override_Value := Value;
+      Form_Override_Armed := True;
+   end Arm_Decoded_Form_Override;
+
+   procedure Apply_Decoded_Form_Override (Value : in out Natural) is
+   begin
+      if Form_Override_Armed and then Form_Override_Skip > 0 then
+         Form_Override_Skip := Form_Override_Skip - 1;
+      elsif Form_Override_Armed then
+         Value := Form_Override_Value;
+         Form_Override_Armed := False;
+      end if;
+   end Apply_Decoded_Form_Override;
 
    procedure Reset_Abort_Count is
    begin

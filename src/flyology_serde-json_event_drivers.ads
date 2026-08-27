@@ -45,15 +45,20 @@ private package Flyology_Serde.JSON_Event_Drivers is
      Ada.Streams.Stream_Element_Array
        (Ada.Streams.Stream_Element_Offset range 1 .. 4);
 
+   type Decoded_Form is (No_Decoded, Raw_Decoded, Inline_Decoded);
+
    type Event_Summary is record
-      Kind            : Event_Kind := Document_Begin;
-      Source_Offset   : Natural := 0;
-      Source_Length   : Natural := 0;
-      Has_Raw_Byte    : Boolean := False;
-      Raw_Byte        : Ada.Streams.Stream_Element := 0;
-      Decoded_Length  : Scalar_Length := 0;
-      Decoded         : Scalar_Storage := [others => 0];
-      Boolean_Payload : Boolean := False;
+      Kind                  : Event_Kind := Document_Begin;
+      Source_Offset         : Natural := 0;
+      Source_Length         : Natural := 0;
+      Has_Raw_Byte          : Boolean := False;
+      Raw_Byte              : Ada.Streams.Stream_Element := 0;
+      Decoded_Form          : JSON_Event_Drivers.Decoded_Form := No_Decoded;
+      Decoded_Offset        : Natural := 0;
+      Decoded_Source_Length : Natural := 0;
+      Decoded_Length        : Scalar_Length := 0;
+      Decoded               : Scalar_Storage := [others => 0];
+      Boolean_Payload       : Boolean := False;
    end record;
 
    Maximum_Event_Summaries : constant Natural := Zero_Progress_Limit + 1;
@@ -152,9 +157,12 @@ private package Flyology_Serde.JSON_Event_Drivers is
       Summary : out Event_Summary;
       Error   : in out Errors.Error_Info);
 
-   --  Offer the exact current strict delimiter without charging it and
-   --  require the selected scalar terminal event with zero consumption. The
-   --  unchanged byte remains retained and uncharged for Step_Source replay.
+   --  Offer the exact current strict value delimiter without charging it and
+   --  require the selected literal or string terminal event with zero
+   --  consumption. The delimiter is JSON whitespace, comma, or a container
+   --  closer. The unchanged byte remains retained and uncharged for
+   --  Step_Source replay. Flyology JSON emits Name_End while consuming the
+   --  closing quote, so names do not use this operation.
    procedure Observe_Token_End
      (Self     : in out Driver;
       Expected : Token_Terminal;

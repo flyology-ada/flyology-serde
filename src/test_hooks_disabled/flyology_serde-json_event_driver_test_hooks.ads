@@ -82,6 +82,36 @@ private package Flyology_Serde.JSON_Event_Driver_Test_Hooks is
      Convention    => Ada,
      External_Name => "flyology_serde_disabled_json_driver_payload_apply";
 
+   procedure Arm_Fragment_Byte_Override
+     (Summaries_To_Skip : Natural;
+      Raw_Byte          : Ada.Streams.Stream_Element;
+      Decoded_Byte      : Ada.Streams.Stream_Element)
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_fragment_arm";
+
+   procedure Apply_Fragment_Byte_Override
+     (Raw_Byte : in out Ada.Streams.Stream_Element;
+      Decoded  : in out Ada.Streams.Stream_Element_Array)
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_fragment_apply";
+
+   procedure Arm_Decoded_Form_Override
+     (Summaries_To_Skip : Natural; Value : Natural)
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_form_arm";
+
+   procedure Apply_Decoded_Form_Override (Value : in out Natural)
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_form_apply";
+
    procedure Reset_Abort_Count
    with
      Import,

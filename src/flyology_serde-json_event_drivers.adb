@@ -278,6 +278,22 @@ package body Flyology_Serde.JSON_Event_Drivers is
       Source     : constant Parsing.Source_Range := Parsing.Source (Item);
       Raw        : Parsing.Chunk_Range;
       Raw_Status : Parsing.Slice_Status;
+
+      procedure Copy_Decoded_Source is
+         Decoded_Source : constant Parsing.Source_Range :=
+           Parsing.Decoded_Source (Item);
+      begin
+         if Decoded_Source.First > Parsing.Byte_Offset (Natural'Last)
+           or else Decoded_Source.Octet_Length
+                   > Parsing.Byte_Offset (Natural'Last)
+         then
+            Fail (Self, Errors.Capacity_Exceeded, Error, Self.Offset);
+         else
+            Summary.Decoded_Offset := Natural (Decoded_Source.First);
+            Summary.Decoded_Source_Length :=
+              Natural (Decoded_Source.Octet_Length);
+         end if;
+      end Copy_Decoded_Source;
    begin
       Summary := (others => <>);
       if Source.First > Parsing.Byte_Offset (Natural'Last)
@@ -323,17 +339,27 @@ package body Flyology_Serde.JSON_Event_Drivers is
 
       case Parsing.Decoded_Kind (Item) is
          when Parsing.No_Decoded_Fragment   =>
-            null;
+            Summary.Decoded_Form := No_Decoded;
 
          when Parsing.Decoded_Is_Raw_Range  =>
             if not Summary.Has_Raw_Byte then
                Fail (Self, Errors.Invalid_State, Error, Self.Offset);
                return;
             end if;
+            Summary.Decoded_Form := Raw_Decoded;
+            Copy_Decoded_Source;
+            if Error.Code /= Errors.No_Error then
+               return;
+            end if;
             Summary.Decoded_Length := 1;
             Summary.Decoded (Summary.Decoded'First) := Summary.Raw_Byte;
 
          when Parsing.Decoded_Inline_Scalar =>
+            Summary.Decoded_Form := Inline_Decoded;
+            Copy_Decoded_Source;
+            if Error.Code /= Errors.No_Error then
+               return;
+            end if;
             declare
                Scalar : constant Parsing.Inline_Scalar :=
                  Parsing.Decoded_Scalar (Item);
@@ -350,6 +376,19 @@ package body Flyology_Serde.JSON_Event_Drivers is
             end;
       end case;
 
+      if Test_Hooks.Enabled then
+         declare
+            Form_Position : Natural := Decoded_Form'Pos (Summary.Decoded_Form);
+         begin
+            Test_Hooks.Apply_Decoded_Form_Override (Form_Position);
+            if Form_Position > Decoded_Form'Pos (Decoded_Form'Last) then
+               Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+               return;
+            end if;
+            Summary.Decoded_Form := Decoded_Form'Val (Form_Position);
+         end;
+      end if;
+
       if Parsing.Kind (Item) = Parsing.Boolean_Value then
          Summary.Boolean_Payload := Parsing.Boolean_Data (Item);
          if Test_Hooks.Enabled then
@@ -363,6 +402,8 @@ package body Flyology_Serde.JSON_Event_Drivers is
             Summary.Decoded_Length,
             Summary.Decoded,
             Summary.Boolean_Payload);
+         Test_Hooks.Apply_Fragment_Byte_Override
+           (Summary.Raw_Byte, Summary.Decoded);
       end if;
    end Copy_Summary;
 

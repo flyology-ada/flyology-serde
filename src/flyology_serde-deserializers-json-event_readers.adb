@@ -1,6 +1,7 @@
 with Flyology_JSON.Numbers.Signed_Integers;
 with Flyology_JSON.Numbers.Unsigned_Integers;
 with Flyology_Serde.JSON_Preflights;
+with Flyology_Serde.UTF_8_Validation;
 
 package body Flyology_Serde.Deserializers.JSON.Event_Readers is
    package Drivers renames Flyology_Serde.JSON_Event_Drivers;
@@ -13,6 +14,7 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
 
    use type Ada.Streams.Stream_Element_Offset;
    use type Ada.Streams.Stream_Element;
+   use type Drivers.Decoded_Form;
    use type Drivers.Driver_Outcome;
    use type Drivers.Event_Kind;
    use type Errors.Error_Code;
@@ -46,6 +48,9 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
    function Has_Empty_Payload (Item : Drivers.Event_Summary) return Boolean
    is (not Item.Has_Raw_Byte
        and then Item.Raw_Byte = 0
+       and then Item.Decoded_Form = Drivers.No_Decoded
+       and then Item.Decoded_Offset = 0
+       and then Item.Decoded_Source_Length = 0
        and then Item.Decoded_Length = 0
        and then (for all Value of Item.Decoded => Value = 0)
        and then not Item.Boolean_Payload);
@@ -72,10 +77,20 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
             raise Program_Error;
          end if;
          Self.Stack (Self.Depth).Child := No_Child;
-         Self.Owner :=
-           (if Terminal = No_Pending_Terminal
-            then No_Terminal_Owner
-            else Sequence_Child_Terminal);
+         if Terminal = No_Pending_Terminal then
+            Self.Owner := No_Terminal_Owner;
+         else
+            case Self.Stack (Self.Depth).Kind is
+               when Sequence_Container =>
+                  Self.Owner := Sequence_Child_Terminal;
+
+               when Record_Container   =>
+                  Self.Owner := Record_Child_Terminal;
+
+               when others             =>
+                  raise Program_Error;
+            end case;
+         end if;
          Self.Owner_Depth := Self.Depth;
       end if;
       Self.Terminal := Terminal;
@@ -294,7 +309,8 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          if Self.Root /= Root_Ready then
             Reject (Self, Errors.Invalid_State, Error);
          end if;
-      elsif Self.Stack (Self.Depth).Kind /= Sequence_Container
+      elsif Self.Stack (Self.Depth).Kind
+            not in Sequence_Container | Record_Container
         or else Self.Stack (Self.Depth).Child /= Child_Ready
       then
          Reject (Self, Errors.Invalid_State, Error);
@@ -463,6 +479,9 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
           and then Item.Has_Raw_Byte
           and then Item.Raw_Byte
                    = Ada.Streams.Stream_Element (Character'Pos (Expected_Byte))
+          and then Item.Decoded_Form = Drivers.No_Decoded
+          and then Item.Decoded_Offset = 0
+          and then Item.Decoded_Source_Length = 0
           and then Item.Decoded_Length = 0
           and then (for all Value of Item.Decoded => Value = 0)
           and then not Item.Boolean_Payload);
@@ -520,6 +539,25 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
             Exhausted  => False);
       end if;
    end Push_Sequence;
+
+   procedure Push_Record
+     (Self : in out Reader; Error : in out Errors.Error_Info) is
+   begin
+      Budgets.Enter_Container (Self.Budget, Unknown_Length, Error);
+      if Error.Code /= Errors.No_Error then
+         Latch (Self, Error);
+      elsif Self.Depth = Policies.Maximum_Supported_Nesting then
+         Reject (Self, Errors.Depth_Exceeded, Error);
+      else
+         Self.Depth := Self.Depth + 1;
+         Self.Stack (Self.Depth) :=
+           (Kind       => Record_Container,
+            Child      => No_Child,
+            Map_Phase  => Map_Needs_Entry,
+            First_Item => True,
+            Exhausted  => False);
+      end if;
+   end Push_Record;
 
    procedure Collect_Literal
      (Self            : in out Reader;
@@ -1704,6 +1742,436 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       Reject_Unsupported (Self, Error);
    end End_Map;
 
+   procedure Collect_Record_Name
+     (Self      : in out Reader;
+      Candidate : out String;
+      Length    : out Natural;
+      Error     : in out Errors.Error_Info)
+   is
+      Summary     : Preflights.String_Summary;
+      Events      :
+        Drivers.Event_Summary_Array (1 .. Drivers.Maximum_Event_Summaries);
+      Count       : Natural;
+      Phase       : Natural range 0 .. 2 := 0;
+      Copied      : Natural := 0;
+      Token_First : constant Natural := Self.Cursor;
+      Token_Last  : Natural := 0;
+      Next_Source : Natural := 0;
+
+      function Valid_Quote
+        (Item : Drivers.Event_Summary; Kind : Drivers.Event_Kind)
+         return Boolean
+      is (Item.Kind = Kind
+          and then Item.Source_Length = 1
+          and then Item.Has_Raw_Byte
+          and then Item.Raw_Byte
+                   = Ada.Streams.Stream_Element (Character'Pos ('"'))
+          and then Item.Decoded_Form = Drivers.No_Decoded
+          and then Item.Decoded_Offset = 0
+          and then Item.Decoded_Source_Length = 0
+          and then Item.Decoded_Length = 0
+          and then (for all Value of Item.Decoded => Value = 0)
+          and then not Item.Boolean_Payload);
+
+      function Hex_Value (Item : Character) return Natural is
+      begin
+         case Item is
+            when '0' .. '9' =>
+               return Character'Pos (Item) - Character'Pos ('0');
+
+            when 'A' .. 'F' =>
+               return Character'Pos (Item) - Character'Pos ('A') + 10;
+
+            when 'a' .. 'f' =>
+               return Character'Pos (Item) - Character'Pos ('a') + 10;
+
+            when others     =>
+               return 16;
+         end case;
+      end Hex_Value;
+
+      function Inline_Matches_Source
+        (Item : Drivers.Event_Summary) return Boolean
+      is
+         Expected        : Drivers.Scalar_Storage := [others => 0];
+         Expected_Length : Natural := 0;
+         Code            : Natural := 0;
+         Low             : Natural := 0;
+         Source_First    : Natural;
+         Source_Last     : Natural;
+
+         function Source_Byte (Offset : Natural) return Character
+         is (Self.Source (Self.Source'First + Source_First + Offset));
+
+         function Read_Hex
+           (Offset : Natural; Value : out Natural) return Boolean
+         is
+            Digit : Natural;
+         begin
+            Value := 0;
+            for Index in Offset .. Offset + 3 loop
+               Digit := Hex_Value (Source_Byte (Index));
+               if Digit = 16 then
+                  return False;
+               end if;
+               Value := Value * 16 + Digit;
+            end loop;
+            return True;
+         end Read_Hex;
+
+         procedure Put (Value : Natural) is
+         begin
+            Expected_Length := Expected_Length + 1;
+            Expected
+              (Expected'First
+               + Ada.Streams.Stream_Element_Offset (Expected_Length - 1)) :=
+              Ada.Streams.Stream_Element (Value);
+         end Put;
+
+         procedure Encode (Point : Natural) is
+         begin
+            if Point <= 16#7F# then
+               Put (Point);
+            elsif Point <= 16#7FF# then
+               Put (16#C0# + Point / 64);
+               Put (16#80# + Point mod 64);
+            elsif Point <= 16#FFFF# then
+               Put (16#E0# + Point / 4_096);
+               Put (16#80# + Point / 64 mod 64);
+               Put (16#80# + Point mod 64);
+            else
+               Put (16#F0# + Point / 262_144);
+               Put (16#80# + Point / 4_096 mod 64);
+               Put (16#80# + Point / 64 mod 64);
+               Put (16#80# + Point mod 64);
+            end if;
+         end Encode;
+      begin
+         if Item.Decoded_Source_Length = 0
+           or else Item.Decoded_Offset <= Token_First
+           or else Item.Decoded_Offset >= Token_Last - 1
+           or else Item.Decoded_Source_Length
+                   > Token_Last - 1 - Item.Decoded_Offset
+           or else Item.Source_Offset > Natural'Last - Item.Source_Length
+           or else Item.Decoded_Offset
+                   > Natural'Last - Item.Decoded_Source_Length
+           or else Item.Decoded_Offset + Item.Decoded_Source_Length
+                   /= Item.Source_Offset + Item.Source_Length
+         then
+            return False;
+         end if;
+         Source_First := Item.Decoded_Offset;
+         Source_Last := Source_First + Item.Decoded_Source_Length - 1;
+
+         if Source_Byte (0) /= '\' then
+            if (case Character'Pos (Source_Byte (0)) is
+                  when 16#C2# .. 16#DF# => Item.Decoded_Source_Length /= 2,
+                  when 16#E0# .. 16#EF# => Item.Decoded_Source_Length /= 3,
+                  when 16#F0# .. 16#F4# => Item.Decoded_Source_Length /= 4,
+                  when others           => True)
+            then
+               return False;
+            end if;
+            declare
+               Valid   : Boolean;
+               Invalid : Natural;
+            begin
+               Flyology_Serde.UTF_8_Validation.Locate
+                 (Self.Source
+                    (Self.Source'First
+                     + Source_First
+                     .. Self.Source'First + Source_Last),
+                  Valid,
+                  Invalid);
+               if not Valid then
+                  return False;
+               end if;
+            end;
+            Expected_Length := Item.Decoded_Source_Length;
+            for Offset in 0 .. Expected_Length - 1 loop
+               Expected
+                 (Expected'First
+                  + Ada.Streams.Stream_Element_Offset (Offset)) :=
+                 Ada.Streams.Stream_Element
+                   (Character'Pos (Source_Byte (Offset)));
+            end loop;
+         elsif Item.Decoded_Source_Length = 2 then
+            case Source_Byte (1) is
+               when '"' | '\' | '/' =>
+                  Code := Character'Pos (Source_Byte (1));
+
+               when 'b'             =>
+                  Code := 8;
+
+               when 'f'             =>
+                  Code := 12;
+
+               when 'n'             =>
+                  Code := 10;
+
+               when 'r'             =>
+                  Code := 13;
+
+               when 't'             =>
+                  Code := 9;
+
+               when others          =>
+                  return False;
+            end case;
+            Encode (Code);
+         elsif Item.Decoded_Source_Length = 6
+           and then Source_Byte (1) = 'u'
+           and then Read_Hex (2, Code)
+           and then Code not in 16#D800# .. 16#DFFF#
+         then
+            Encode (Code);
+         elsif Item.Decoded_Source_Length = 12
+           and then Source_Byte (1) = 'u'
+           and then Source_Byte (6) = '\'
+           and then Source_Byte (7) = 'u'
+           and then Read_Hex (2, Code)
+           and then Read_Hex (8, Low)
+           and then Code in 16#D800# .. 16#DBFF#
+           and then Low in 16#DC00# .. 16#DFFF#
+         then
+            Encode (16#1_0000# + (Code - 16#D800#) * 1_024 + Low - 16#DC00#);
+         else
+            return False;
+         end if;
+
+         return
+           Expected_Length = Item.Decoded_Length
+           and then (for all Offset in 0 .. Expected_Length - 1 =>
+                       Expected
+                         (Expected'First
+                          + Ada.Streams.Stream_Element_Offset (Offset))
+                       = Item.Decoded
+                           (Item.Decoded'First
+                            + Ada.Streams.Stream_Element_Offset (Offset)));
+      end Inline_Matches_Source;
+
+      function Valid_Name_Fragment
+        (Item : Drivers.Event_Summary) return Boolean
+      is
+         Source_Last : Natural;
+      begin
+         if Item.Kind /= Drivers.Name_Fragment
+           or else Item.Boolean_Payload
+           or else Item.Source_Length = 0
+           or else Item.Source_Offset >= Self.Source'Length
+           or else Item.Source_Length > Self.Source'Length - Item.Source_Offset
+           or else not Item.Has_Raw_Byte
+         then
+            return False;
+         end if;
+
+         Source_Last := Item.Source_Offset + Item.Source_Length - 1;
+         if Item.Raw_Byte
+           /= Ada.Streams.Stream_Element
+                (Character'Pos (Self.Source (Self.Source'First + Source_Last)))
+         then
+            return False;
+         end if;
+
+         case Item.Decoded_Form is
+            when Drivers.No_Decoded     =>
+               if Item.Decoded_Offset /= 0
+                 or else Item.Decoded_Source_Length /= 0
+                 or else Item.Decoded_Length /= 0
+                 or else Item.Source_Length /= 1
+               then
+                  return False;
+               end if;
+
+            when Drivers.Raw_Decoded    =>
+               if Item.Source_Length /= 1
+                 or else Item.Decoded_Offset /= Item.Source_Offset
+                 or else Item.Decoded_Source_Length /= Item.Source_Length
+                 or else Item.Decoded_Length /= 1
+                 or else Item.Decoded (Item.Decoded'First) /= Item.Raw_Byte
+               then
+                  return False;
+               end if;
+
+            when Drivers.Inline_Decoded =>
+               if not Inline_Matches_Source (Item) then
+                  return False;
+               end if;
+         end case;
+
+         for Index in Item.Decoded'Range loop
+            if Index
+              >= Item.Decoded'First
+                 + Ada.Streams.Stream_Element_Offset (Item.Decoded_Length)
+              and then Item.Decoded (Index) /= 0
+            then
+               return False;
+            end if;
+         end loop;
+         return True;
+      end Valid_Name_Fragment;
+
+      procedure Accept_Name_End (Item : Drivers.Event_Summary) is
+      begin
+         if Phase /= 1
+           or else not Valid_Quote (Item, Drivers.Name_End)
+           or else Item.Source_Offset /= Next_Source
+           or else Item.Source_Offset /= Token_Last - 1
+         then
+            Reject_Transcript (Self, Error);
+         else
+            Phase := 2;
+         end if;
+      end Accept_Name_End;
+
+   begin
+      Candidate := [others => ' '];
+      Length := 0;
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif not Has_Input (Self) or else Current (Self) /= '"' then
+         Reject (Self, Errors.Syntax_Error, Error);
+         return;
+      end if;
+
+      Preflights.Scan_String
+        (Self.Source.all,
+         Self.Cursor,
+         Budgets.Input_Remaining (Self.Budget),
+         Summary,
+         Error);
+      if Error.Code /= Errors.No_Error then
+         Latch (Self, Error);
+         return;
+      elsif Summary.Raw_Length > Self.Source'Length - Token_First then
+         Reject_Transcript (Self, Error);
+         return;
+      end if;
+      Token_Last := Token_First + Summary.Raw_Length;
+      Budgets.Check_Text_Length (Self.Budget, Summary.Decoded_Length, Error);
+      if Error.Code = Errors.No_Error
+        and then Summary.Decoded_Length > Candidate'Length
+      then
+         Errors.Fail (Error, Errors.Capacity_Exceeded);
+      end if;
+      if Error.Code /= Errors.No_Error then
+         Latch (Self, Error);
+         return;
+      end if;
+
+      for Byte_Index in 1 .. Summary.Raw_Length loop
+         exit when Error.Code /= Errors.No_Error;
+         Consume_Owned_Byte (Self, Events, Count, Error);
+         if Error.Code = Errors.No_Error and then Count > 0 then
+            for Index in Events'First .. Events'First + Count - 1 loop
+               case Events (Index).Kind is
+                  when Drivers.Name_Begin    =>
+                     if Phase /= 0
+                       or else not Valid_Quote
+                                     (Events (Index), Drivers.Name_Begin)
+                       or else Events (Index).Source_Offset /= Token_First
+                     then
+                        Reject_Transcript (Self, Error);
+                     else
+                        Phase := 1;
+                        Next_Source := Token_First + 1;
+                     end if;
+
+                  when Drivers.Name_Fragment =>
+                     if Phase /= 1
+                       or else not Valid_Name_Fragment (Events (Index))
+                       or else Events (Index).Source_Offset /= Next_Source
+                       or else Events (Index).Source_Offset <= Token_First
+                       or else Events (Index).Source_Offset >= Token_Last - 1
+                       or else Events (Index).Source_Length
+                               > Token_Last - 1 - Events (Index).Source_Offset
+                       or else Copied > Candidate'Length
+                       or else Events (Index).Decoded_Length
+                               > Candidate'Length - Copied
+                     then
+                        Reject_Transcript (Self, Error);
+                     else
+                        if Events (Index).Decoded_Length > 0 then
+                           for Fragment_Index in
+                             0 .. Events (Index).Decoded_Length - 1
+                           loop
+                              Candidate
+                                (Candidate'First + Copied + Fragment_Index) :=
+                                Character'Val
+                                  (Events (Index).Decoded
+                                     (Events (Index).Decoded'First
+                                      + Ada.Streams.Stream_Element_Offset
+                                          (Fragment_Index)));
+                           end loop;
+                        end if;
+                        Copied := Copied + Events (Index).Decoded_Length;
+                        Next_Source :=
+                          Events (Index).Source_Offset
+                          + Events (Index).Source_Length;
+                     end if;
+
+                  when Drivers.Name_End      =>
+                     Accept_Name_End (Events (Index));
+
+                  when others                =>
+                     Reject_Transcript (Self, Error);
+               end case;
+               exit when Error.Code /= Errors.No_Error;
+            end loop;
+         end if;
+      end loop;
+
+      if Error.Code = Errors.No_Error and then Copied /= Summary.Decoded_Length
+      then
+         Reject_Transcript (Self, Error);
+      elsif Error.Code = Errors.No_Error and then Phase /= 2 then
+         Reject_Transcript (Self, Error);
+      end if;
+      if Error.Code /= Errors.No_Error then
+         Candidate := [others => ' '];
+         return;
+      end if;
+
+      Commit_Value_Whitespace (Self, Error);
+      Consume_Separator (Self, ':', Error);
+      Commit_Value_Whitespace (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         Candidate := [others => ' '];
+      elsif not Has_Input (Self) or else not Is_Value_Leading (Current (Self))
+      then
+         Reject (Self, Errors.Syntax_Error, Error);
+         Candidate := [others => ' '];
+      else
+         Length := Copied;
+      end if;
+   end Collect_Record_Name;
+
+   procedure Admit_Record_Field
+     (Self      : in out Reader;
+      Name      : out String;
+      Length    : out Natural;
+      Available : out Boolean;
+      Error     : in out Errors.Error_Info) is
+   begin
+      Name := [others => ' '];
+      Length := 0;
+      Available := False;
+      Collect_Record_Name (Self, Name, Length, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Budgets.Consume_Container_Item (Self.Budget, Error);
+      if Error.Code /= Errors.No_Error then
+         Latch (Self, Error);
+         Name := [others => ' '];
+         Length := 0;
+         return;
+      end if;
+      Self.Stack (Self.Depth).First_Item := False;
+      Self.Stack (Self.Depth).Child := Child_Ready;
+      Available := True;
+   end Admit_Record_Field;
+
    overriding
    procedure Begin_Record
      (Self      : in out Reader;
@@ -1712,9 +2180,43 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       Error     : in out Errors.Error_Info)
    is
       pragma Unreferenced (Type_Name);
+      Saw_Document_End : Boolean;
    begin
       Length := Unknown_Length;
-      Reject_Unsupported (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Require_Leading (Self, "{", Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Prepare_Value (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Claim_Boundary (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Consume_Structure
+        (Self,
+         '{',
+         Drivers.Object_Begin,
+         Allow_Document_End => False,
+         Saw_Document_End   => Saw_Document_End,
+         Error              => Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Saw_Document_End then
+         Reject_Transcript (Self, Error);
+      else
+         Push_Record (Self, Error);
+      end if;
+   exception
+      when others =>
+         Poison_After_Exception (Self);
+         Length := Unknown_Length;
+         raise;
    end Begin_Record;
 
    overriding
@@ -1728,14 +2230,135 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       Name := [others => ' '];
       Length := 0;
       Available := False;
-      Reject_Unsupported (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Self.Operation /= Active
+        or else Self.Depth = 0
+        or else Self.Stack (Self.Depth).Kind /= Record_Container
+        or else Self.Stack (Self.Depth).Child /= No_Child
+        or else Self.Stack (Self.Depth).Exhausted
+      then
+         Reject (Self, Errors.Invalid_State, Error);
+         return;
+      end if;
+
+      loop
+         if Self.Terminal /= No_Pending_Terminal then
+            if Self.Owner /= Record_Child_Terminal
+              or else Self.Owner_Depth /= Self.Depth
+            then
+               Reject (Self, Errors.Invalid_State, Error);
+               return;
+            elsif Self.Terminal = Deferred_Invalid_Follower
+              or else not Has_Input (Self)
+            then
+               Reject (Self, Errors.Syntax_Error, Error);
+               return;
+            elsif Current (Self) = '}' then
+               Self.Stack (Self.Depth).Exhausted := True;
+               Self.Owner := Record_End_Terminal;
+               return;
+            elsif Is_Whitespace (Current (Self)) then
+               Consume_Separator (Self, Current (Self), Error);
+               if Error.Code /= Errors.No_Error then
+                  return;
+               end if;
+               Clear_Terminal (Self);
+            elsif Current (Self) = ',' then
+               Consume_Separator (Self, ',', Error);
+               if Error.Code /= Errors.No_Error then
+                  return;
+               end if;
+               Clear_Terminal (Self);
+               Commit_Value_Whitespace (Self, Error);
+               Admit_Record_Field (Self, Name, Length, Available, Error);
+               return;
+            else
+               Reject (Self, Errors.Syntax_Error, Error);
+               return;
+            end if;
+         else
+            Commit_Value_Whitespace (Self, Error);
+            if Error.Code /= Errors.No_Error then
+               return;
+            elsif not Has_Input (Self) then
+               Reject (Self, Errors.Syntax_Error, Error);
+               return;
+            elsif Current (Self) = '}' then
+               Self.Stack (Self.Depth).Exhausted := True;
+               return;
+            elsif not Self.Stack (Self.Depth).First_Item then
+               Consume_Separator (Self, ',', Error);
+               Commit_Value_Whitespace (Self, Error);
+            end if;
+            Admit_Record_Field (Self, Name, Length, Available, Error);
+            return;
+         end if;
+      end loop;
+   exception
+      when others =>
+         Poison_After_Exception (Self);
+         Name := [others => ' '];
+         Length := 0;
+         Available := False;
+         raise;
    end Next_Field;
 
    overriding
    procedure End_Record
-     (Self : in out Reader; Error : in out Errors.Error_Info) is
+     (Self : in out Reader; Error : in out Errors.Error_Info)
+   is
+      Closing_Root     : Boolean;
+      Saw_Document_End : Boolean;
    begin
-      Reject_Unsupported (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Self.Operation /= Active
+        or else Self.Depth = 0
+        or else Self.Stack (Self.Depth).Kind /= Record_Container
+        or else Self.Stack (Self.Depth).Child /= No_Child
+        or else not Self.Stack (Self.Depth).Exhausted
+        or else (Self.Terminal /= No_Pending_Terminal
+                 and then (Self.Owner /= Record_End_Terminal
+                           or else Self.Owner_Depth /= Self.Depth))
+      then
+         Reject (Self, Errors.Invalid_State, Error);
+         return;
+      end if;
+
+      if Self.Terminal = No_Pending_Terminal then
+         Commit_Value_Whitespace (Self, Error);
+      end if;
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+
+      Closing_Root := Self.Depth = 1 and then Self.Root = Root_In_Progress;
+      Consume_Structure
+        (Self,
+         '}',
+         Drivers.Object_End,
+         Allow_Document_End => Closing_Root,
+         Saw_Document_End   => Saw_Document_End,
+         Error              => Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+
+      Clear_Terminal (Self);
+      Self.Stack (Self.Depth) := (others => <>);
+      Self.Depth := Self.Depth - 1;
+      Budgets.Leave_Container (Self.Budget, Error);
+      if Error.Code /= Errors.No_Error then
+         Latch (Self, Error);
+      else
+         Mark_Value_Complete
+           (Self, No_Pending_Terminal, Saw_Document_End => Saw_Document_End);
+      end if;
+   exception
+      when others =>
+         Poison_After_Exception (Self);
+         raise;
    end End_Record;
 
    overriding

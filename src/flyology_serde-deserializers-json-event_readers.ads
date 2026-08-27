@@ -218,7 +218,9 @@ private
      (No_Terminal_Owner,
       Root_Terminal,
       Sequence_Child_Terminal,
-      Sequence_End_Terminal);
+      Sequence_End_Terminal,
+      Record_Child_Terminal,
+      Record_End_Terminal);
 
    type Reader (Source : not null access constant String) is limited
      new Deserialization.Deserializer

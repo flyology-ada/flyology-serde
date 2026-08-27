@@ -27,6 +27,16 @@ private package Flyology_Serde.JSON_Event_Driver_Test_Hooks is
       Decoded_Length  : in out Natural;
       Decoded         : in out Ada.Streams.Stream_Element_Array;
       Boolean_Payload : in out Boolean);
+   procedure Arm_Fragment_Byte_Override
+     (Summaries_To_Skip : Natural;
+      Raw_Byte          : Ada.Streams.Stream_Element;
+      Decoded_Byte      : Ada.Streams.Stream_Element);
+   procedure Apply_Fragment_Byte_Override
+     (Raw_Byte : in out Ada.Streams.Stream_Element;
+      Decoded  : in out Ada.Streams.Stream_Element_Array);
+   procedure Arm_Decoded_Form_Override
+     (Summaries_To_Skip : Natural; Value : Natural);
+   procedure Apply_Decoded_Form_Override (Value : in out Natural);
    procedure Reset_Abort_Count;
    procedure Note_Abort;
    function Abort_Count return Natural;
