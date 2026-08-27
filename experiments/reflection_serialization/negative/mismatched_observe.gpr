@@ -1,0 +1,21 @@
+with "flyology_serde";
+with "flyology_reflection";
+
+project Mismatched_Observe is
+   Reflection_Root := external ("FLYOLOGY_REFLECTION_ROOT");
+   Build_Root := external ("FLYOLOGY_SERDE_REFLECTION_BUILD_ROOT", ".");
+
+   for Source_Dirs use
+     (".",
+      "../src",
+      Reflection_Root & "/experiments/private_child_experiment/src",
+      Reflection_Root & "/experiments/private_child_experiment/generated");
+   for Object_Dir use Build_Root & "/negative-obj";
+   for Exec_Dir use Build_Root & "/negative-bin";
+   for Main use ("mismatched_observe.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnata", "-gnatwa", "-gnatw.X", "-gnatyM110");
+   end Compiler;
+end Mismatched_Observe;

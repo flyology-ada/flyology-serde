@@ -11,5 +11,7 @@ FLYOLOGY_REFLECTION_ROOT=/path/to/flyology-reflection scripts/test.sh
 ```
 
 The script supplies GPR search paths only for this experiment. No committed Alire manifest contains a Git or path
-pin. Promotion to the separate `flyology_serde_reflection` crate requires the indexed source and every gate in
-`docs/reviews/2026-08-27-reflection-derivation-proposal.md`.
+pin. It exports the exact reviewed Reflection commit into a fresh directory, runs the positive integration, proves
+that a mismatched source type and observation procedure cannot instantiate the generic adapter, and scans both build
+closures for forbidden dependencies. Promotion to the separate `flyology_serde_reflection` crate requires the
+indexed source and every gate in `docs/reviews/2026-08-27-reflection-derivation-proposal.md`.

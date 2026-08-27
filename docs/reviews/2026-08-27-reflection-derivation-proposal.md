@@ -243,9 +243,10 @@ claim of this checkpoint.
 ## Uninstalled implementation checkpoint
 
 The repository now contains `experiments/reflection_serialization`, an uninstalled implementation against exact
-Reflection commit `9d3c9b17c8bb510ddfdf8a286e5a192ff929640b`. Its runner exports that commit into a fresh temporary source tree,
-builds Reflection there, builds and runs the integration in fresh temporary object and executable directories, and
-checks that Reflection or extractor dependencies do not enter the root Serde source/build closure. The maintained
+Reflection commit `89afd7dbfb38f9e545a02dabe57ff9ec0cd03b16`. Its runner exports that commit into a fresh temporary source tree,
+builds Reflection there, builds and runs the integration in fresh temporary object and executable directories,
+requires a mismatched source type and `Observe` procedure to fail at the external generic instantiation, and checks
+that Reflection or extractor dependencies do not enter the root Serde source/build closure. The maintained
 tests cover successful Boolean, enum, signed, modular, canonical rank-one array, record, discriminated-record, and
 flat-variant JSON/CBOR traversal; direct byte parity with equivalent handwritten record/array and variant traversals;
 unsupported/lossy shapes; scalar range and grammar; limits; paths; reset; record, array-element, and array-bound
@@ -254,8 +255,15 @@ range failures; fixed-storage alternative names at and beyond the exact limit, i
 alternative and field paths after a child failure; Reflection protocol failures; and first- and second-pass exception
 cleanup.
 
-The final implementation, attestation, change, and safety reviews report P0/P1/P2 none for this checkpoint. This is
-not the crate release or API freeze. Before promotion, the remaining P2 gates are a reviewed indexed Reflection
-release, a rejected mismatched-`Observe` external compile test, installed-client compile/link/run, and full installed
+The final implementation, attestation, change, and safety reviews report P0/P1/P2 none for the first checkpoint.
+The follow-up checkpoint moves the attested source to the reviewed rational-floating API contract and closes the
+mismatched-`Observe` external compile gate. This is not the crate release or API freeze. Before promotion, the
+remaining P2 gates are a reviewed indexed Reflection release, installed-client compile/link/run, and full installed
 dependency-closure isolation tests. Generic deserialization remains blocked on reviewed Reflection builders and is
 not implied by this serialization checkpoint.
+
+The follow-up change and safety reviews initially found that a negative build could be accepted for an unrelated
+diagnostic in the controlled source. The final gate requires the one intended `Observe` conformance diagnostic at
+the controlled instantiation, rejects additional GNAT errors, and rejects a completed main ALI, object, or
+executable. Both independent fix re-reviews report P0/P1/P2 none and independently reran the exact archived-source
+integration against commit `89afd7dbfb38f9e545a02dabe57ff9ec0cd03b16` successfully.
