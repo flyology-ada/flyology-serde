@@ -61,6 +61,9 @@ private package Flyology_Serde.JSON_Event_Drivers is
 
    type Driver_Outcome is (Event_Available, Need_Source, Document_Accepted);
 
+   type Token_Terminal is
+     (Null_Terminal, Boolean_Terminal, String_Terminal, Number_Terminal);
+
    --  Closed progress accounting shared by the live driver and the direct
    --  conformance test. Exceeded is true before Count could wrap.
    procedure Account_Progress
@@ -148,6 +151,15 @@ private package Flyology_Serde.JSON_Event_Drivers is
      (Self    : in out Driver;
       Summary : out Event_Summary;
       Error   : in out Errors.Error_Info);
+
+   --  Offer the exact current strict delimiter without charging it and
+   --  require the selected scalar terminal event with zero consumption. The
+   --  unchanged byte remains retained and uncharged for Step_Source replay.
+   procedure Observe_Token_End
+     (Self     : in out Driver;
+      Expected : Token_Terminal;
+      Summary  : out Event_Summary;
+      Error    : in out Errors.Error_Info);
 
    --  Admit final input and require Flyology JSON's complete-document gate.
    procedure Finish (Self : in out Driver; Error : in out Errors.Error_Info);

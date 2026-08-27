@@ -1,19 +1,32 @@
 with Ada.Streams;
 with Flyology_JSON.Errors;
 with Flyology_JSON.Profiles;
+with Flyology_Serde.Adapters.Unsigned_Integers;
+with Flyology_Serde.Deserialization;
+with Flyology_Serde.Deserialization_Adapters;
+with Flyology_Serde.Deserializers.JSON.Event_Readers;
 with Flyology_Serde.JSON_Event_Driver_Test_Hooks;
 with Flyology_Serde.JSON_Preflights;
+with Interfaces;
 
 package body Flyology_Serde.Deserializers.JSON.Testing is
    package Parsing renames JSON_Event_Drivers.Parsing;
    package JSON_Errors renames Flyology_JSON.Errors;
+   package Event_Readers renames
+     Flyology_Serde.Deserializers.JSON.Event_Readers;
    package Preflights renames Flyology_Serde.JSON_Preflights;
    package Test_Hooks renames Flyology_Serde.JSON_Event_Driver_Test_Hooks;
 
    use type Ada.Streams.Stream_Element_Count;
    use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Array;
+   use type Data_Model.Float_64_Category;
+   use type Data_Model.Value_Kind;
    use type Errors.Error_Code;
+   use type Errors.Input_Offset_Unit;
+   use type Interfaces.IEEE_Float_64;
+   use type Interfaces.Integer_64;
+   use type Interfaces.Unsigned_64;
    use type JSON_Event_Drivers.Driver_Outcome;
    use type JSON_Errors.Error_Code;
    use type JSON_Event_Drivers.Event_Kind;
@@ -689,6 +702,122 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                 and then Budgets.Input_Consumed (Budget) = 2);
          JSON_Event_Drivers.Finish (Driver, Error);
          pragma Assert (Error.Code = Errors.No_Error);
+      end;
+
+      --  The generalized scalar-terminal observer covers every installed
+      --  scalar terminal and preserves Boolean payload identity.
+      declare
+         procedure Check_Terminal
+           (Token            : String;
+            Expected         : JSON_Event_Drivers.Token_Terminal;
+            Expected_Kind    : JSON_Event_Drivers.Event_Kind;
+            Expected_Boolean : Boolean := False)
+         is
+            Input    : aliased constant String := Token & " ";
+            Driver   : JSON_Event_Drivers.Driver (Input'Access);
+            Budget   : Budgets.Decode_Budget;
+            Error    : Errors.Error_Info;
+            Summary  : JSON_Event_Drivers.Event_Summary;
+            Consumed : Boolean;
+         begin
+            JSON_Event_Drivers.Initialize (Driver, Error);
+            Budgets.Initialize (Budget, Policy.Limits);
+            for Index in Token'Range loop
+               pragma Unreferenced (Index);
+               JSON_Event_Drivers.Consume_One
+                 (Driver, Budget, Consumed, Error);
+               pragma Assert (Error.Code = Errors.No_Error and then Consumed);
+            end loop;
+            JSON_Event_Drivers.Observe_Token_End
+              (Driver, Expected, Summary, Error);
+            pragma
+              Assert
+                (Error.Code = Errors.No_Error
+                   and then Summary.Kind = Expected_Kind
+                   and then (Expected_Kind /= JSON_Event_Drivers.Boolean_Value
+                             or else Summary.Boolean_Payload
+                                     = Expected_Boolean)
+                   and then JSON_Event_Drivers.Input_Offset (Driver)
+                            = Token'Length
+                   and then Budgets.Input_Consumed (Budget) = Token'Length,
+                 Token
+                   & Error.Code'Image
+                   & Summary.Kind'Image
+                   & JSON_Event_Drivers.Input_Offset (Driver)'Image
+                   & Budgets.Input_Consumed (Budget)'Image);
+         end Check_Terminal;
+      begin
+         Check_Terminal
+           ("null",
+            JSON_Event_Drivers.Null_Terminal,
+            JSON_Event_Drivers.Null_Value);
+         Check_Terminal
+           ("true",
+            JSON_Event_Drivers.Boolean_Terminal,
+            JSON_Event_Drivers.Boolean_Value,
+            Expected_Boolean => True);
+         Check_Terminal
+           ("false",
+            JSON_Event_Drivers.Boolean_Terminal,
+            JSON_Event_Drivers.Boolean_Value,
+            Expected_Boolean => False);
+         Check_Terminal
+           ("1",
+            JSON_Event_Drivers.Number_Terminal,
+            JSON_Event_Drivers.Number_End);
+      end;
+
+      --  A wrong selector and a duplicate observation publish the default
+      --  summary and fail closed without charging the delimiter.
+      declare
+         Input    : aliased constant String := "null ";
+         Driver   : JSON_Event_Drivers.Driver (Input'Access);
+         Budget   : Budgets.Decode_Budget;
+         Error    : Errors.Error_Info;
+         Summary  : JSON_Event_Drivers.Event_Summary;
+         Consumed : Boolean;
+      begin
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         for Index in 1 .. 4 loop
+            pragma Unreferenced (Index);
+            JSON_Event_Drivers.Consume_One (Driver, Budget, Consumed, Error);
+         end loop;
+         JSON_Event_Drivers.Observe_Token_End
+           (Driver, JSON_Event_Drivers.Boolean_Terminal, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then Summary.Kind = JSON_Event_Drivers.Document_Begin
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 4
+                and then Budgets.Input_Consumed (Budget) = 4);
+      end;
+
+      declare
+         Input    : aliased constant String := "null ";
+         Driver   : JSON_Event_Drivers.Driver (Input'Access);
+         Budget   : Budgets.Decode_Budget;
+         Error    : Errors.Error_Info;
+         Summary  : JSON_Event_Drivers.Event_Summary;
+         Consumed : Boolean;
+      begin
+         JSON_Event_Drivers.Initialize (Driver, Error);
+         Budgets.Initialize (Budget, Policy.Limits);
+         for Index in 1 .. 4 loop
+            pragma Unreferenced (Index);
+            JSON_Event_Drivers.Consume_One (Driver, Budget, Consumed, Error);
+         end loop;
+         JSON_Event_Drivers.Observe_Token_End
+           (Driver, JSON_Event_Drivers.Null_Terminal, Summary, Error);
+         pragma Assert (Error.Code = Errors.No_Error);
+         JSON_Event_Drivers.Observe_Token_End
+           (Driver, JSON_Event_Drivers.Null_Terminal, Summary, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then Summary.Kind = JSON_Event_Drivers.Document_Begin
+                and then JSON_Event_Drivers.Input_Offset (Driver) = 4
+                and then Budgets.Input_Consumed (Budget) = 4);
       end;
 
       --  Number-end observation admits exactly the strict JSON delimiter set
@@ -1940,5 +2069,1268 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
           (Error.Code = Errors.Application_Error
              and then Error.Input_Offset = 9);
    end Assert_JSON_Preflights;
+
+   procedure Assert_JSON_Event_Scalar_Reader is
+      Policy : constant Policies.Decode_Policy := (others => <>);
+
+      procedure Assert_Same
+        (Oracle         : Reader;
+         Parallel       : Event_Readers.Reader;
+         Oracle_Error   : Errors.Error_Info;
+         Parallel_Error : Errors.Error_Info) is
+      begin
+         pragma Assert (Parallel_Error.Code = Oracle_Error.Code);
+         pragma
+           Assert
+             (Parallel_Error.Input_Offset = Oracle_Error.Input_Offset
+                and then Parallel_Error.Offset_Unit = Oracle_Error.Offset_Unit
+                and then Parallel_Error.Path_Length
+                         = Oracle_Error.Path_Length);
+         pragma
+           Assert
+             (Event_Readers.Input_Offset (Parallel) = Input_Offset (Oracle));
+         pragma
+           Assert
+             (Event_Readers.Input_Consumed (Parallel)
+                = Budgets.Input_Consumed (Oracle.Budget));
+         pragma
+           Assert
+             (Event_Readers.Values_Consumed (Parallel)
+                = Budgets.Values_Consumed (Oracle.Budget));
+         pragma
+           Assert
+             (Event_Readers.Is_Complete (Parallel) = Is_Complete (Oracle));
+      end Assert_Same;
+
+      procedure Check_Null
+        (Source         : String;
+         Maximum_Input  : Natural := Natural'Last;
+         Maximum_Values : Natural := Natural'Last)
+      is
+         Input          : aliased constant String := Source;
+         Oracle         : Reader (Input'Access);
+         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle_Error   : Errors.Error_Info;
+         Parallel_Error : Errors.Error_Info;
+         Local_Policy   : Policies.Decode_Policy := Policy;
+      begin
+         Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
+         Local_Policy.Limits.Maximum_Logical_Values := Maximum_Values;
+         Initialize (Oracle, Local_Policy);
+         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         pragma Assert (Parallel_Error.Code = Errors.No_Error);
+
+         Read_Null (Oracle, Oracle_Error);
+         Event_Readers.Read_Null (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         if Oracle_Error.Code = Errors.No_Error then
+            Finish_Document (Oracle, Oracle_Error);
+            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end if;
+      end Check_Null;
+
+      procedure Check_Boolean
+        (Source : String; Maximum_Input : Natural := Natural'Last)
+      is
+         Input          : aliased constant String := Source;
+         Oracle         : Reader (Input'Access);
+         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle_Error   : Errors.Error_Info;
+         Parallel_Error : Errors.Error_Info;
+         Oracle_Value   : Boolean;
+         Parallel_Value : Boolean;
+         Local_Policy   : Policies.Decode_Policy := Policy;
+      begin
+         Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
+         Initialize (Oracle, Local_Policy);
+         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         pragma Assert (Parallel_Error.Code = Errors.No_Error);
+
+         Read_Boolean (Oracle, Oracle_Value, Oracle_Error);
+         Event_Readers.Read_Boolean (Parallel, Parallel_Value, Parallel_Error);
+         pragma Assert (Parallel_Value = Oracle_Value);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         if Oracle_Error.Code = Errors.No_Error then
+            Finish_Document (Oracle, Oracle_Error);
+            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end if;
+      end Check_Boolean;
+
+      procedure Check_Text
+        (Source : String; Maximum_Input : Natural := Natural'Last)
+      is
+         Input           : aliased constant String := Source;
+         Oracle          : Reader (Input'Access);
+         Parallel        : Event_Readers.Reader (Input'Access);
+         Oracle_Error    : Errors.Error_Info;
+         Parallel_Error  : Errors.Error_Info;
+         Oracle_Value    : String (3 .. 34);
+         Parallel_Value  : String (7 .. 38);
+         Oracle_Length   : Natural;
+         Parallel_Length : Natural;
+         Local_Policy    : Policies.Decode_Policy := Policy;
+      begin
+         Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
+         Initialize (Oracle, Local_Policy);
+         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         pragma Assert (Parallel_Error.Code = Errors.No_Error);
+
+         Read_Text (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
+         Event_Readers.Read_Text
+           (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
+         pragma Assert (Parallel_Length = Oracle_Length);
+         pragma
+           Assert
+             (Parallel_Value
+                (Parallel_Value'First
+                 .. Parallel_Value'First + Parallel_Length - 1)
+                = Oracle_Value
+                    (Oracle_Value'First
+                     .. Oracle_Value'First + Oracle_Length - 1));
+         pragma
+           Assert
+             ((for all Index in Parallel_Value'Range =>
+                 (if Index >= Parallel_Value'First + Parallel_Length
+                  then Parallel_Value (Index) = ' ')));
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         if Oracle_Error.Code = Errors.No_Error then
+            Finish_Document (Oracle, Oracle_Error);
+            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end if;
+      end Check_Text;
+
+      procedure Check_Signed (Source : String) is
+         Input          : aliased constant String := Source;
+         Oracle         : Reader (Input'Access);
+         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle_Error   : Errors.Error_Info;
+         Parallel_Error : Errors.Error_Info;
+         Oracle_Value   : Interfaces.Integer_64;
+         Parallel_Value : Interfaces.Integer_64;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Read_Signed (Oracle, Oracle_Value, Oracle_Error);
+         Event_Readers.Read_Signed (Parallel, Parallel_Value, Parallel_Error);
+         pragma Assert (Parallel_Value = Oracle_Value);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         if Oracle_Error.Code = Errors.No_Error then
+            Finish_Document (Oracle, Oracle_Error);
+            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end if;
+      end Check_Signed;
+
+      procedure Check_Unsigned
+        (Source : String; Maximum_Input : Natural := Natural'Last)
+      is
+         Input          : aliased constant String := Source;
+         Oracle         : Reader (Input'Access);
+         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle_Error   : Errors.Error_Info;
+         Parallel_Error : Errors.Error_Info;
+         Oracle_Value   : Interfaces.Unsigned_64;
+         Parallel_Value : Interfaces.Unsigned_64;
+         Local_Policy   : Policies.Decode_Policy := Policy;
+      begin
+         Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
+         Initialize (Oracle, Local_Policy);
+         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Read_Unsigned (Oracle, Oracle_Value, Oracle_Error);
+         Event_Readers.Read_Unsigned
+           (Parallel, Parallel_Value, Parallel_Error);
+         pragma Assert (Parallel_Value = Oracle_Value);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         if Oracle_Error.Code = Errors.No_Error then
+            Finish_Document (Oracle, Oracle_Error);
+            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end if;
+      end Check_Unsigned;
+
+      procedure Check_Float (Source : String) is
+         Input          : aliased constant String := Source;
+         Oracle         : Reader (Input'Access);
+         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle_Error   : Errors.Error_Info;
+         Parallel_Error : Errors.Error_Info;
+         Oracle_Value   : Data_Model.Float_64_Value;
+         Parallel_Value : Data_Model.Float_64_Value;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Read_Float_64 (Oracle, Oracle_Value, Oracle_Error);
+         Event_Readers.Read_Float_64
+           (Parallel, Parallel_Value, Parallel_Error);
+         pragma
+           Assert
+             (Data_Model.Category (Parallel_Value)
+                = Data_Model.Category (Oracle_Value));
+         if Data_Model.Category (Oracle_Value) = Data_Model.Finite_Float then
+            pragma
+              Assert
+                (Data_Model.Finite_Value (Parallel_Value)
+                   = Data_Model.Finite_Value (Oracle_Value)
+                   and then Data_Model.Is_Negative_Zero (Parallel_Value)
+                            = Data_Model.Is_Negative_Zero (Oracle_Value));
+         end if;
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         if Oracle_Error.Code = Errors.No_Error then
+            Finish_Document (Oracle, Oracle_Error);
+            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end if;
+      end Check_Float;
+
+      procedure Check_Peek (Source : String) is
+         Input          : aliased constant String := Source;
+         Oracle         : Reader (Input'Access);
+         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle_Error   : Errors.Error_Info;
+         Parallel_Error : Errors.Error_Info;
+         Oracle_Kind    : Data_Model.Value_Kind;
+         Parallel_Kind  : Data_Model.Value_Kind;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Oracle_Kind := Peek_Kind (Oracle, Oracle_Error);
+         Parallel_Kind := Event_Readers.Peek_Kind (Parallel, Parallel_Error);
+         pragma Assert (Parallel_Kind = Oracle_Kind);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         if Oracle_Error.Code = Errors.No_Error then
+            Oracle_Kind := Peek_Kind (Oracle, Oracle_Error);
+            Parallel_Kind :=
+              Event_Readers.Peek_Kind (Parallel, Parallel_Error);
+            pragma Assert (Parallel_Kind = Oracle_Kind);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end if;
+      end Check_Peek;
+
+      procedure Check_Text_Capacity
+        (Source       : String;
+         Capacity     : Natural;
+         Maximum_Text : Natural := Natural'Last)
+      is
+         Input           : aliased constant String := Source;
+         Oracle          : Reader (Input'Access);
+         Parallel        : Event_Readers.Reader (Input'Access);
+         Oracle_Error    : Errors.Error_Info;
+         Parallel_Error  : Errors.Error_Info;
+         Oracle_Value    : String (5 .. 4 + Capacity);
+         Parallel_Value  : String (9 .. 8 + Capacity);
+         Oracle_Length   : Natural;
+         Parallel_Length : Natural;
+         Local_Policy    : Policies.Decode_Policy := Policy;
+      begin
+         Local_Policy.Limits.Maximum_Text_Length := Maximum_Text;
+         Initialize (Oracle, Local_Policy);
+         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Read_Text (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
+         Event_Readers.Read_Text
+           (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
+         pragma
+           Assert
+             (Parallel_Length = Oracle_Length
+                and then (for all Value of Parallel_Value => Value = ' '));
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+      end Check_Text_Capacity;
+
+      type Supported_Operation is
+        (Peek_Operation,
+         Read_Null_Operation,
+         Read_Boolean_Operation,
+         Read_Signed_Operation,
+         Read_Unsigned_Operation,
+         Read_Float_Operation,
+         Read_Text_Operation);
+
+      procedure Check_Prelatched (Operation : Supported_Operation) is
+         Input          : aliased constant String := "null";
+         Item           : Event_Readers.Reader (Input'Access);
+         Error          : Errors.Error_Info;
+         Kind           : Data_Model.Value_Kind := Data_Model.Text_Value;
+         Boolean_Value  : Boolean := True;
+         Signed_Value   : Interfaces.Integer_64 := 99;
+         Unsigned_Value : Interfaces.Unsigned_64 := 99;
+         Float_Value    : Data_Model.Float_64_Value :=
+           Data_Model.Make_Finite (99.0);
+         Text           : String (5 .. 8) := [others => 'x'];
+         Length         : Natural := 99;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Errors.Fail (Error, Errors.Application_Error, 17, Errors.Byte_Offset);
+         case Operation is
+            when Peek_Operation          =>
+               Kind := Event_Readers.Peek_Kind (Item, Error);
+               pragma Assert (Kind = Data_Model.Null_Value);
+
+            when Read_Null_Operation     =>
+               Event_Readers.Read_Null (Item, Error);
+
+            when Read_Boolean_Operation  =>
+               Event_Readers.Read_Boolean (Item, Boolean_Value, Error);
+               pragma Assert (not Boolean_Value);
+
+            when Read_Signed_Operation   =>
+               Event_Readers.Read_Signed (Item, Signed_Value, Error);
+               pragma Assert (Signed_Value = 0);
+
+            when Read_Unsigned_Operation =>
+               Event_Readers.Read_Unsigned (Item, Unsigned_Value, Error);
+               pragma Assert (Unsigned_Value = 0);
+
+            when Read_Float_Operation    =>
+               Event_Readers.Read_Float_64 (Item, Float_Value, Error);
+               pragma
+                 Assert
+                   (Data_Model.Finite_Value (Float_Value) = 0.0
+                      and then not Data_Model.Is_Negative_Zero (Float_Value));
+
+            when Read_Text_Operation     =>
+               Event_Readers.Read_Text (Item, Text, Length, Error);
+               pragma
+                 Assert
+                   (Length = 0
+                      and then (for all Value of Text => Value = ' '));
+         end case;
+         pragma
+           Assert
+             (Error.Code = Errors.Application_Error
+                and then Error.Input_Offset = 17
+                and then Event_Readers.Input_Offset (Item) = 0
+                and then Event_Readers.Input_Consumed (Item) = 0
+                and then Event_Readers.Values_Consumed (Item) = 0);
+         Errors.Reset (Error);
+         Event_Readers.Read_Null (Item, Error);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Event_Readers.Is_Complete (Item),
+              Operation'Image
+                & Error.Code'Image
+                & Error.Input_Offset'Image
+                & Event_Readers.Input_Offset (Item)'Image);
+      end Check_Prelatched;
+
+      type Unsupported_Operation is
+        (Read_Bytes_Operation,
+         Skip_Value_Operation,
+         Begin_Optional_Operation,
+         End_Optional_Operation,
+         Begin_Sequence_Operation,
+         Next_Element_Operation,
+         End_Sequence_Operation,
+         Begin_Map_Operation,
+         Next_Map_Entry_Operation,
+         End_Map_Operation,
+         Begin_Record_Operation,
+         Next_Field_Operation,
+         End_Record_Operation,
+         Read_Enumeration_Operation,
+         Begin_Variant_Operation,
+         End_Variant_Operation);
+
+      procedure Check_Unsupported (Operation : Unsupported_Operation) is
+         Input     : aliased constant String := "null";
+         Item      : Event_Readers.Reader (Input'Access);
+         Error     : Errors.Error_Info;
+         Bytes     : Ada.Streams.Stream_Element_Array (5 .. 6) :=
+           [others => 9];
+         Text      : String (7 .. 14) := [others => 'x'];
+         Length    : Natural := 99;
+         Name_Len  : Natural := 99;
+         Available : Boolean := True;
+         Present   : Boolean := True;
+         Info      : Data_Model.Length_Information :=
+           (Known => True, Length => 99);
+         procedure Invoke is
+         begin
+            case Operation is
+               when Read_Bytes_Operation       =>
+                  Event_Readers.Read_Bytes (Item, Bytes, Length, Error);
+                  pragma
+                    Assert
+                      (Length = 0
+                         and then (for all Value of Bytes => Value = 0));
+
+               when Skip_Value_Operation       =>
+                  Event_Readers.Skip_Value (Item, Error);
+
+               when Begin_Optional_Operation   =>
+                  Event_Readers.Begin_Optional (Item, Present, Error);
+                  pragma Assert (not Present);
+
+               when End_Optional_Operation     =>
+                  Event_Readers.End_Optional (Item, Error);
+
+               when Begin_Sequence_Operation   =>
+                  Event_Readers.Begin_Sequence (Item, Info, Error);
+                  pragma Assert (not Info.Known and then Info.Length = 0);
+
+               when Next_Element_Operation     =>
+                  Event_Readers.Next_Element (Item, Available, Error);
+                  pragma Assert (not Available);
+
+               when End_Sequence_Operation     =>
+                  Event_Readers.End_Sequence (Item, Error);
+
+               when Begin_Map_Operation        =>
+                  Event_Readers.Begin_Map (Item, Info, Error);
+                  pragma Assert (not Info.Known and then Info.Length = 0);
+
+               when Next_Map_Entry_Operation   =>
+                  Event_Readers.Next_Map_Entry (Item, Available, Error);
+                  pragma Assert (not Available);
+
+               when End_Map_Operation          =>
+                  Event_Readers.End_Map (Item, Error);
+
+               when Begin_Record_Operation     =>
+                  Event_Readers.Begin_Record (Item, "T", Info, Error);
+                  pragma Assert (not Info.Known and then Info.Length = 0);
+
+               when Next_Field_Operation       =>
+                  Event_Readers.Next_Field
+                    (Item, Text, Name_Len, Available, Error);
+                  pragma
+                    Assert
+                      (Name_Len = 0
+                         and then not Available
+                         and then (for all Value of Text => Value = ' '));
+
+               when End_Record_Operation       =>
+                  Event_Readers.End_Record (Item, Error);
+
+               when Read_Enumeration_Operation =>
+                  Event_Readers.Read_Enumeration
+                    (Item, "T", Text, Name_Len, Error);
+                  pragma
+                    Assert
+                      (Name_Len = 0
+                         and then (for all Value of Text => Value = ' '));
+
+               when Begin_Variant_Operation    =>
+                  Event_Readers.Begin_Variant
+                    (Item, "T", Text, Name_Len, Info, Error);
+                  pragma
+                    Assert
+                      (Name_Len = 0
+                         and then not Info.Known
+                         and then Info.Length = 0
+                         and then (for all Value of Text => Value = ' '));
+
+               when End_Variant_Operation      =>
+                  Event_Readers.End_Variant (Item, Error);
+            end case;
+         end Invoke;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Errors.Fail (Error, Errors.Application_Error, 17, Errors.Byte_Offset);
+         Invoke;
+         pragma
+           Assert
+             (Error.Code = Errors.Application_Error
+                and then Error.Input_Offset = 17
+                and then Event_Readers.Input_Offset (Item) = 0
+                and then Event_Readers.Input_Consumed (Item) = 0
+                and then Event_Readers.Values_Consumed (Item) = 0);
+         Errors.Reset (Error);
+         Event_Readers.Read_Null (Item, Error);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Event_Readers.Is_Complete (Item));
+         Event_Readers.Reset (Item, Policy, Error);
+         Invoke;
+
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then Error.Input_Offset = 0
+                and then Event_Readers.Input_Offset (Item) = 0
+                and then Event_Readers.Input_Consumed (Item) = 0
+                and then Event_Readers.Values_Consumed (Item) = 0);
+         Errors.Reset (Error);
+         Event_Readers.Read_Null (Item, Error);
+         pragma Assert (Error.Code = Errors.Invalid_State);
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         Event_Readers.Read_Null (Item, Error);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Event_Readers.Is_Complete (Item));
+      end Check_Unsupported;
+
+      package U64_Adapter is new
+        Flyology_Serde.Adapters.Unsigned_Integers (Interfaces.Unsigned_64);
+
+      type U64_Builder is limited record
+         Published : Interfaces.Unsigned_64 := 41;
+         Candidate : Interfaces.Unsigned_64 := 0;
+         Commits   : Natural := 0;
+         Rollbacks : Natural := 0;
+      end record;
+
+      procedure Begin_U64
+        (Target : in out U64_Builder; Error : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Error);
+      begin
+         Target.Candidate := 0;
+      end Begin_U64;
+
+      procedure Read_U64
+        (From   : in out Deserialization.Deserializer'Class;
+         Target : in out U64_Builder;
+         Policy : Policies.Decode_Policy;
+         Error  : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Policy);
+      begin
+         U64_Adapter.Deserialize_Candidate (From, Target.Candidate, Error);
+      end Read_U64;
+
+      procedure Commit_U64
+        (Target : in out U64_Builder; Error : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Error);
+      begin
+         Target.Published := Target.Candidate;
+         Target.Commits := Target.Commits + 1;
+      end Commit_U64;
+
+      procedure Rollback_U64 (Target : in out U64_Builder) is
+      begin
+         Target.Candidate := 0;
+         Target.Rollbacks := Target.Rollbacks + 1;
+      end Rollback_U64;
+
+      package U64_Root is new
+        Flyology_Serde.Deserialization_Adapters
+          (Builder_Type       => U64_Builder,
+           Policy             => Policy,
+           Begin_Candidate    => Begin_U64,
+           Deserialize_Value  => Read_U64,
+           Commit_Candidate   => Commit_U64,
+           Rollback_Candidate => Rollback_U64);
+   begin
+      Test_Hooks.Disarm;
+
+      declare
+         Input : aliased constant String := "null";
+         Item  : Event_Readers.Reader (Input'Access);
+         Error : Errors.Error_Info;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Read_Null (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Event_Readers.Input_Offset (Item) = Input'Length
+                and then Event_Readers.Input_Consumed (Item) = Input'Length
+                and then Event_Readers.Values_Consumed (Item) = 1,
+              Error.Code'Image
+                & Error.Input_Offset'Image
+                & Event_Readers.Input_Offset (Item)'Image
+                & Event_Readers.Input_Consumed (Item)'Image
+                & Event_Readers.Values_Consumed (Item)'Image);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Event_Readers.Is_Complete (Item));
+      end;
+
+      declare
+         Input : aliased constant String := "true";
+         Item  : Event_Readers.Reader (Input'Access);
+         Error : Errors.Error_Info;
+         Value : Boolean;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Read_Boolean (Item, Value, Error);
+         pragma Assert (Error.Code = Errors.No_Error and then Value);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma Assert (Event_Readers.Is_Complete (Item));
+      end;
+
+      declare
+         Input : aliased constant String := "-9223372036854775808";
+         Item  : Event_Readers.Reader (Input'Access);
+         Error : Errors.Error_Info;
+         Value : Interfaces.Integer_64;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Read_Signed (Item, Value, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Value = Interfaces.Integer_64'First);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma Assert (Event_Readers.Is_Complete (Item));
+      end;
+
+      declare
+         Input : aliased constant String := "18446744073709551615";
+         Item  : Event_Readers.Reader (Input'Access);
+         Error : Errors.Error_Info;
+         Value : Interfaces.Unsigned_64;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Read_Unsigned (Item, Value, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Value = Interfaces.Unsigned_64'Last);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma Assert (Event_Readers.Is_Complete (Item));
+      end;
+
+      declare
+         Input  : aliased constant String := """line\n\uD83D\uDE00""";
+         Item   : Event_Readers.Reader (Input'Access);
+         Error  : Errors.Error_Info;
+         Value  : String (1 .. 16);
+         Length : Natural;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Read_Text (Item, Value, Length, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Length = 9
+                and then Value (1 .. 5) = "line" & ASCII.LF,
+              Error.Code'Image
+                & Length'Image
+                & Event_Readers.Input_Offset (Item)'Image
+                & Event_Readers.Input_Consumed (Item)'Image);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma Assert (Event_Readers.Is_Complete (Item));
+      end;
+
+      declare
+         Input : aliased constant String := "1x";
+         Item  : Event_Readers.Reader (Input'Access);
+         Error : Errors.Error_Info;
+         Value : Interfaces.Unsigned_64;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Read_Unsigned (Item, Value, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Value = 1
+                and then Event_Readers.Input_Offset (Item) = 1
+                and then Event_Readers.Input_Consumed (Item) = 1);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Syntax_Error
+                and then Error.Input_Offset = 1
+                and then Event_Readers.Input_Offset (Item) = 1
+                and then Event_Readers.Input_Consumed (Item) = 1);
+      end;
+
+      --  A real root adapter cannot publish a provisional scalar when
+      --  Finish_Document later rejects its deferred follower.
+      declare
+         Input  : aliased constant String := "1x";
+         Item   : Event_Readers.Reader (Input'Access);
+         Target : U64_Builder;
+         Error  : Errors.Error_Info;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         U64_Root.Deserialize (Item, Target, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Syntax_Error
+                and then Target.Published = 41
+                and then Target.Commits = 0
+                and then Target.Rollbacks = 1);
+      end;
+
+      declare
+         Input  : aliased constant String := "42";
+         Item   : Event_Readers.Reader (Input'Access);
+         Target : U64_Builder;
+         Error  : Errors.Error_Info;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         U64_Root.Deserialize (Item, Target, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Target.Published = 42
+                and then Target.Commits = 1
+                and then Target.Rollbacks = 0);
+      end;
+
+      Check_Null ("null");
+      Check_Null ("null ");
+      Check_Null ("null" & ASCII.HT);
+      Check_Null ("null" & ASCII.CR);
+      Check_Null ("null" & ASCII.LF);
+      Check_Null ("null,");
+      Check_Null ("null]");
+      Check_Null ("null}");
+      Check_Null ("nullx");
+      Check_Null ("null!");
+      Check_Null ("null ", 4);
+      Check_Null ("nullx", 4);
+      for Limit in Natural range 0 .. 3 loop
+         Check_Null ("null", Limit);
+      end loop;
+      Check_Null (" null", 4);
+      Check_Null ("null  ", 5);
+      Check_Null ("null", Maximum_Values => 0);
+
+      Check_Boolean ("true");
+      Check_Boolean ("false");
+      Check_Boolean ("true ");
+      Check_Boolean ("false ");
+      Check_Boolean ("true,");
+      Check_Boolean ("false]");
+      Check_Boolean ("truex");
+      Check_Boolean ("false!");
+      Check_Boolean ("true ", 4);
+      Check_Boolean ("false ", 5);
+      Check_Boolean ("truex", 4);
+      Check_Boolean ("falsex", 5);
+      Check_Boolean ("true", 3);
+      Check_Boolean ("false", 4);
+
+      declare
+         Delimiters : constant String :=
+           [' ', ASCII.HT, ASCII.CR, ASCII.LF, ',', ']', '}'];
+      begin
+         for Delimiter of Delimiters loop
+            Check_Boolean ("true" & Delimiter);
+            Check_Boolean ("false" & Delimiter);
+            Check_Text ("""x""" & Delimiter);
+            Check_Signed ("-1" & Delimiter);
+            Check_Unsigned ("1" & Delimiter);
+            Check_Float ("1.5" & Delimiter);
+         end loop;
+      end;
+
+      --  The reader validates the parser's Boolean payload rather than
+      --  trusting only the event kind, at EOF and at a retained delimiter.
+      declare
+         Input : aliased constant String := "true";
+         Item  : Event_Readers.Reader (Input'Access);
+         Error : Errors.Error_Info;
+         Value : Boolean := True;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Test_Hooks.Arm_Boolean_Override (False);
+         Event_Readers.Read_Boolean (Item, Value, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then not Value
+                and then not Event_Readers.Is_Complete (Item));
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         Event_Readers.Read_Boolean (Item, Value, Error);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Value
+                and then Event_Readers.Is_Complete (Item));
+      end;
+
+      declare
+         Input : aliased constant String := "false ";
+         Item  : Event_Readers.Reader (Input'Access);
+         Error : Errors.Error_Info;
+         Value : Boolean := True;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Test_Hooks.Arm_Boolean_Override (True);
+         Event_Readers.Read_Boolean (Item, Value, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then not Value
+                and then Event_Readers.Input_Consumed (Item) = 5);
+      end;
+
+      --  Numeric conversion cannot bypass a missing/reordered event fragment.
+      declare
+         Input : aliased constant String := "12";
+         Item  : Event_Readers.Reader (Input'Access);
+         Error : Errors.Error_Info;
+         Value : Interfaces.Unsigned_64 := 99;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Test_Hooks.Arm_Source_Offset_Override
+           (Summaries_To_Skip => 1, Value => 1);
+         Event_Readers.Read_Unsigned (Item, Value, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then Value = 0
+                and then not Event_Readers.Is_Complete (Item));
+      end;
+
+      --  String fragment source ranges must cover the raw token in order,
+      --  without a gap or overlap, independently of decoded-length parity.
+      declare
+         procedure Check_Fragment_Offset_Mismatch
+           (Summaries_To_Skip : Natural; Source_Offset : Natural)
+         is
+            Input  : aliased constant String := """ab""";
+            Item   : Event_Readers.Reader (Input'Access);
+            Error  : Errors.Error_Info;
+            Value  : String (4 .. 7) := [others => 'x'];
+            Length : Natural := 99;
+         begin
+            Event_Readers.Initialize (Item, Policy, Error);
+            Test_Hooks.Arm_Source_Offset_Override
+              (Summaries_To_Skip, Source_Offset);
+            Event_Readers.Read_Text (Item, Value, Length, Error);
+            pragma
+              Assert
+                (Error.Code = Errors.Invalid_State
+                   and then Length = 0
+                   and then (for all Item of Value => Item = ' '));
+         end Check_Fragment_Offset_Mismatch;
+      begin
+         Check_Fragment_Offset_Mismatch
+           (Summaries_To_Skip => 1, Source_Offset => 2);
+         Check_Fragment_Offset_Mismatch
+           (Summaries_To_Skip => 2, Source_Offset => 1);
+      end;
+
+      --  A mismatch after decoded text was copied clears the complete
+      --  arbitrary-bound destination and publishes length zero.
+      declare
+         Input  : aliased constant String := """x""";
+         Item   : Event_Readers.Reader (Input'Access);
+         Error  : Errors.Error_Info;
+         Value  : String (9 .. 12) := [others => 'x'];
+         Length : Natural := 99;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Test_Hooks.Arm_Source_Offset_Override
+           (Summaries_To_Skip => 2, Value => 0);
+         Event_Readers.Read_Text (Item, Value, Length, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then Length = 0
+                and then (for all Item of Value => Item = ' '));
+      end;
+
+      Check_Text ("""""");
+      Check_Text ("""x""");
+      Check_Text ("""x"" ");
+      Check_Text ("""x"",");
+      Check_Text ("""x""x");
+      Check_Text ("""x"" ", 3);
+      Check_Text ("""x""x", 3);
+      Check_Text ("""x""", 2);
+      Check_Text ("""line\n\uD83D\uDE00""");
+      Check_Text ("""\""""");
+      Check_Text ("""\\""");
+      Check_Text ("""\/""");
+      Check_Text ("""\b""");
+      Check_Text ("""\f""");
+      Check_Text ("""\n""");
+      Check_Text ("""\r""");
+      Check_Text ("""\t""");
+      Check_Text ("""\u0000""");
+      Check_Text ("""\u20AC""");
+      Check_Text ("""\uD800""");
+      Check_Text ("""\u12""");
+      Check_Text ('"' & Character'Val (16#C2#) & '"');
+      Check_Text_Capacity ("""x""", 0);
+      Check_Text_Capacity ("""x""", 1, Maximum_Text => 0);
+
+      Check_Signed ("-9223372036854775808");
+      Check_Signed ("9223372036854775807");
+      Check_Signed ("-9223372036854775809");
+      Check_Signed ("9223372036854775808");
+      Check_Signed ("-0");
+      Check_Signed ("1.0");
+
+      Check_Unsigned ("0");
+      Check_Unsigned ("18446744073709551615");
+      Check_Unsigned ("18446744073709551616");
+      Check_Unsigned ("-0");
+      Check_Unsigned ("1 ");
+      Check_Unsigned ("1" & ASCII.HT);
+      Check_Unsigned ("1" & ASCII.CR);
+      Check_Unsigned ("1" & ASCII.LF);
+      Check_Unsigned ("1,");
+      Check_Unsigned ("1]");
+      Check_Unsigned ("1}");
+      Check_Unsigned ("1x");
+      Check_Unsigned ("1 ", 1);
+
+      Check_Float ("0.0");
+      Check_Float ("-0.0");
+      Check_Float ("1.5");
+      Check_Float ("2.2250738585072014e-308");
+      Check_Float ("4.9406564584124654e-324");
+      Check_Float ("1e309");
+      Check_Float ("1.0x");
+
+      Check_Null ("null" & Character'Val (16#C2#));
+      Check_Boolean ("true" & Character'Val (16#C2#));
+      Check_Text ("""x""" & Character'Val (16#C2#));
+      Check_Signed ("-1" & Character'Val (16#C2#));
+      Check_Float ("1.5" & Character'Val (16#C2#));
+
+      Check_Peek ("null");
+      Check_Peek ("truX");
+      Check_Peek ("false");
+      Check_Peek ("-1");
+      Check_Peek ("1");
+      Check_Peek ("1.0");
+      Check_Peek ("""unterminated");
+      Check_Peek ("[");
+      Check_Peek ("{");
+      Check_Peek (" ");
+      Check_Peek ("-");
+      Check_Peek ("x");
+
+      for Operation in Unsupported_Operation loop
+         Check_Unsupported (Operation);
+      end loop;
+
+      for Operation in Supported_Operation loop
+         Check_Prelatched (Operation);
+      end loop;
+
+      --  A prelatched initialization is a strict no-op. A clean second
+      --  initialization poisons the old operation until Reset.
+      declare
+         Input : aliased constant String := "null";
+         Item  : Event_Readers.Reader (Input'Access);
+         Error : Errors.Error_Info;
+      begin
+         Errors.Fail (Error, Errors.Application_Error, 17);
+         Event_Readers.Initialize (Item, Policy, Error);
+         Errors.Reset (Error);
+         Event_Readers.Initialize (Item, Policy, Error);
+         pragma Assert (Error.Code = Errors.No_Error);
+         Event_Readers.Initialize (Item, Policy, Error);
+         pragma Assert (Error.Code = Errors.Invalid_State);
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         Event_Readers.Read_Null (Item, Error);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma Assert (Event_Readers.Is_Complete (Item));
+         Event_Readers.Finish_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Event_Readers.Is_Complete (Item));
+      end;
+
+      --  Finish before a root fails closed; Abort is idempotent and Reset
+      --  starts a fresh budget/parser operation.
+      declare
+         Input : aliased constant String := "null";
+         Item  : Event_Readers.Reader (Input'Access);
+         Error : Errors.Error_Info;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma Assert (Error.Code = Errors.Invalid_State);
+         Event_Readers.Abort_Document (Item, Error);
+         Event_Readers.Abort_Document (Item, Error);
+         pragma Assert (Error.Code = Errors.Invalid_State);
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         Errors.Fail (Error, Errors.Application_Error, 23);
+         Event_Readers.Reset (Item, Policy, Error);
+         pragma Assert (Error.Code = Errors.Application_Error);
+         Errors.Reset (Error);
+         Event_Readers.Read_Null (Item, Error);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma Assert (Event_Readers.Is_Complete (Item));
+      end;
+
+      --  A prelatched Finish is a strict no-op, while Finish after a reader
+      --  failure reports protocol misuse without trying to revive the parser.
+      declare
+         Input        : aliased constant String := "null";
+         Item         : Event_Readers.Reader (Input'Access);
+         Error        : Errors.Error_Info;
+         Before_Input : Natural;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Read_Null (Item, Error);
+         Before_Input := Event_Readers.Input_Consumed (Item);
+         Errors.Fail (Error, Errors.Application_Error, 29, Errors.Byte_Offset);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Application_Error
+                and then Error.Input_Offset = 29
+                and then Event_Readers.Input_Consumed (Item) = Before_Input
+                and then not Event_Readers.Is_Complete (Item));
+         Errors.Reset (Error);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma Assert (Event_Readers.Is_Complete (Item));
+         Event_Readers.Abort_Document (Item, Error);
+         Errors.Reset (Error);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma Assert (Error.Code = Errors.Invalid_State);
+      end;
+
+      --  Every guarded parser boundary leaves the event reader failed and
+      --  Reset can construct a complete fresh operation after propagation.
+      for Point in Test_Hooks.Before_Step .. Test_Hooks.After_Step loop
+         declare
+            Input  : aliased constant String := "null";
+            Item   : Event_Readers.Reader (Input'Access);
+            Error  : Errors.Error_Info;
+            Raised : Boolean := False;
+         begin
+            Test_Hooks.Arm (Point);
+            begin
+               Event_Readers.Initialize (Item, Policy, Error);
+            exception
+               when Constraint_Error =>
+                  Raised := True;
+            end;
+            pragma
+              Assert (Raised and then not Event_Readers.Is_Complete (Item));
+            Event_Readers.Initialize (Item, Policy, Error);
+            pragma Assert (Error.Code = Errors.Invalid_State);
+            Errors.Reset (Error);
+            Event_Readers.Reset (Item, Policy, Error);
+            Event_Readers.Read_Null (Item, Error);
+            Event_Readers.Finish_Document (Item, Error);
+            pragma
+              Assert
+                (Error.Code = Errors.No_Error
+                   and then Event_Readers.Is_Complete (Item));
+         end;
+      end loop;
+
+      for Point in Test_Hooks.Failure_Point loop
+         declare
+            Input  : aliased constant String := "null";
+            Item   : Event_Readers.Reader (Input'Access);
+            Error  : Errors.Error_Info;
+            Raised : Boolean := False;
+         begin
+            Event_Readers.Initialize (Item, Policy, Error);
+            Test_Hooks.Arm (Point);
+            begin
+               Event_Readers.Read_Null (Item, Error);
+            exception
+               when Constraint_Error =>
+                  Raised := True;
+            end;
+            pragma
+              Assert
+                (Raised and then not Event_Readers.Is_Complete (Item),
+                 Point'Image);
+            Errors.Reset (Error);
+            Event_Readers.Read_Null (Item, Error);
+            pragma Assert (Error.Code = Errors.Invalid_State);
+            Errors.Reset (Error);
+            Event_Readers.Reset (Item, Policy, Error);
+            Event_Readers.Read_Null (Item, Error);
+            Event_Readers.Finish_Document (Item, Error);
+            pragma
+              Assert
+                (Error.Code = Errors.No_Error
+                   and then Event_Readers.Is_Complete (Item));
+         end;
+      end loop;
+
+      --  Finish owns both retained-window Step and final-input Step calls.
+      --  Abnormal transfer from either boundary poisons the reader, and Reset
+      --  rebuilds a complete operation.
+      for Point in Test_Hooks.Before_Step .. Test_Hooks.After_Finish_Step loop
+         declare
+            Input  : aliased constant String := "null ";
+            Item   : Event_Readers.Reader (Input'Access);
+            Error  : Errors.Error_Info;
+            Raised : Boolean := False;
+         begin
+            Event_Readers.Initialize (Item, Policy, Error);
+            Event_Readers.Read_Null (Item, Error);
+            pragma Assert (Error.Code = Errors.No_Error);
+            Test_Hooks.Arm (Point);
+            begin
+               Event_Readers.Finish_Document (Item, Error);
+            exception
+               when Constraint_Error =>
+                  Raised := True;
+            end;
+            pragma
+              Assert
+                (Raised and then not Event_Readers.Is_Complete (Item),
+                 Point'Image);
+            Errors.Reset (Error);
+            Event_Readers.Finish_Document (Item, Error);
+            pragma Assert (Error.Code = Errors.Invalid_State);
+            Errors.Reset (Error);
+            Event_Readers.Reset (Item, Policy, Error);
+            Event_Readers.Read_Null (Item, Error);
+            Event_Readers.Finish_Document (Item, Error);
+            pragma
+              Assert
+                (Error.Code = Errors.No_Error
+                   and then Event_Readers.Is_Complete (Item));
+         end;
+      end loop;
+
+      --  Abort and direct Reset discard every scalar terminal state without
+      --  replaying or refunding its retained/deferred source.
+      declare
+         type Terminal_State_Case is
+           (EOF_Complete, Retained_Delimiter, Deferred_Follower, Unclassified);
+
+         procedure Exercise
+           (State_Case   : Terminal_State_Case;
+            Abort_First  : Boolean;
+            With_Primary : Boolean)
+         is
+            Input_Text   : constant String :=
+              (case State_Case is
+                 when EOF_Complete       => "null",
+                 when Retained_Delimiter => "null ",
+                 when Deferred_Follower  => "nullx",
+                 when Unclassified       => "null ");
+            Input        : aliased constant String := Input_Text;
+            Item         : Event_Readers.Reader (Input'Access);
+            Error        : Errors.Error_Info;
+            Local_Policy : Policies.Decode_Policy := Policy;
+            Before_Input : Natural;
+         begin
+            if State_Case = Unclassified then
+               Local_Policy.Limits.Maximum_Input_Units := 4;
+            end if;
+            Event_Readers.Initialize (Item, Local_Policy, Error);
+            Event_Readers.Read_Null (Item, Error);
+            pragma Assert (Error.Code = Errors.No_Error);
+            Before_Input := Event_Readers.Input_Consumed (Item);
+            if Abort_First then
+               if With_Primary then
+                  Errors.Fail
+                    (Error, Errors.Application_Error, 41, Errors.Byte_Offset);
+               end if;
+               Event_Readers.Abort_Document (Item, Error);
+               pragma
+                 Assert
+                   ((if With_Primary
+                     then
+                       Error.Code = Errors.Application_Error
+                       and then Error.Input_Offset = 41
+                     else Error.Code = Errors.No_Error)
+                      and then Event_Readers.Input_Consumed (Item)
+                               = Before_Input);
+               Errors.Reset (Error);
+            end if;
+            Event_Readers.Reset (Item, Policy, Error);
+            pragma
+              Assert
+                (Error.Code = Errors.No_Error
+                   and then Event_Readers.Input_Consumed (Item) = 0
+                   and then Event_Readers.Values_Consumed (Item) = 0);
+            Event_Readers.Read_Null (Item, Error);
+            pragma Assert (Error.Code = Errors.No_Error);
+            if State_Case /= Deferred_Follower then
+               Event_Readers.Finish_Document (Item, Error);
+               pragma
+                 Assert
+                   (Error.Code = Errors.No_Error
+                      and then Event_Readers.Is_Complete (Item));
+            else
+               Event_Readers.Abort_Document (Item, Error);
+            end if;
+         end Exercise;
+      begin
+         for State_Case in Terminal_State_Case loop
+            Exercise (State_Case, Abort_First => False, With_Primary => False);
+            Exercise (State_Case, Abort_First => True, With_Primary => False);
+            Exercise (State_Case, Abort_First => True, With_Primary => True);
+         end loop;
+      end;
+
+      --  The source lower bound is irrelevant; all public offsets are
+      --  zero-based relative counts.
+      declare
+         Input : aliased constant String :=
+           [Positive'Last - 3 => 'n',
+            Positive'Last - 2 => 'u',
+            Positive'Last - 1 => 'l',
+            Positive'Last     => 'l'];
+         Item  : Event_Readers.Reader (Input'Access);
+         Error : Errors.Error_Info;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Read_Null (Item, Error);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Event_Readers.Input_Offset (Item) = 4
+                and then Event_Readers.Input_Consumed (Item) = 4);
+      end;
+
+      --  Text decoding also uses relative counts when the source and output
+      --  end at Positive'Last.
+      declare
+         Input  : aliased constant String :=
+           [Positive'Last - 2 => '"',
+            Positive'Last - 1 => 'x',
+            Positive'Last     => '"'];
+         Item   : Event_Readers.Reader (Input'Access);
+         Error  : Errors.Error_Info;
+         Value  : String (Positive'Last .. Positive'Last) := [others => '?'];
+         Length : Natural := 0;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Read_Text (Item, Value, Length, Error);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Length = 1
+                and then Value (Positive'Last) = 'x'
+                and then Event_Readers.Input_Offset (Item) = 3
+                and then Event_Readers.Input_Consumed (Item) = 3);
+      end;
+
+      --  Mutation hooks are explicit test-operation resources. A hook that a
+      --  prelatched no-op cannot consume is discarded before later parsing.
+      declare
+         Input : aliased constant String := "null";
+         Item  : Event_Readers.Reader (Input'Access);
+         Error : Errors.Error_Info;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Test_Hooks.Arm_Source_Offset_Override (0, 99);
+         Errors.Fail (Error, Errors.Application_Error, 7, Errors.Byte_Offset);
+         Event_Readers.Read_Null (Item, Error);
+         Test_Hooks.Disarm;
+         Errors.Reset (Error);
+         Event_Readers.Read_Null (Item, Error);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Event_Readers.Is_Complete (Item));
+      end;
+
+      Test_Hooks.Disarm;
+   end Assert_JSON_Event_Scalar_Reader;
 
 end Flyology_Serde.Deserializers.JSON.Testing;

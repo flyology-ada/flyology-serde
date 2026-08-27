@@ -39,6 +39,7 @@ begin
    JSON_Testing.Assert_JSON_Single_Step_Driver;
    JSON_Testing.Assert_JSON_Driver_Lifecycle;
    JSON_Testing.Assert_JSON_Preflights;
+   JSON_Testing.Assert_JSON_Event_Scalar_Reader;
 
    --  Flyology JSON sees each source byte only after the one shared Serde
    --  budget admits it. Zero-consumption events reuse the charged window.

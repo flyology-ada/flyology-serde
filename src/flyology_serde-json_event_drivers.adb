@@ -290,6 +290,9 @@ package body Flyology_Serde.JSON_Event_Drivers is
       Summary.Kind := Summary_Kind (Parsing.Kind (Item));
       Summary.Source_Offset := Natural (Source.First);
       Summary.Source_Length := Natural (Source.Octet_Length);
+      if Test_Hooks.Enabled then
+         Test_Hooks.Apply_Source_Offset_Override (Summary.Source_Offset);
+      end if;
 
       if Parsing.Has_Raw_Slice (Item) then
          Parsing.Resolve_Raw_Range
@@ -337,6 +340,9 @@ package body Flyology_Serde.JSON_Event_Drivers is
 
       if Parsing.Kind (Item) = Parsing.Boolean_Value then
          Summary.Boolean_Payload := Parsing.Boolean_Data (Item);
+         if Test_Hooks.Enabled then
+            Test_Hooks.Apply_Boolean_Override (Summary.Boolean_Payload);
+         end if;
       end if;
    end Copy_Summary;
 
@@ -661,16 +667,36 @@ package body Flyology_Serde.JSON_Event_Drivers is
          raise;
    end Step_Final;
 
-   function Is_Number_Delimiter (Item : Character) return Boolean
+   function Is_Token_Delimiter (Item : Character) return Boolean
    is (Item in ' ' | ASCII.HT | ASCII.CR | ASCII.LF | ',' | ']' | '}');
 
-   procedure Observe_Number_End
-     (Self    : in out Driver;
-      Summary : out Event_Summary;
-      Error   : in out Errors.Error_Info)
+   function Terminal_Kind (Expected : Token_Terminal) return Parsing.Event_Kind
    is
-      Result   : Parsing.Step_Result;
-      Consumed : Boolean;
+   begin
+      case Expected is
+         when Null_Terminal    =>
+            return Parsing.Null_Value;
+
+         when Boolean_Terminal =>
+            return Parsing.Boolean_Value;
+
+         when String_Terminal  =>
+            return Parsing.String_End;
+
+         when Number_Terminal  =>
+            return Parsing.Number_End;
+      end case;
+   end Terminal_Kind;
+
+   procedure Observe_Token_End
+     (Self     : in out Driver;
+      Expected : Token_Terminal;
+      Summary  : out Event_Summary;
+      Error    : in out Errors.Error_Info)
+   is
+      Result    : Parsing.Step_Result;
+      Consumed  : Boolean;
+      Candidate : Event_Summary;
    begin
       Summary := (others => <>);
       if Error.Code /= Errors.No_Error then
@@ -686,7 +712,7 @@ package body Flyology_Serde.JSON_Event_Drivers is
       elsif Self.Offset >= Self.Source'Length then
          Fail (Self, Errors.Invalid_State, Error, Self.Offset);
          return;
-      elsif not Is_Number_Delimiter
+      elsif not Is_Token_Delimiter
                   (Self.Source (Self.Source'First + Self.Offset))
       then
          Fail (Self, Errors.Invalid_State, Error, Self.Offset);
@@ -710,25 +736,35 @@ package body Flyology_Serde.JSON_Event_Drivers is
 
       if Result.Consumed /= 0
         or else Result.Outcome /= Parsing.Event_Ready
-        or else Parsing.Kind (Result.Item) /= Parsing.Number_End
+        or else Parsing.Kind (Result.Item) /= Terminal_Kind (Expected)
       then
          Parsing.Abort_Document (Self.Parser);
          Fail (Self, Errors.Invalid_State, Error, Self.Offset);
          return;
       end if;
 
-      Copy_Summary (Self, Result, Summary, Error);
+      Copy_Summary (Self, Result, Candidate, Error);
       if Error.Code /= Errors.No_Error then
          return;
       end if;
       Register_Result (Self, Result, Consumed, Error);
       if Error.Code = Errors.No_Error and then Consumed then
          Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+      elsif Error.Code = Errors.No_Error then
+         Summary := Candidate;
       end if;
    exception
       when others =>
          Abort_Document (Self);
          raise;
+   end Observe_Token_End;
+
+   procedure Observe_Number_End
+     (Self    : in out Driver;
+      Summary : out Event_Summary;
+      Error   : in out Errors.Error_Info) is
+   begin
+      Observe_Token_End (Self, Number_Terminal, Summary, Error);
    end Observe_Number_End;
 
    procedure Consume_One
@@ -780,6 +816,9 @@ package body Flyology_Serde.JSON_Event_Drivers is
             return;
          end if;
 
+         if Test_Hooks.Enabled then
+            Test_Hooks.Raise_If_Armed (Test_Hooks.Before_Source_Copy);
+         end if;
          Self.Window (Self.Window'First) :=
            Ada.Streams.Stream_Element
              (Character'Pos (Self.Source (Self.Source'First + Self.Offset)));

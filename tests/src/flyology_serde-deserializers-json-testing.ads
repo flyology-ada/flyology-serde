@@ -7,4 +7,5 @@ package Flyology_Serde.Deserializers.JSON.Testing is
    procedure Assert_JSON_Single_Step_Driver;
    procedure Assert_JSON_Driver_Lifecycle;
    procedure Assert_JSON_Preflights;
+   procedure Assert_JSON_Event_Scalar_Reader;
 end Flyology_Serde.Deserializers.JSON.Testing;

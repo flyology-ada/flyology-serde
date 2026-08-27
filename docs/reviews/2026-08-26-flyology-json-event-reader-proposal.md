@@ -39,12 +39,16 @@ A preflight:
 Text, name, number-candidate, and byte-output capacity are checked after this preflight and before event collection,
 at the same point as the oracle. The Flyology JSON transcript remains the final syntax and Unicode authority. A
 successful preflight never permits final document or root-candidate acceptance without the matching complete event
-transcript. The sole intermediate exception is the documented `Deferred_Number_End`: a direct numeric pull may return
-a provisional scalar into the adapter's private unpublished candidate before the token-end event, matching the
-existing pull API's invalid-follower timing. That return is not parser-complete token acceptance. The later real
-follower must either complete `Number_End` or produce the retained parser rejection, and `Finish_Document` can never
-succeed until the complete number/document transcript exists. Any other disagreement is an internal `Invalid_State`,
-aborts the parser, and publishes no result.
+transcript. A root scalar whose final zero-consumption event requires a later
+parser step may return a provisional value before that event when the next
+source byte is an invalid non-delimiter or is outside the scalar call's
+remaining inspection allowance. This applies to literal, string, and number
+terminals and matches the existing pull API's trailing-suffix timing. The
+return is not parser-complete token acceptance. `Finish_Document` rejects the
+uncharged non-whitespace suffix at the public reader's cursor and can never
+publish the adapter candidate until the complete token/document transcript
+exists. Any other disagreement is an internal `Invalid_State`, aborts the
+parser, and publishes no result.
 
 `Peek_Kind` uses the same bounded preflights and does not call `Step`, debit a budget, move a frontier, or cache an
 accepted token. This is the existing nonmutating public convention. Repeated calls by a trusted caller may repeat
@@ -58,6 +62,26 @@ It retains one copied input byte at a time, freezes the exact strict profile alr
 Flyology JSON `Event`, raw range, parser, access value, or borrowed slice. Its observation operations return only
 fixed event-kind/Boolean summaries or synchronously copy a complete decoded name, decoded string, or exact number
 lexeme into caller storage.
+
+The generalized boundary operation is
+`Observe_Token_End (Self, Expected, Summary, Error)`. `Expected` has a closed
+private selector type with exactly `Null_Terminal`, `Boolean_Terminal`,
+`String_Terminal`, and `Number_Terminal`; callers cannot request another event
+kind. A prelatched call sets `Summary` to its default and is a strict no-op.
+Otherwise the driver requires an initialized, nonfailed operation with no
+pending document boundary or retained window, a current source byte, and that
+byte equal to one real strict delimiter. It copies that exact byte into its
+one-byte window without charging it, performs exactly one nonfinal parser
+`Step`, and accepts only the selector's matching `Null_Value`,
+`Boolean_Value`, `String_End`, or `Number_End` with zero consumption. The
+copied summary is published only after all checks pass; the Boolean payload is
+then checked by the reader against its preflighted literal. The exact delimiter
+byte remains unchanged, retained, and uncharged for later replay. A wrong
+event, consumption, parser outcome, range, or lifecycle state aborts and
+poisons the driver as `Invalid_State`, publishes the default summary, and
+retains no usable token. Unexpected exceptions take the existing nonraising
+abort-and-reraise path. The existing number-only observation entry point is a
+temporary wrapper around this operation until all callers migrate.
 
 Raw or decoded fragments are observed only before the next `Step`. A raw range must resolve into the exact retained
 one-byte producing window; an inline scalar is copied from the event value. Failure to resolve the documented range
@@ -73,27 +97,50 @@ The driver tracks three monotonic zero-based frontiers:
 - `Reader_Cursor` is the byte count committed by the pull protocol and exposed through `Input_Offset`.
 
 Every pull call owns a closed raw byte interval `[Call_Start, Owned_End)`, computed by its preflight. The parser is
-never offered a consumable source byte outside that interval. Number completion has three closed cases after raw
-preflight establishes the complete valid numeric lexeme. At physical source end, the driver offers an empty window
-with `End_Of_Input = True` and requires `Number_End`. When the following source byte is a strict JSON token delimiter
+never offered a consumable source byte outside that interval. Token completion
+has four closed cases after raw preflight establishes the complete literal,
+string, or number spelling. At physical source end, the driver offers an empty
+window with `End_Of_Input = True` and requires the matching terminal event.
+When the following source byte is a strict JSON token delimiter
 (space, horizontal tab, CR, LF, comma, right bracket, or right brace), preflight has already proven that byte within
-`Input_Remaining`; the driver copies that exact byte into its private one-byte window and calls `Step` solely to
-obtain `Number_End`. Flyology JSON specifies zero consumption for this case.
+`Input_Remaining`; the driver copies that exact byte into its private one-byte
+window without charging it and calls `Step` solely to obtain the matching
+`Null_Value`, `Boolean_Value`, `String_End`, or `Number_End`. Flyology JSON
+specifies zero consumption for this case.
 
-Any other nonnumeric follower is an oracle-invalid later syntax byte, not a JSON token delimiter. The numeric read
-does not offer it to the parser. It records `Deferred_Number_End` with no window and may return the already preflighted
-scalar, matching the public Reader's current timing. The next syntax-bearing operation first performs its own
-prelatched/call-order gates, then offers that exact follower through the normal charged path. Flyology JSON consumes
-and rejects it as `Invalid_Number`; Serde maps that retained primary to the oracle's `Syntax_Error` at the same byte.
-No later scalar or document can complete, and a private adapter candidate remains unpublished and is aborted. A
-protocol-misuse call and `Abort_Document` do not resolve deferred completion.
+For a literal or string, the physical source can continue while the complete
+token consumes the call's entire `Input_Remaining` allowance. The scalar call
+cannot inspect or classify that follower. It records the expected terminal
+state in `Root_Complete_Unclassified`, with no selector, payload, window, or
+follower-derived state, and may return the provisional value. At root
+`Finish_Document`, ordinary source-bound lookahead preserves the public oracle:
+an uncharged non-whitespace suffix is `Syntax_Error` at `Reader_Cursor`; a
+whitespace suffix attempts its one input charge and deterministically returns
+`Capacity_Exceeded`, because entry proves the immutable input allowance is
+zero. No parser step or terminal payload is reachable in this state. Boolean
+payload is validated at physical EOF and every legal retained delimiter,
+where the event is observable. Abort and Reset discard the unclassified state
+without charge or refund. Number preflight already requires follower lookahead
+whenever a physical follower exists, so a number never enters this fourth
+state.
 
-The legal-delimiter unconsumed window is retained unchanged after `Number_End`; it is the one exception to an otherwise empty driver
+Any other follower is oracle-invalid trailing syntax, not a JSON token
+delimiter. The scalar read does not offer it to the parser. It records a
+deferred terminal event with no window and may return the preflighted scalar or
+text, matching the public Reader's timing. `Finish_Document` rejects that exact
+uncharged byte as `Syntax_Error` without parser admission. No later scalar or
+document can complete, and the private adapter candidate remains unpublished
+and is aborted. A protocol-misuse call and `Abort_Document` do not resolve
+deferred completion.
+
+The legal-delimiter unconsumed window is retained unchanged after the scalar
+terminal event; it is the one exception to an otherwise empty driver
 window at a successful public return. The next operation must re-present that exact byte as the first byte of the
 same unconsumed suffix. Immediately before the parser may consume it, the driver charges it once, changes the window
 to admitted, and never copies or charges it again. An operation such as close lookahead may leave it uncharged and
 retained across one more public return; the matching `End_*` then charges and consumes it. Abort/Reset discards either
-window state and `Deferred_Number_End` without charge or refund. No other lookahead or event may retain an uncharged
+window state and deferred terminal event without charge or refund. No other
+lookahead or event may retain an uncharged
 window.
 
 Within an operation, a byte can be in exactly one state:
@@ -107,7 +154,7 @@ Within an operation, a byte can be in exactly one state:
 once before copying it into the parser window. Pull commit moves `Reader_Cursor` only at the oracle's corresponding
 `Advance` point and only after the parser has consumed and validated that byte. There is no parser catch-up across a
 public operation boundary and no generic `max` rule. Every successful public return has
-`Parser_Offset = Admission_Frontier = Reader_Cursor`. Equality does not count the optional uncharged number-terminator
+`Parser_Offset = Admission_Frontier = Reader_Cursor`. Equality does not count the optional uncharged scalar-terminal
 window, because that byte belongs to the unconsumed suffix. On failure, admission may lead the other frontiers only
 by one admitted failing source byte, whether consumed or retained by the parser. That byte remains charged and is
 never refunded.
@@ -259,13 +306,15 @@ frontiers at complete source length, and no pending token/event before publishin
 
 One preflight scans each owned interval at most once. Event collection processes each owned source byte once and emits
 at most the Flyology JSON grammar's fixed zero-consumption boundary events plus one fragment event per admitted byte.
-Each numeric token followed by a legal delimiter offers its exact following byte once for zero-consumption
-`Number_End` and later offers that retained byte once for actual parser consumption; the second offer is the same
-unconsumed suffix, not a rescan or copy. A number followed by an invalid token byte defers completion and offers that
-byte once through the later charged rejection path. A number at physical source end adds one empty final-input `Step`.
+Each scalar token whose terminal event needs a legal delimiter offers its exact
+following byte once for zero-consumption terminal observation and later offers
+that retained byte once for actual parser consumption; the second offer is the
+same unconsumed suffix, not a rescan or copy. A scalar followed by an invalid
+token byte defers completion and root Finish rejects that byte without parser
+admission. A scalar at physical source end adds one empty final-input `Step`.
 The existing zero-progress guard bounds
 boundary events from the closed 17-kind grammar. No operation rescans an already accepted token or performs indexed
-child lookup. Thus one pull operation is linear in its owned source span plus at most one constant-cost number-end
+child lookup. Thus one pull operation is linear in its owned source span plus at most one constant-cost scalar-terminal
 observation; parser `Drain` is outside this milestone.
 
 All source addressing is relative. The implementation validates lengths and converts counts before computing an Ada
@@ -278,18 +327,32 @@ each checked addition.
 ## Review and removal gates
 
 Architecture review must close raw-preflight scope, call-owned intervals, exact-once charging, operation ordering,
-pull delimiter timing, immediate fragment lifetime, duplicate policy, numeric conversion, status mapping, work
+pull delimiter timing, immediate fragment lifetime, duplicate policy, scalar conversion, status mapping, work
 bounds, and abort/reset precedence before implementation. Change review must include every existing JSON
 direct/adapter/allocating fixture against both engines; exact successful budget totals and the documented rejected
 input-byte distinction; intermediate delimiter-denial cases; arbitrary-bound source and destination arrays; every
 event kind; split Unicode and number fragments; duplicate/alias matrices; malformed and truncated inputs;
 depth/item/text/byte/input limits; prelatched errors; abort/reset and abandonment from every reachable state; and
-exception cleanup with production hook elision. Numeric boundary tests include physical EOF, every legal whitespace
-and structural follower, illegal alphabetic/control/structural followers, exact and one-short input limits, and
-arbitrary source bounds. They assert zero legal-terminator consumption, unchanged frontiers/budget, no premature
-caller output, the exact retained byte/offset and uncharged state, exact same-window replay, exactly-once admission of
-the real follower, deferred invalid-follower rejection only in the next syntax-bearing operation, and state clearing
-after later consumption, rejection, or Abort/Reset.
+exception cleanup with production hook elision. Scalar-terminal boundary tests
+cover null, Boolean, string, and number at physical EOF, every legal whitespace
+and structural follower, representative illegal alphabetic/control/UTF-8/
+structural followers, exact and one-short input limits, and arbitrary source
+bounds. They assert the exact summary kind and Boolean payload, zero legal-
+terminator consumption, unchanged frontiers and budget, provisional direct
+output but no root-candidate publication, the exact retained byte/offset and
+uncharged state, exact same-window replay, exactly-once admission only for real
+trailing whitespace, uncharged invalid-follower rejection in root Finish, and
+state clearing after later consumption, rejection, or Abort/Reset.
+
+Direct driver conformance also injects wrong `Expected`, duplicate observation
+after a terminal was already emitted, wrong terminal kind or Boolean payload,
+nonzero consumption, and exceptions before and after `Step`. Every case proves
+default summary publication, exact retained-window cleanup, primary
+diagnostic/exception precedence, and Reset recovery.
+
+The deferred-unclassified tests mutate delayed `true` and `false` payloads and
+require `Invalid_State`, default/no committed candidate, retained primary
+precedence, and Reset recovery.
 
 The handwritten reader is removed only in a later focused subtraction change after the event reader is the public
 engine, the complete parity matrix is green, and another P0/P1/P2 review finds no oracle-only behavior. Batched
