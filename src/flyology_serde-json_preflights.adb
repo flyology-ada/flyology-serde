@@ -1,7 +1,24 @@
 with Flyology_Serde.UTF_8_Validation;
+with Flyology_Serde.JSON_Event_Driver_Test_Hooks;
 
 package body Flyology_Serde.JSON_Preflights is
+   package Test_Hooks renames Flyology_Serde.JSON_Event_Driver_Test_Hooks;
+
    use type Errors.Error_Code;
+
+   procedure Note_Classification is
+   begin
+      if Test_Hooks.Enabled then
+         Test_Hooks.Note_Skip_Classification;
+      end if;
+   end Note_Classification;
+
+   procedure Note_Inspection (End_Exclusive : Natural) is
+   begin
+      if Test_Hooks.Enabled then
+         Test_Hooks.Note_Skip_Inspection (End_Exclusive);
+      end if;
+   end Note_Inspection;
 
    procedure Reject
      (Error  : in out Errors.Error_Info;
@@ -44,6 +61,7 @@ package body Flyology_Serde.JSON_Preflights is
       function Has (Count : Natural := 1) return Boolean is
          Inspected : constant Natural := Position - Cursor;
       begin
+         Note_Classification;
          if Position <= Source'Length and then Count > Source'Length - Position
          then
             return False;
@@ -53,6 +71,10 @@ package body Flyology_Serde.JSON_Preflights is
          then
             Reject (Error, Errors.Capacity_Exceeded, Cursor + Input_Remaining);
             return False;
+         end if;
+         if Position < Source'Length and then Count <= Source'Length - Position
+         then
+            Note_Inspection (Position + Count);
          end if;
          return
            Position <= Source'Length
@@ -216,11 +238,15 @@ package body Flyology_Serde.JSON_Preflights is
 
       function Has return Boolean is
       begin
+         Note_Classification;
          if Position < Source'Length
            and then Position - Cursor >= Input_Remaining
          then
             Reject (Error, Errors.Capacity_Exceeded, Cursor + Input_Remaining);
             return False;
+         end if;
+         if Position < Source'Length then
+            Note_Inspection (Position + 1);
          end if;
          return Position < Source'Length;
       end Has;
@@ -303,15 +329,20 @@ package body Flyology_Serde.JSON_Preflights is
          Reject (Error, Errors.Invalid_State, Cursor);
          return;
       elsif Literal'Length > Source'Length - Cursor then
+         Note_Classification;
          Reject (Error, Errors.Syntax_Error, Cursor);
          return;
       end if;
 
+      Note_Classification;
       for Offset in 0 .. Literal'Length - 1 loop
+         Note_Classification;
          if Offset >= Input_Remaining then
             Reject (Error, Errors.Capacity_Exceeded, Cursor + Offset);
             return;
-         elsif Source (Source'First + Cursor + Offset)
+         end if;
+         Note_Inspection (Cursor + Offset + 1);
+         if Source (Source'First + Cursor + Offset)
            /= Literal (Literal'First + Offset)
          then
             Reject (Error, Errors.Syntax_Error, Cursor + Offset);

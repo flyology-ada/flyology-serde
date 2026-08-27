@@ -1,11 +1,13 @@
 with Flyology_JSON.Numbers.Signed_Integers;
 with Flyology_JSON.Numbers.Unsigned_Integers;
+with Flyology_Serde.JSON_Event_Driver_Test_Hooks;
 with Flyology_Serde.JSON_Preflights;
 with Flyology_Serde.UTF_8_Validation;
 
 package body Flyology_Serde.Deserializers.JSON.Event_Readers is
    package Drivers renames Flyology_Serde.JSON_Event_Drivers;
    package Preflights renames Flyology_Serde.JSON_Preflights;
+   package Test_Hooks renames Flyology_Serde.JSON_Event_Driver_Test_Hooks;
 
    package Signed_64 is new
      Flyology_JSON.Numbers.Signed_Integers (Interfaces.Integer_64);
@@ -63,6 +65,16 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
        and then Item.Decoded_Length = 0
        and then (for all Value of Item.Decoded => Value = 0)
        and then not Item.Boolean_Payload);
+
+   function Has_Boolean_Only_Payload
+     (Item : Drivers.Event_Summary) return Boolean
+   is (not Item.Has_Raw_Byte
+       and then Item.Raw_Byte = 0
+       and then Item.Decoded_Form = Drivers.No_Decoded
+       and then Item.Decoded_Offset = 0
+       and then Item.Decoded_Source_Length = 0
+       and then Item.Decoded_Length = 0
+       and then (for all Value of Item.Decoded => Value = 0));
 
    function Valid_Quote
      (Item : Drivers.Event_Summary; Kind : Drivers.Event_Kind) return Boolean
@@ -458,14 +470,6 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       Reject (Self, Errors.Invalid_State, Error);
    end Reject_Transcript;
 
-   procedure Reject_Unsupported
-     (Self : in out Reader; Error : in out Errors.Error_Info) is
-   begin
-      if Error.Code = Errors.No_Error then
-         Reject (Self, Errors.Invalid_State, Error);
-      end if;
-   end Reject_Unsupported;
-
    procedure Apply_New_Operation
      (Self   : in out Reader;
       Policy : Policies.Decode_Policy;
@@ -544,10 +548,14 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       Before : Natural;
    begin
       while Error.Code = Errors.No_Error
-        and then Self.Operation = Ready
+        and then not Self.Document_Begin_Seen
+        and then Self.Depth = 0
         and then Has_Input (Self)
         and then Is_Whitespace (Current (Self))
       loop
+         if Test_Hooks.Enabled then
+            Test_Hooks.Note_Skip_Classification;
+         end if;
          Before := Self.Cursor;
          Drivers.Consume_Leading_Whitespace (Self.Syntax, Self.Budget, Error);
          if Error.Code = Errors.No_Error then
@@ -716,6 +724,9 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
         and then Has_Input (Self)
         and then Is_Whitespace (Current (Self))
       loop
+         if Test_Hooks.Enabled then
+            Test_Hooks.Note_Skip_Classification;
+         end if;
          Consume_Owned_Byte (Self, Summaries, Count, Error);
          if Error.Code = Errors.No_Error and then Count /= 0 then
             Reject_Transcript (Self, Error);
@@ -1076,6 +1087,14 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
            and then Summary.Boolean_Payload /= Boolean_Payload
          then
             Reject_Transcript (Self, Error);
+         elsif Expected = Drivers.Boolean_Value
+           and then not Has_Boolean_Only_Payload (Summary)
+         then
+            Reject_Transcript (Self, Error);
+         elsif Expected = Drivers.Null_Value
+           and then not Has_Empty_Payload (Summary)
+         then
+            Reject_Transcript (Self, Error);
          else
             Seen := True;
          end if;
@@ -1086,6 +1105,9 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          Outcome  : Drivers.Driver_Outcome;
          Selector : Drivers.Token_Terminal;
       begin
+         if Test_Hooks.Enabled then
+            Test_Hooks.Note_Skip_Classification;
+         end if;
          if Expected = Drivers.Null_Value then
             Selector := Drivers.Null_Terminal;
          elsif Expected = Drivers.Boolean_Value then
@@ -1109,7 +1131,14 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
             end if;
          elsif Budgets.Input_Remaining (Self.Budget) = 0 then
             Terminal := Unclassified_Exhausted;
-         elsif Is_Number_Delimiter (Current (Self)) then
+         end if;
+
+         if Terminal /= No_Pending_Terminal then
+            null;
+         elsif Has_Input (Self)
+           and then Budgets.Input_Remaining (Self.Budget) > 0
+           and then Is_Number_Delimiter (Current (Self))
+         then
             Drivers.Observe_Token_End (Self.Syntax, Selector, Summary, Error);
             if Error.Code /= Errors.No_Error then
                Latch (Self, Error);
@@ -1119,7 +1148,9 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
                   Terminal := Retained_Delimiter;
                end if;
             end if;
-         else
+         elsif Has_Input (Self)
+           and then Budgets.Input_Remaining (Self.Budget) > 0
+         then
             Terminal := Deferred_Invalid_Follower;
          end if;
       end Complete_Literal_End;
@@ -1248,6 +1279,9 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          return;
       end if;
 
+      if Test_Hooks.Enabled then
+         Test_Hooks.Note_Skip_Classification;
+      end if;
       if not Has_Input (Self) and then not Finalize_At_EOF then
          Terminal := Deferred_Invalid_Follower;
       elsif not Has_Input (Self) then
@@ -1271,7 +1305,11 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          if Error.Code = Errors.No_Error and then Ended then
             Terminal := No_Pending_Terminal;
          end if;
-      elsif Is_Number_Delimiter (Current (Self)) then
+      end if;
+
+      if Terminal /= No_Pending_Terminal then
+         null;
+      elsif Has_Input (Self) and then Is_Number_Delimiter (Current (Self)) then
          Drivers.Observe_Number_End (Self.Syntax, Summary, Error);
          if Error.Code /= Errors.No_Error then
             Latch (Self, Error);
@@ -1289,7 +1327,7 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          if Error.Code = Errors.No_Error and then Ended then
             Terminal := Retained_Delimiter;
          end if;
-      else
+      elsif Has_Input (Self) then
          Terminal := Deferred_Invalid_Follower;
       end if;
    end Collect_Number;
@@ -1809,11 +1847,12 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
    end Read_Float_64;
 
    procedure Collect_String
-     (Self     : in out Reader;
-      Value    : out String;
-      Length   : out Natural;
-      Terminal : out Terminal_State;
-      Error    : in out Errors.Error_Info)
+     (Self        : in out Reader;
+      Value       : out String;
+      Length      : out Natural;
+      Store_Value : Boolean;
+      Terminal    : out Terminal_State;
+      Error       : in out Errors.Error_Info)
    is
       Summary     : Preflights.String_Summary;
       Events      :
@@ -1841,6 +1880,9 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          Item    : Drivers.Event_Summary;
          Outcome : Drivers.Driver_Outcome;
       begin
+         if Test_Hooks.Enabled then
+            Test_Hooks.Note_Skip_Classification;
+         end if;
          if not Has_Input (Self) then
             Drivers.Step_Final (Self.Syntax, Outcome, Item, Error);
             if Error.Code /= Errors.No_Error then
@@ -1855,7 +1897,14 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
             end if;
          elsif Budgets.Input_Remaining (Self.Budget) = 0 then
             Terminal := Unclassified_Exhausted;
-         elsif Is_Number_Delimiter (Current (Self)) then
+         end if;
+
+         if Terminal /= No_Pending_Terminal then
+            null;
+         elsif Has_Input (Self)
+           and then Budgets.Input_Remaining (Self.Budget) > 0
+           and then Is_Number_Delimiter (Current (Self))
+         then
             Drivers.Observe_Token_End
               (Self.Syntax, Drivers.String_Terminal, Item, Error);
             if Error.Code /= Errors.No_Error then
@@ -1866,7 +1915,9 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
                   Terminal := Retained_Delimiter;
                end if;
             end if;
-         else
+         elsif Has_Input (Self)
+           and then Budgets.Input_Remaining (Self.Budget) > 0
+         then
             Terminal := Deferred_Invalid_Follower;
          end if;
       end Complete_String_End;
@@ -1895,12 +1946,18 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       Token_Last := Token_First + Summary.Raw_Length;
       Budgets.Check_Text_Length (Self.Budget, Summary.Decoded_Length, Error);
       if Error.Code = Errors.No_Error
+        and then Store_Value
         and then Summary.Decoded_Length > Value'Length
       then
          Errors.Fail (Error, Errors.Capacity_Exceeded);
       end if;
       if Error.Code /= Errors.No_Error then
          Latch (Self, Error);
+         return;
+      end if;
+
+      Claim_Boundary (Self, Error);
+      if Error.Code /= Errors.No_Error then
          return;
       end if;
 
@@ -1935,13 +1992,16 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
                        or else Events (Index).Source_Offset >= Token_Last - 1
                        or else Events (Index).Source_Length
                                > Token_Last - 1 - Events (Index).Source_Offset
-                       or else Copied > Value'Length
-                       or else Events (Index).Decoded_Length
-                               > Value'Length - Copied
+                       or else (Store_Value
+                                and then (Copied > Value'Length
+                                          or else Events (Index).Decoded_Length
+                                                  > Value'Length - Copied))
                      then
                         Reject_Transcript (Self, Error);
                      else
-                        if Events (Index).Decoded_Length > 0 then
+                        if Store_Value
+                          and then Events (Index).Decoded_Length > 0
+                        then
                            for Fragment_Index in
                              0 .. Events (Index).Decoded_Length - 1
                            loop
@@ -2007,8 +2067,13 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       if Error.Code /= Errors.No_Error then
          return;
       end if;
-      Claim_Boundary (Self, Error);
-      Collect_String (Self, Value, Length, Terminal, Error);
+      Collect_String
+        (Self,
+         Value,
+         Length,
+         Store_Value => True,
+         Terminal    => Terminal,
+         Error       => Error);
       Finish_Value (Self, Terminal, Error);
       if Error.Code /= Errors.No_Error then
          Value := [others => ' '];
@@ -2302,9 +2367,394 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
 
    overriding
    procedure Skip_Value
-     (Self : in out Reader; Error : in out Errors.Error_Info) is
+     (Self : in out Reader; Error : in out Errors.Error_Info)
+   is
+      type Raw_Container_Kind is (Raw_Array, Raw_Object);
+      type Raw_Phase is
+        (Array_First_Or_End,
+         Array_Value_After_Comma,
+         Array_Separator_Or_End,
+         Object_First_Or_End,
+         Object_Name_After_Comma,
+         Object_Value,
+         Object_Separator_Or_End);
+      type Raw_Frame is record
+         Kind  : Raw_Container_Kind := Raw_Array;
+         Phase : Raw_Phase := Array_First_Or_End;
+         Items : Natural := 0;
+      end record;
+      type Raw_Stack is
+        array (Positive range 1 .. Policies.Maximum_Supported_Nesting)
+        of Raw_Frame;
+
+      Live_Stack       : Raw_Stack := [others => <>];
+      Live_Depth       : Natural := 0;
+      Root_Needs_Value : Boolean := True;
+      Root_Complete    : Boolean := False;
+      Pending_Terminal : Terminal_State := No_Pending_Terminal;
+      Root_Terminal    : Terminal_State := No_Pending_Terminal;
+      Saw_Document_End : Boolean := False;
+      Dummy_Text       : String (1 .. 1);
+      Dummy_Length     : Natural;
+
+      procedure Note_Classification is
+      begin
+         if Test_Hooks.Enabled then
+            Test_Hooks.Note_Skip_Classification;
+         end if;
+      end Note_Classification;
+
+      procedure Note_Frame_Operation is
+      begin
+         if Test_Hooks.Enabled then
+            Test_Hooks.Note_Skip_Frame_Operation;
+         end if;
+      end Note_Frame_Operation;
+
+      procedure Check_Live_Raw_Depth (Candidate : Natural) is
+         Logical_Depth : constant Natural := Budgets.Depth (Self.Budget);
+         Maximum       : constant Natural :=
+           Natural (Self.Policy.Limits.Maximum_Nesting_Depth);
+      begin
+         if Logical_Depth > Maximum or else Candidate > Maximum - Logical_Depth
+         then
+            Reject (Self, Errors.Depth_Exceeded, Error);
+         end if;
+      end Check_Live_Raw_Depth;
+
+      procedure Admit_Live_Item (Frame : in out Raw_Frame) is
+      begin
+         if Frame.Items = Self.Policy.Limits.Maximum_Container_Items then
+            Reject (Self, Errors.Capacity_Exceeded, Error);
+         else
+            Frame.Items := Frame.Items + 1;
+            Note_Frame_Operation;
+         end if;
+      end Admit_Live_Item;
+
+      procedure Complete_Live_Value (Terminal : Terminal_State) is
+      begin
+         if Live_Depth = 0 then
+            Root_Complete := True;
+            Root_Terminal := Terminal;
+         elsif Terminal = Deferred_Invalid_Follower then
+            Reject (Self, Errors.Syntax_Error, Error);
+         elsif Terminal = Unclassified_Exhausted then
+            Reject (Self, Errors.Capacity_Exceeded, Error);
+         else
+            Pending_Terminal := Terminal;
+         end if;
+      end Complete_Live_Value;
+
+      procedure Prepare_Live_Separator is
+      begin
+         Note_Classification;
+         if Pending_Terminal = Deferred_Invalid_Follower then
+            Reject (Self, Errors.Syntax_Error, Error);
+         elsif Pending_Terminal = Unclassified_Exhausted then
+            Reject (Self, Errors.Capacity_Exceeded, Error);
+         else
+            Commit_Value_Whitespace (Self, Error);
+            if Error.Code = Errors.No_Error then
+               Pending_Terminal := No_Pending_Terminal;
+            end if;
+         end if;
+      end Prepare_Live_Separator;
+
+      procedure Consume_Live_Value is
+         Summary  : Preflights.Number_Summary;
+         Terminal : Terminal_State := No_Pending_Terminal;
+         Start    : constant Natural := Self.Cursor;
+         Seen_End : Boolean;
+         Open     : Character;
+      begin
+         if not Has_Input (Self) then
+            Reject (Self, Errors.Syntax_Error, Error);
+            return;
+         elsif Live_Depth = 0 then
+            Root_Needs_Value := False;
+         end if;
+         Note_Classification;
+         case Current (Self) is
+            when 'n'              =>
+               Preflights.Match_Literal
+                 (Self.Source.all,
+                  Self.Cursor,
+                  Budgets.Input_Remaining (Self.Budget),
+                  "null",
+                  Error);
+               if Error.Code = Errors.No_Error then
+                  Collect_Literal
+                    (Self, 4, Drivers.Null_Value, False, Terminal, Error);
+               else
+                  Latch (Self, Error);
+               end if;
+               Complete_Live_Value (Terminal);
+
+            when 't'              =>
+               Preflights.Match_Literal
+                 (Self.Source.all,
+                  Self.Cursor,
+                  Budgets.Input_Remaining (Self.Budget),
+                  "true",
+                  Error);
+               if Error.Code = Errors.No_Error then
+                  Collect_Literal
+                    (Self, 4, Drivers.Boolean_Value, True, Terminal, Error);
+               else
+                  Latch (Self, Error);
+               end if;
+               Complete_Live_Value (Terminal);
+
+            when 'f'              =>
+               Preflights.Match_Literal
+                 (Self.Source.all,
+                  Self.Cursor,
+                  Budgets.Input_Remaining (Self.Budget),
+                  "false",
+                  Error);
+               if Error.Code = Errors.No_Error then
+                  Collect_Literal
+                    (Self, 5, Drivers.Boolean_Value, False, Terminal, Error);
+               else
+                  Latch (Self, Error);
+               end if;
+               Complete_Live_Value (Terminal);
+
+            when '"'              =>
+               Collect_String
+                 (Self,
+                  Dummy_Text,
+                  Dummy_Length,
+                  Store_Value => False,
+                  Terminal    => Terminal,
+                  Error       => Error);
+               Complete_Live_Value (Terminal);
+
+            when '-' | '0' .. '9' =>
+               Preflights.Scan_Number
+                 (Self.Source.all,
+                  Self.Cursor,
+                  Budgets.Input_Remaining (Self.Budget),
+                  Summary,
+                  Error);
+               if Error.Code = Errors.No_Error and then Summary.Raw_Length > 0
+               then
+                  Collect_Number
+                    (Self, Start, Summary.Raw_Length, Terminal, Error);
+               else
+                  Latch (Self, Error);
+               end if;
+               Complete_Live_Value (Terminal);
+
+            when '[' | '{'        =>
+               Check_Live_Raw_Depth (Live_Depth + 1);
+               if Error.Code /= Errors.No_Error then
+                  return;
+               end if;
+               Open := Current (Self);
+               Claim_Boundary (Self, Error);
+               if Error.Code /= Errors.No_Error then
+                  return;
+               end if;
+               Consume_Structure
+                 (Self,
+                  Open,
+                  (if Open = '['
+                   then Drivers.Array_Begin
+                   else Drivers.Object_Begin),
+                  Allow_Document_End => False,
+                  Saw_Document_End   => Seen_End,
+                  Error              => Error);
+               if Error.Code /= Errors.No_Error then
+                  return;
+               elsif Seen_End then
+                  Reject_Transcript (Self, Error);
+                  return;
+               end if;
+               Live_Depth := Live_Depth + 1;
+               Note_Frame_Operation;
+               Live_Stack (Live_Depth) :=
+                 (Kind  => (if Open = '[' then Raw_Array else Raw_Object),
+                  Phase =>
+                    (if Open = '['
+                     then Array_First_Or_End
+                     else Object_First_Or_End),
+                  Items => 0);
+
+            when others           =>
+               Reject (Self, Errors.Syntax_Error, Error);
+         end case;
+      end Consume_Live_Value;
+
+      procedure Close_Live_Container (Closer : Character) is
+         Seen_End : Boolean;
+      begin
+         Consume_Structure
+           (Self,
+            Closer,
+            (if Closer = ']' then Drivers.Array_End else Drivers.Object_End),
+            Allow_Document_End => Live_Depth = 1 and then Self.Depth = 0,
+            Saw_Document_End   => Seen_End,
+            Error              => Error);
+         if Error.Code /= Errors.No_Error then
+            return;
+         end if;
+         Live_Stack (Live_Depth) := (others => <>);
+         Live_Depth := Live_Depth - 1;
+         Note_Frame_Operation;
+         if Live_Depth = 0 then
+            Saw_Document_End := Seen_End;
+         elsif Seen_End then
+            Reject_Transcript (Self, Error);
+            return;
+         end if;
+         Complete_Live_Value (No_Pending_Terminal);
+      end Close_Live_Container;
    begin
-      Reject_Unsupported (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      if Test_Hooks.Enabled then
+         Test_Hooks.Begin_Skip_Trace (Self.Cursor);
+      end if;
+      Check_Value_Ready (Self, Error);
+      Prepare_Value (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      if not Self.Document_Begin_Seen and then Self.Depth = 0 then
+         Commit_Leading_Whitespace (Self, Error);
+      else
+         Commit_Value_Whitespace (Self, Error);
+      end if;
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      while Error.Code = Errors.No_Error and then not Root_Complete loop
+         if Live_Depth = 0 and then Root_Needs_Value then
+            Consume_Live_Value;
+         else
+            Note_Classification;
+            case Live_Stack (Live_Depth).Phase is
+               when Array_First_Or_End      =>
+                  Commit_Value_Whitespace (Self, Error);
+                  if Error.Code = Errors.No_Error
+                    and then Has_Input (Self)
+                    and then Current (Self) = ']'
+                  then
+                     Close_Live_Container (']');
+                  elsif Error.Code = Errors.No_Error then
+                     Admit_Live_Item (Live_Stack (Live_Depth));
+                     Live_Stack (Live_Depth).Phase := Array_Separator_Or_End;
+                     Note_Frame_Operation;
+                     Consume_Live_Value;
+                  end if;
+
+               when Array_Value_After_Comma =>
+                  Commit_Value_Whitespace (Self, Error);
+                  if Error.Code = Errors.No_Error then
+                     Admit_Live_Item (Live_Stack (Live_Depth));
+                     Live_Stack (Live_Depth).Phase := Array_Separator_Or_End;
+                     Note_Frame_Operation;
+                     Consume_Live_Value;
+                  end if;
+
+               when Array_Separator_Or_End  =>
+                  Prepare_Live_Separator;
+                  if Error.Code = Errors.No_Error
+                    and then Has_Input (Self)
+                    and then Current (Self) = ']'
+                  then
+                     Close_Live_Container (']');
+                  elsif Error.Code = Errors.No_Error
+                    and then Has_Input (Self)
+                    and then Current (Self) = ','
+                  then
+                     Consume_Separator (Self, ',', Error);
+                     Live_Stack (Live_Depth).Phase := Array_Value_After_Comma;
+                     Note_Frame_Operation;
+                  elsif Error.Code = Errors.No_Error then
+                     Reject (Self, Errors.Syntax_Error, Error);
+                  end if;
+
+               when Object_First_Or_End     =>
+                  Commit_Value_Whitespace (Self, Error);
+                  if Error.Code = Errors.No_Error
+                    and then Has_Input (Self)
+                    and then Current (Self) = '}'
+                  then
+                     Close_Live_Container ('}');
+                  elsif Error.Code = Errors.No_Error then
+                     Admit_Live_Item (Live_Stack (Live_Depth));
+                     Collect_Record_Name
+                       (Self,
+                        Dummy_Text,
+                        Dummy_Length,
+                        Check_Length    => True,
+                        Store_Value     => False,
+                        Prechecked      => False,
+                        Checked_Summary => (others => <>),
+                        Consume_Colon   => True,
+                        Error           => Error);
+                     if Error.Code = Errors.No_Error then
+                        Live_Stack (Live_Depth).Phase := Object_Value;
+                        Note_Frame_Operation;
+                     end if;
+                  end if;
+
+               when Object_Name_After_Comma =>
+                  Commit_Value_Whitespace (Self, Error);
+                  if Error.Code = Errors.No_Error then
+                     Admit_Live_Item (Live_Stack (Live_Depth));
+                     Collect_Record_Name
+                       (Self,
+                        Dummy_Text,
+                        Dummy_Length,
+                        Check_Length    => True,
+                        Store_Value     => False,
+                        Prechecked      => False,
+                        Checked_Summary => (others => <>),
+                        Consume_Colon   => True,
+                        Error           => Error);
+                     if Error.Code = Errors.No_Error then
+                        Live_Stack (Live_Depth).Phase := Object_Value;
+                        Note_Frame_Operation;
+                     end if;
+                  end if;
+
+               when Object_Value            =>
+                  Live_Stack (Live_Depth).Phase := Object_Separator_Or_End;
+                  Note_Frame_Operation;
+                  Consume_Live_Value;
+
+               when Object_Separator_Or_End =>
+                  Prepare_Live_Separator;
+                  if Error.Code = Errors.No_Error
+                    and then Has_Input (Self)
+                    and then Current (Self) = '}'
+                  then
+                     Close_Live_Container ('}');
+                  elsif Error.Code = Errors.No_Error
+                    and then Has_Input (Self)
+                    and then Current (Self) = ','
+                  then
+                     Consume_Separator (Self, ',', Error);
+                     Live_Stack (Live_Depth).Phase := Object_Name_After_Comma;
+                     Note_Frame_Operation;
+                  elsif Error.Code = Errors.No_Error then
+                     Reject (Self, Errors.Syntax_Error, Error);
+                  end if;
+            end case;
+         end if;
+      end loop;
+
+      Finish_Value
+        (Self, Root_Terminal, Error, Saw_Document_End => Saw_Document_End);
+   exception
+      when others =>
+         Poison_After_Exception (Self);
+         raise;
    end Skip_Value;
 
    overriding
@@ -3332,7 +3782,13 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          Reject (Self, Errors.Syntax_Error, Error);
          return;
       end if;
-      Collect_String (Self, Alternative_Name, Name_Length, Terminal, Error);
+      Collect_String
+        (Self,
+         Alternative_Name,
+         Name_Length,
+         Store_Value => True,
+         Terminal    => Terminal,
+         Error       => Error);
       Resolve_Local_Separator (Self, Terminal, ',', Error);
       Commit_Value_Whitespace (Self, Error);
       if Error.Code /= Errors.No_Error then

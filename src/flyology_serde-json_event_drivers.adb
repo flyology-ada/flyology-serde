@@ -383,6 +383,10 @@ package body Flyology_Serde.JSON_Event_Drivers is
       end case;
 
       if Test_Hooks.Enabled then
+         Test_Hooks.Note_Decoded_Copy (Natural (Summary.Decoded_Length));
+      end if;
+
+      if Test_Hooks.Enabled then
          declare
             Form_Position : Natural := Decoded_Form'Pos (Summary.Decoded_Form);
          begin

@@ -126,6 +126,73 @@ private package Flyology_Serde.JSON_Event_Driver_Test_Hooks is
      Convention    => Ada,
      External_Name => "flyology_serde_disabled_json_driver_form_apply";
 
+   procedure Reset_Work_Counts
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_work_reset";
+
+   procedure Begin_Skip_Trace (Start_Offset : Natural)
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_trace_begin";
+
+   procedure Note_Skip_Inspection (End_Exclusive : Natural)
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_inspection";
+
+   procedure Note_Skip_Classification (Units : Natural := 1)
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_classification";
+
+   procedure Note_Skip_Frame_Operation
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_frame_operation";
+
+   procedure Note_Decoded_Copy (Units : Natural)
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_decoded_copy";
+
+   function Skip_Classifications return Natural
+   with
+     Import,
+     Convention    => Ada,
+     External_Name =>
+       "flyology_serde_disabled_json_driver_classification_count";
+
+   function Skip_Frame_Operations return Natural
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_frame_count";
+
+   function Parser_Step_Attempts return Natural
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_step_count";
+
+   function Decoded_Octets_Copied return Natural
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_decoded_count";
+
+   function Skip_Inspected_Source_Units return Natural
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_inspected_units";
+
    procedure Reset_Abort_Count
    with
      Import,

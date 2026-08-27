@@ -258,19 +258,30 @@ consume logical container items; the outer skipped value consumes exactly one
 logical value.
 
 There is no `Work_Units` category in `Decode_Budget`, so work is a derived
-bound rather than a denial limit. For one `Skip_Value` call that admits `N`
-bytes, let `M = Drivers.Maximum_Event_Summaries`. The implementation must keep
+bound rather than a denial limit. For one `Skip_Value` call, let `N` be the
+larger of bytes admitted by that call and the source span from its initial
+cursor through the furthest byte inspected by token preflight, and let
+`M = Drivers.Maximum_Event_Summaries`. The implementation must keep
 noncharging token-preflight/follower/phase classifications at or below
-`4 * N + 2`; parser Step attempts at or below `(N + 1) * (M + 1)` including
-terminal observation/replay and EOF zero-source steps; copied decoded octets at
+`4 * N + 8`; the additive eight covers bounded zero-progress number-scanner,
+follower, and root overhead at the smallest token. Parser Step attempts
+remain at or below `(N + 1) * (M + 1)`, including terminal observation/replay
+and EOF zero-source steps; copied decoded octets remain at
 or below `4 * M * N`; and raw-frame push/pop/phase operations at or below
 `4 * N + 2`. Each byte is admitted and input-charged at most once, but may be
 classified before later admission and a retained window may require bounded
 zero-consumption Steps before its one replay. All formula arithmetic is
 overflow-checked or compared by division before instrumentation. Private test
-counters trace every category at empty, exact input/depth/item limits and at
-one-past denial. Representation events do not consume extra logical Serde
-values, depth, or items.
+counters use one classification unit for each token-preflight availability or
+literal comparison, each admitted whitespace byte, each scalar-follower test,
+and each raw value, phase, or terminal classification. They use one frame unit
+for each push, pop, admitted item, or phase transition, and otherwise count the
+driver Step attempts and decoded octets named above. Tests read all four
+categories after empty input, exact input/depth/item/text/value limits, and
+their one-past denials. Long literal, number, and string denials trace the
+preflight frontier separately from `Input_Consumed`; the bound never substitutes
+the complete source extent for that observed frontier. Representation events
+do not consume extra logical Serde values, depth, or items.
 
 ## Ordering and failures
 
@@ -557,3 +568,35 @@ the Ada generator build/scaffold/smoke suite, all 12 Python generator tests,
 release-marker and fixture-manifest checks, the generated-fixture crate, all 10
 APM 0.28.0 audit checks, formatting, the 110-column scan, and
 `git diff --check`.
+
+## Generic skip implementation review record
+
+The `Skip_Value` implementation and its mandatory fix re-reviews closed with
+P0 none, P1 none, and P2 none. The implementation balances one arbitrary JSON
+value through one fixed local raw-frame stack and one progressive token
+preflight. It neither duplicates a whole-value scan nor charges JSON-only
+containers and members as logical Serde depth, items, or values.
+
+Review fixes added exact work evidence for token, follower, whitespace, parser,
+decoded-copy, and raw-frame activity. The bound uses the larger of per-call
+admitted bytes and the exact token-preflight inspected span, so capacity or
+text denial cannot hide inspected work. Tests cover empty input; exact and
+one-past input, depth, item, text, and logical-value limits; root literal,
+number, and long-string preflight denials; the one-byte number overhead; and a
+nested call whose pre-existing consumption differs from its admitted delta and
+inspected delimiter span. Division-based comparison helpers prove every bound
+without overflow through `Natural'Last`.
+
+The production hook-elision gate compiles and scans the driver, token
+preflights, and event reader independently with hooks enabled and disabled at
+`-O0` and `-O2`. Differential and mutation tests additionally cover every JSON
+kind, malformed containers, exact error offsets, arbitrary source bounds,
+logical-parent resolution, transactional root commit/rollback, abort/reset,
+and every reachable injected driver exception.
+
+Final verification passed the root build and assertion-enabled tests, both
+Flyology JSON lock attestations and their seven Python tests, the expanded
+test-hook-elision gate, the Ada generator build/scaffold/smoke suite, all 12
+Python generator tests, release-marker and fixture-manifest checks, the
+generated-fixture crate, all 10 APM 0.28.0 audit checks, formatting, the
+110-column scan, shell syntax, and `git diff --check`.

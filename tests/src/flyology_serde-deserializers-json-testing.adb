@@ -4781,6 +4781,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Read_Float_Operation,
          Read_Text_Operation,
          Read_Bytes_Operation,
+         Skip_Value_Operation,
          Begin_Sequence_Operation,
          Next_Element_Operation,
          End_Sequence_Operation,
@@ -4856,6 +4857,9 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                pragma
                  Assert
                    (Length = 0 and then (for all Value of Bytes => Value = 0));
+
+            when Skip_Value_Operation       =>
+               Event_Readers.Skip_Value (Item, Error);
 
             when Begin_Sequence_Operation   =>
                Event_Readers.Begin_Sequence (Item, Info, Error);
@@ -4941,59 +4945,746 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                 & Event_Readers.Input_Offset (Item)'Image);
       end Check_Prelatched;
 
-      type Unsupported_Operation is (Skip_Value_Operation);
-
-      procedure Check_Unsupported (Operation : Unsupported_Operation) is
-         Input : aliased constant String := "null";
-         Item  : Event_Readers.Reader (Input'Access);
-         Error : Errors.Error_Info;
-         procedure Invoke is
-         begin
-            case Operation is
-               when Skip_Value_Operation =>
-                  Event_Readers.Skip_Value (Item, Error);
-            end case;
-         end Invoke;
+      procedure Check_Skip_Parity
+        (Source       : String;
+         Local_Policy : Policies.Decode_Policy := Policy;
+         Finish       : Boolean := True)
+      is
+         Input          : aliased constant String := Source;
+         Oracle         : Reader (Input'Access);
+         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle_Error   : Errors.Error_Info;
+         Parallel_Error : Errors.Error_Info;
       begin
-         Event_Readers.Initialize (Item, Policy, Error);
-         Errors.Fail (Error, Errors.Application_Error, 17, Errors.Byte_Offset);
-         Invoke;
+         Initialize (Oracle, Local_Policy);
+         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Skip_Value (Oracle, Oracle_Error);
+         Event_Readers.Skip_Value (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         if Finish and then Oracle_Error.Code = Errors.No_Error then
+            Finish_Document (Oracle, Oracle_Error);
+            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end if;
+      end Check_Skip_Parity;
+
+      procedure Check_Skip_Sequence is
+         Input          : aliased constant String := "[{""x"":[1,true]}]";
+         Oracle         : Reader (Input'Access);
+         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle_Error   : Errors.Error_Info;
+         Parallel_Error : Errors.Error_Info;
+         Oracle_Info    : Data_Model.Length_Information;
+         Parallel_Info  : Data_Model.Length_Information;
+         Oracle_Item    : Boolean;
+         Parallel_Item  : Boolean;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Begin_Sequence (Oracle, Oracle_Info, Oracle_Error);
+         Event_Readers.Begin_Sequence
+           (Parallel, Parallel_Info, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         Next_Element (Oracle, Oracle_Item, Oracle_Error);
+         Event_Readers.Next_Element (Parallel, Parallel_Item, Parallel_Error);
+         pragma Assert (Oracle_Item and then Parallel_Item);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         Skip_Value (Oracle, Oracle_Error);
+         Event_Readers.Skip_Value (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         Next_Element (Oracle, Oracle_Item, Oracle_Error);
+         Event_Readers.Next_Element (Parallel, Parallel_Item, Parallel_Error);
+         pragma Assert (not Oracle_Item and then not Parallel_Item);
+         End_Sequence (Oracle, Oracle_Error);
+         Event_Readers.End_Sequence (Parallel, Parallel_Error);
+         Finish_Document (Oracle, Oracle_Error);
+         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+      end Check_Skip_Sequence;
+
+      procedure Check_Skip_Map is
+         Input          : aliased constant String :=
+           "[[{""k"":[1]},[true,false]]]";
+         Oracle         : Reader (Input'Access);
+         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle_Error   : Errors.Error_Info;
+         Parallel_Error : Errors.Error_Info;
+         Oracle_Info    : Data_Model.Length_Information;
+         Parallel_Info  : Data_Model.Length_Information;
+         Oracle_Item    : Boolean;
+         Parallel_Item  : Boolean;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Begin_Map (Oracle, Oracle_Info, Oracle_Error);
+         Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+         Next_Map_Entry (Oracle, Oracle_Item, Oracle_Error);
+         Event_Readers.Next_Map_Entry
+           (Parallel, Parallel_Item, Parallel_Error);
+         pragma Assert (Oracle_Item and then Parallel_Item);
+         Skip_Value (Oracle, Oracle_Error);
+         Event_Readers.Skip_Value (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         Skip_Value (Oracle, Oracle_Error);
+         Event_Readers.Skip_Value (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         Next_Map_Entry (Oracle, Oracle_Item, Oracle_Error);
+         Event_Readers.Next_Map_Entry
+           (Parallel, Parallel_Item, Parallel_Error);
+         pragma Assert (not Oracle_Item and then not Parallel_Item);
+         End_Map (Oracle, Oracle_Error);
+         Event_Readers.End_Map (Parallel, Parallel_Error);
+         Finish_Document (Oracle, Oracle_Error);
+         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+      end Check_Skip_Map;
+
+      procedure Check_Skip_Record is
+         Input           : aliased constant String := "{""a"":{""x"":[1]}}";
+         Oracle          : Reader (Input'Access);
+         Parallel        : Event_Readers.Reader (Input'Access);
+         Oracle_Error    : Errors.Error_Info;
+         Parallel_Error  : Errors.Error_Info;
+         Oracle_Info     : Data_Model.Length_Information;
+         Parallel_Info   : Data_Model.Length_Information;
+         Oracle_Name     : String (1 .. 1);
+         Parallel_Name   : String (1 .. 1);
+         Oracle_Length   : Natural;
+         Parallel_Length : Natural;
+         Oracle_Item     : Boolean;
+         Parallel_Item   : Boolean;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Begin_Record (Oracle, "T", Oracle_Info, Oracle_Error);
+         Event_Readers.Begin_Record
+           (Parallel, "T", Parallel_Info, Parallel_Error);
+         Next_Field
+           (Oracle, Oracle_Name, Oracle_Length, Oracle_Item, Oracle_Error);
+         Event_Readers.Next_Field
+           (Parallel,
+            Parallel_Name,
+            Parallel_Length,
+            Parallel_Item,
+            Parallel_Error);
          pragma
            Assert
-             (Error.Code = Errors.Application_Error
-                and then Error.Input_Offset = 17
-                and then Event_Readers.Input_Offset (Item) = 0
-                and then Event_Readers.Input_Consumed (Item) = 0
-                and then Event_Readers.Values_Consumed (Item) = 0);
-         Errors.Reset (Error);
-         Event_Readers.Read_Null (Item, Error);
+             (Oracle_Item
+                and then Parallel_Item
+                and then Oracle_Name = "a"
+                and then Parallel_Name = "a");
+         Skip_Value (Oracle, Oracle_Error);
+         Event_Readers.Skip_Value (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         Next_Field
+           (Oracle, Oracle_Name, Oracle_Length, Oracle_Item, Oracle_Error);
+         Event_Readers.Next_Field
+           (Parallel,
+            Parallel_Name,
+            Parallel_Length,
+            Parallel_Item,
+            Parallel_Error);
+         pragma Assert (not Oracle_Item and then not Parallel_Item);
+         End_Record (Oracle, Oracle_Error);
+         Event_Readers.End_Record (Parallel, Parallel_Error);
+         Finish_Document (Oracle, Oracle_Error);
+         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+      end Check_Skip_Record;
+
+      procedure Check_Skip_Optional is
+         Input            : aliased constant String := "[1,{""x"":[1]}]";
+         Oracle           : Reader (Input'Access);
+         Parallel         : Event_Readers.Reader (Input'Access);
+         Oracle_Error     : Errors.Error_Info;
+         Parallel_Error   : Errors.Error_Info;
+         Oracle_Present   : Boolean;
+         Parallel_Present : Boolean;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Begin_Optional (Oracle, Oracle_Present, Oracle_Error);
+         Event_Readers.Begin_Optional
+           (Parallel, Parallel_Present, Parallel_Error);
+         pragma Assert (Oracle_Present and then Parallel_Present);
+         Skip_Value (Oracle, Oracle_Error);
+         Event_Readers.Skip_Value (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         End_Optional (Oracle, Oracle_Error);
+         Event_Readers.End_Optional (Parallel, Parallel_Error);
+         Finish_Document (Oracle, Oracle_Error);
+         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+      end Check_Skip_Optional;
+
+      procedure Check_Skip_Variant is
+         Input           : aliased constant String := "[""Alt"",{""x"":[1]}]";
+         Oracle          : Reader (Input'Access);
+         Parallel        : Event_Readers.Reader (Input'Access);
+         Oracle_Error    : Errors.Error_Info;
+         Parallel_Error  : Errors.Error_Info;
+         Oracle_Info     : Data_Model.Length_Information;
+         Parallel_Info   : Data_Model.Length_Information;
+         Oracle_Name     : String (1 .. 3);
+         Parallel_Name   : String (1 .. 3);
+         Oracle_Length   : Natural;
+         Parallel_Length : Natural;
+         Oracle_Item     : Boolean;
+         Parallel_Item   : Boolean;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Begin_Variant
+           (Oracle,
+            "T",
+            Oracle_Name,
+            Oracle_Length,
+            Oracle_Info,
+            Oracle_Error);
+         Event_Readers.Begin_Variant
+           (Parallel,
+            "T",
+            Parallel_Name,
+            Parallel_Length,
+            Parallel_Info,
+            Parallel_Error);
+         pragma
+           Assert
+             (Oracle_Name = "Alt"
+                and then Parallel_Name = "Alt"
+                and then Oracle_Length = 3
+                and then Parallel_Length = 3);
+         Next_Field
+           (Oracle, Oracle_Name, Oracle_Length, Oracle_Item, Oracle_Error);
+         Event_Readers.Next_Field
+           (Parallel,
+            Parallel_Name,
+            Parallel_Length,
+            Parallel_Item,
+            Parallel_Error);
+         pragma
+           Assert
+             (Oracle_Item
+                and then Parallel_Item
+                and then Oracle_Name (1) = 'x'
+                and then Parallel_Name (1) = 'x');
+         Skip_Value (Oracle, Oracle_Error);
+         Event_Readers.Skip_Value (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         Next_Field
+           (Oracle, Oracle_Name, Oracle_Length, Oracle_Item, Oracle_Error);
+         Event_Readers.Next_Field
+           (Parallel,
+            Parallel_Name,
+            Parallel_Length,
+            Parallel_Item,
+            Parallel_Error);
+         pragma Assert (not Oracle_Item and then not Parallel_Item);
+         End_Variant (Oracle, Oracle_Error);
+         Event_Readers.End_Variant (Parallel, Parallel_Error);
+         Finish_Document (Oracle, Oracle_Error);
+         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+      end Check_Skip_Variant;
+
+      procedure Check_Skip_Arbitrary_Bounds is
+         Input          : aliased constant String :=
+           [Positive'Last - 8 => '{',
+            Positive'Last - 7 => '"',
+            Positive'Last - 6 => 'a',
+            Positive'Last - 5 => '"',
+            Positive'Last - 4 => ':',
+            Positive'Last - 3 => '[',
+            Positive'Last - 2 => '1',
+            Positive'Last - 1 => ']',
+            Positive'Last     => '}'];
+         Oracle         : Reader (Input'Access);
+         Parallel       : Event_Readers.Reader (Input'Access);
+         Oracle_Error   : Errors.Error_Info;
+         Parallel_Error : Errors.Error_Info;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Skip_Value (Oracle, Oracle_Error);
+         Event_Readers.Skip_Value (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         Finish_Document (Oracle, Oracle_Error);
+         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+      end Check_Skip_Arbitrary_Bounds;
+
+      Skip_Event_Batch_Maximum : constant Positive :=
+        Positive (JSON_Event_Drivers.Maximum_Event_Summaries);
+      Skip_Step_Factor         : constant Positive :=
+        Skip_Event_Batch_Maximum + 1;
+
+      function Ceiling_Divide
+        (Value : Natural; Divisor : Positive) return Natural
+      is
+         Quotient : constant Natural := Value / Divisor;
+      begin
+         return (if Value mod Divisor = 0 then Quotient else Quotient + 1);
+      end Ceiling_Divide;
+
+      function Within_Linear_Bound
+        (Value       : Natural;
+         Units       : Natural;
+         Coefficient : Positive;
+         Addend      : Natural) return Boolean is
+      begin
+         return
+           Value <= Addend
+           or else Ceiling_Divide (Value - Addend, Coefficient) <= Units;
+      end Within_Linear_Bound;
+
+      function Within_Step_Bound
+        (Value : Natural; Units : Natural) return Boolean
+      is
+         Required_Factors : constant Natural :=
+           Ceiling_Divide (Value, Skip_Step_Factor);
+      begin
+         return Required_Factors = 0 or else Required_Factors - 1 <= Units;
+      end Within_Step_Bound;
+
+      function Within_Decoded_Bound
+        (Value : Natural; Units : Natural) return Boolean
+      is
+         Required_Batches : constant Natural :=
+           Ceiling_Divide
+             (Ceiling_Divide (Value, 4), Skip_Event_Batch_Maximum);
+      begin
+         return Required_Batches <= Units;
+      end Within_Decoded_Bound;
+
+      procedure Check_Skip_Work_Trace
+        (Source                   : String;
+         Local_Policy             : Policies.Decode_Policy;
+         Expected_Code            : Errors.Error_Code;
+         Expected_Consumed        : Natural;
+         Expected_Inspected       : Natural;
+         Expected_Classifications : Natural;
+         Expected_Steps           : Natural;
+         Expected_Decoded         : Natural;
+         Expected_Frames          : Natural)
+      is
+         Input           : aliased constant String := Source;
+         Item            : Event_Readers.Reader (Input'Access);
+         Error           : Errors.Error_Info;
+         Classifications : Natural;
+         Steps           : Natural;
+         Decoded         : Natural;
+         Frames          : Natural;
+         Inspected       : Natural;
+         Before_Consumed : Natural;
+         After_Consumed  : Natural;
+         Admitted        : Natural;
+         N               : Natural;
+      begin
+         Event_Readers.Initialize (Item, Local_Policy, Error);
+         Before_Consumed := Event_Readers.Input_Consumed (Item);
+         Test_Hooks.Reset_Work_Counts;
+         Event_Readers.Skip_Value (Item, Error);
+         After_Consumed := Event_Readers.Input_Consumed (Item);
+         Inspected := Test_Hooks.Skip_Inspected_Source_Units;
+         Admitted :=
+           (if After_Consumed >= Before_Consumed
+            then After_Consumed - Before_Consumed
+            else Natural'Last);
+         N := Natural'Max (Admitted, Inspected);
+         Classifications := Test_Hooks.Skip_Classifications;
+         Steps := Test_Hooks.Parser_Step_Attempts;
+         Decoded := Test_Hooks.Decoded_Octets_Copied;
+         Frames := Test_Hooks.Skip_Frame_Operations;
+         pragma
+           Assert
+             (Error.Code = Expected_Code
+                and then Admitted = Expected_Consumed
+                and then Inspected = Expected_Inspected
+                and then Classifications = Expected_Classifications
+                and then Steps = Expected_Steps
+                and then Decoded = Expected_Decoded
+                and then Frames = Expected_Frames,
+              Source
+                & Error.Code'Image
+                & Admitted'Image
+                & N'Image
+                & Inspected'Image
+                & Classifications'Image
+                & Steps'Image
+                & Decoded'Image
+                & Frames'Image);
+         pragma
+           Assert
+             (Inspected <= Source'Length
+                and then Within_Linear_Bound (Classifications, N, 4, 8)
+                and then Within_Step_Bound (Steps, N)
+                and then Within_Decoded_Bound (Decoded, N)
+                and then Within_Linear_Bound (Frames, N, 4, 2));
+      end Check_Skip_Work_Trace;
+
+      procedure Check_Nested_Skip_Work_Trace
+        (Expected_Classifications : Natural;
+         Expected_Steps           : Natural;
+         Expected_Decoded         : Natural;
+         Expected_Frames          : Natural)
+      is
+         Input           : aliased constant String := "[1]";
+         Item            : Event_Readers.Reader (Input'Access);
+         Error           : Errors.Error_Info;
+         Info            : Data_Model.Length_Information;
+         Available       : Boolean;
+         Before_Consumed : Natural;
+         After_Consumed  : Natural;
+         Admitted        : Natural;
+         Inspected       : Natural;
+         Classifications : Natural;
+         Steps           : Natural;
+         Decoded         : Natural;
+         Frames          : Natural;
+         N               : Natural;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Begin_Sequence (Item, Info, Error);
+         Event_Readers.Next_Element (Item, Available, Error);
+         pragma Assert (Available and then Error.Code = Errors.No_Error);
+         Before_Consumed := Event_Readers.Input_Consumed (Item);
+         Test_Hooks.Reset_Work_Counts;
+         Event_Readers.Skip_Value (Item, Error);
+         After_Consumed := Event_Readers.Input_Consumed (Item);
+         Admitted :=
+           (if After_Consumed >= Before_Consumed
+            then After_Consumed - Before_Consumed
+            else Natural'Last);
+         Inspected := Test_Hooks.Skip_Inspected_Source_Units;
+         Classifications := Test_Hooks.Skip_Classifications;
+         Steps := Test_Hooks.Parser_Step_Attempts;
+         Decoded := Test_Hooks.Decoded_Octets_Copied;
+         Frames := Test_Hooks.Skip_Frame_Operations;
+         N := Natural'Max (Admitted, Inspected);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Before_Consumed = 1
+                and then Admitted = 1
+                and then Inspected = 2
+                and then Classifications = Expected_Classifications
+                and then Steps = Expected_Steps
+                and then Decoded = Expected_Decoded
+                and then Frames = Expected_Frames
+                and then Event_Readers.Container_Depth (Item) = 1
+                and then Event_Readers.Budget_Depth (Item) = 1,
+              Before_Consumed'Image
+                & Admitted'Image
+                & Inspected'Image
+                & Classifications'Image
+                & Steps'Image
+                & Decoded'Image
+                & Frames'Image);
+         pragma
+           Assert
+             (Within_Linear_Bound (Classifications, N, 4, 8)
+                and then Within_Step_Bound (Steps, N)
+                and then Within_Decoded_Bound (Decoded, N)
+                and then Within_Linear_Bound (Frames, N, 4, 2));
+         Event_Readers.Next_Element (Item, Available, Error);
+         pragma Assert (not Available and then Error.Code = Errors.No_Error);
+         Event_Readers.End_Sequence (Item, Error);
          Event_Readers.Finish_Document (Item, Error);
          pragma
            Assert
              (Error.Code = Errors.No_Error
                 and then Event_Readers.Is_Complete (Item));
-         Event_Readers.Reset (Item, Policy, Error);
-         Invoke;
+      end Check_Nested_Skip_Work_Trace;
 
+      procedure Check_Skip_Expected
+        (Source            : String;
+         Local_Policy      : Policies.Decode_Policy;
+         Expected_Code     : Errors.Error_Code;
+         Expected_Offset   : Natural;
+         Expected_Cursor   : Natural;
+         Expected_Consumed : Natural;
+         Expected_Values   : Natural := 1)
+      is
+         Input : aliased constant String := Source;
+         Item  : Event_Readers.Reader (Input'Access);
+         Error : Errors.Error_Info;
+      begin
+         Event_Readers.Initialize (Item, Local_Policy, Error);
+         Event_Readers.Skip_Value (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Expected_Code
+                and then (Expected_Code = Errors.No_Error
+                          or else (Error.Input_Offset = Expected_Offset
+                                   and then Error.Offset_Unit
+                                            = Errors.Byte_Offset))
+                and then Event_Readers.Input_Offset (Item) = Expected_Cursor
+                and then Event_Readers.Input_Consumed (Item)
+                         = Expected_Consumed
+                and then Event_Readers.Values_Consumed (Item) = Expected_Values
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0,
+              Source
+                & Error.Code'Image
+                & Error.Input_Offset'Image
+                & Event_Readers.Input_Offset (Item)'Image
+                & Event_Readers.Input_Consumed (Item)'Image
+                & Event_Readers.Values_Consumed (Item)'Image);
+         if Expected_Code /= Errors.No_Error then
+            Event_Readers.Abort_Document (Item, Error);
+            pragma
+              Assert
+                (Error.Code = Expected_Code
+                   and then Event_Readers.Container_Depth (Item) = 0
+                   and then Event_Readers.Budget_Depth (Item) = 0);
+            Errors.Reset (Error);
+            Event_Readers.Reset (Item, Local_Policy, Error);
+            pragma
+              Assert
+                (Error.Code = Errors.No_Error
+                   and then Event_Readers.Input_Offset (Item) = 0
+                   and then Event_Readers.Input_Consumed (Item) = 0
+                   and then Event_Readers.Values_Consumed (Item) = 0);
+         end if;
+      end Check_Skip_Expected;
+
+      procedure Check_Skip_Combined_Depth
+        (Maximum_Depth     : Policies.Nesting_Limit;
+         Expected_Code     : Errors.Error_Code;
+         Expected_Offset   : Natural;
+         Expected_Cursor   : Natural;
+         Expected_Consumed : Natural)
+      is
+         Input        : aliased constant String := "[[[]]]";
+         Item         : Event_Readers.Reader (Input'Access);
+         Error        : Errors.Error_Info;
+         Local_Policy : Policies.Decode_Policy := Policy;
+         Info         : Data_Model.Length_Information;
+         Available    : Boolean;
+      begin
+         Local_Policy.Limits.Maximum_Nesting_Depth := Maximum_Depth;
+         Event_Readers.Initialize (Item, Local_Policy, Error);
+         Event_Readers.Begin_Sequence (Item, Info, Error);
+         Event_Readers.Next_Element (Item, Available, Error);
+         pragma Assert (Available and then Error.Code = Errors.No_Error);
+         Event_Readers.Skip_Value (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Expected_Code
+                and then (Expected_Code = Errors.No_Error
+                          or else Error.Input_Offset = Expected_Offset)
+                and then Event_Readers.Input_Offset (Item) = Expected_Cursor
+                and then Event_Readers.Input_Consumed (Item)
+                         = Expected_Consumed
+                and then Event_Readers.Values_Consumed (Item) = 2
+                and then Event_Readers.Container_Depth (Item)
+                         = (if Expected_Code = Errors.No_Error then 1 else 0)
+                and then Event_Readers.Budget_Depth (Item)
+                         = (if Expected_Code = Errors.No_Error then 1 else 0),
+              Error.Code'Image
+                & Error.Input_Offset'Image
+                & Event_Readers.Input_Offset (Item)'Image
+                & Event_Readers.Input_Consumed (Item)'Image);
+         if Expected_Code = Errors.No_Error then
+            Event_Readers.Next_Element (Item, Available, Error);
+            pragma Assert (not Available);
+            Event_Readers.End_Sequence (Item, Error);
+            Event_Readers.Finish_Document (Item, Error);
+            pragma
+              Assert
+                (Error.Code = Errors.No_Error
+                   and then Event_Readers.Is_Complete (Item));
+         end if;
+      end Check_Skip_Combined_Depth;
+
+      procedure Check_Skip_Payload_Mutation
+        (Summaries_To_Skip : Natural; Expected_Success : Boolean := False)
+      is
+         Input : aliased constant String := "{""a"":[null,true,""x"",1]}";
+         Item  : Event_Readers.Reader (Input'Access);
+         Error : Errors.Error_Info;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Test_Hooks.Arm_Payload_Contamination (Summaries_To_Skip);
+         Event_Readers.Skip_Value (Item, Error);
+         Test_Hooks.Disarm;
+         pragma
+           Assert
+             ((if Expected_Success
+               then Error.Code = Errors.No_Error
+               else Error.Code = Errors.Invalid_State)
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0,
+              Summaries_To_Skip'Image & Error.Code'Image);
+      end Check_Skip_Payload_Mutation;
+
+      type Skip_Mutation is
+        (Kind_Mutation, Source_Mutation, Form_Mutation, Fragment_Mutation);
+
+      procedure Check_Skip_Mutation (Mutation : Skip_Mutation) is
+         Input : aliased constant String := "{""a"":[null,true,""x"",1]}";
+         Item  : Event_Readers.Reader (Input'Access);
+         Error : Errors.Error_Info;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         case Mutation is
+            when Kind_Mutation     =>
+               Test_Hooks.Arm_Kind_Override_After
+                 (0,
+                  JSON_Event_Drivers.Event_Kind'Pos
+                    (JSON_Event_Drivers.Event_Kind'Last)
+                  + 1);
+
+            when Source_Mutation   =>
+               Test_Hooks.Arm_Source_Offset_Override (0, 99);
+
+            when Form_Mutation     =>
+               Test_Hooks.Arm_Decoded_Form_Override
+                 (1,
+                  JSON_Event_Drivers.Decoded_Form'Pos
+                    (JSON_Event_Drivers.Inline_Decoded));
+
+            when Fragment_Mutation =>
+               Test_Hooks.Arm_Fragment_Byte_Override
+                 (3,
+                  Ada.Streams.Stream_Element (Character'Pos ('z')),
+                  Ada.Streams.Stream_Element (Character'Pos ('z')));
+         end case;
+         Event_Readers.Skip_Value (Item, Error);
+         Test_Hooks.Disarm;
          pragma
            Assert
              (Error.Code = Errors.Invalid_State
-                and then Error.Input_Offset = 0
-                and then Event_Readers.Input_Offset (Item) = 0
-                and then Event_Readers.Input_Consumed (Item) = 0
-                and then Event_Readers.Values_Consumed (Item) = 0);
-         Errors.Reset (Error);
-         Event_Readers.Read_Null (Item, Error);
-         pragma Assert (Error.Code = Errors.Invalid_State);
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0,
+              Mutation'Image & Error.Code'Image);
+      end Check_Skip_Mutation;
+
+      procedure Check_Skip_Exception
+        (Point                  : Test_Hooks.Failure_Point;
+         Matching_Calls_To_Skip : Natural;
+         Expected_Raise         : Boolean;
+         Source                 : String := "{""a"":[null,true,""x"",1]}")
+      is
+         Input  : aliased constant String := Source;
+         Item   : Event_Readers.Reader (Input'Access);
+         Error  : Errors.Error_Info;
+         Raised : Boolean := False;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Test_Hooks.Reset_Abort_Count;
+         Test_Hooks.Arm_After (Point, Matching_Calls_To_Skip);
+         begin
+            Event_Readers.Skip_Value (Item, Error);
+         exception
+            when Constraint_Error =>
+               Raised := True;
+         end;
+         Test_Hooks.Disarm;
+         pragma
+           Assert
+             (Raised = Expected_Raise
+                and then Test_Hooks.Abort_Count
+                         = (if Expected_Raise then 1 else 0)
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0,
+              Point'Image
+                & Matching_Calls_To_Skip'Image
+                & Raised'Image
+                & Test_Hooks.Abort_Count'Image);
          Errors.Reset (Error);
          Event_Readers.Reset (Item, Policy, Error);
-         Event_Readers.Read_Null (Item, Error);
+         Event_Readers.Skip_Value (Item, Error);
          Event_Readers.Finish_Document (Item, Error);
          pragma
            Assert
              (Error.Code = Errors.No_Error
                 and then Event_Readers.Is_Complete (Item));
-      end Check_Unsupported;
+      end Check_Skip_Exception;
+
+      type Skip_Root_Builder is limited record
+         Published : Boolean := False;
+         Candidate : Boolean := False;
+         Commits   : Natural := 0;
+         Rollbacks : Natural := 0;
+      end record;
+
+      procedure Begin_Skip
+        (Target : in out Skip_Root_Builder; Error : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Error);
+      begin
+         Target.Candidate := False;
+      end Begin_Skip;
+
+      procedure Read_Skip_Value
+        (From   : in out Deserialization.Deserializer'Class;
+         Target : in out Skip_Root_Builder;
+         Policy : Policies.Decode_Policy;
+         Error  : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Policy);
+      begin
+         From.Skip_Value (Error);
+         if Error.Code = Errors.No_Error then
+            Target.Candidate := True;
+         end if;
+      end Read_Skip_Value;
+
+      procedure Commit_Skip
+        (Target : in out Skip_Root_Builder; Error : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Error);
+      begin
+         Target.Published := Target.Candidate;
+         Target.Commits := Target.Commits + 1;
+      end Commit_Skip;
+
+      procedure Rollback_Skip (Target : in out Skip_Root_Builder) is
+      begin
+         Target.Candidate := False;
+         Target.Rollbacks := Target.Rollbacks + 1;
+      end Rollback_Skip;
+
+      package Skip_Root is new
+        Flyology_Serde.Deserialization_Adapters
+          (Builder_Type       => Skip_Root_Builder,
+           Begin_Candidate    => Begin_Skip,
+           Deserialize_Value  => Read_Skip_Value,
+           Commit_Candidate   => Commit_Skip,
+           Rollback_Candidate => Rollback_Skip);
+
+      procedure Check_Skip_Root_Adapter is
+         procedure Run
+           (Source        : String;
+            Expected_Code : Errors.Error_Code;
+            Published     : Boolean;
+            Commits       : Natural;
+            Rollbacks     : Natural)
+         is
+            Input  : aliased constant String := Source;
+            Item   : Event_Readers.Reader (Input'Access);
+            Target : Skip_Root_Builder;
+            Error  : Errors.Error_Info;
+         begin
+            Event_Readers.Initialize (Item, Policy, Error);
+            Skip_Root.Deserialize (Item, Target, Error);
+            pragma
+              Assert
+                (Error.Code = Expected_Code
+                   and then Target.Published = Published
+                   and then Target.Commits = Commits
+                   and then Target.Rollbacks = Rollbacks
+                   and then Target.Candidate
+                            = (if Expected_Code = Errors.No_Error
+                               then Published
+                               else False));
+         end Run;
+      begin
+         Run ("{""a"":[1]}", Errors.No_Error, True, 1, 0);
+         Run ("{""a"":[1]}x", Errors.Syntax_Error, False, 0, 1);
+         Run ("{""a"":[1,]}", Errors.Syntax_Error, False, 0, 1);
+      end Check_Skip_Root_Adapter;
 
       package U64_Adapter is new
         Flyology_Serde.Adapters.Unsigned_Integers (Interfaces.Unsigned_64);
@@ -9771,9 +10462,375 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Assert_Same (Oracle, Parallel, Oracle_Error, Event_Error);
       end;
 
-      for Operation in Unsupported_Operation loop
-         Check_Unsupported (Operation);
+      Check_Skip_Parity ("null");
+      Check_Skip_Parity ("true");
+      Check_Skip_Parity ("false");
+      Check_Skip_Parity ("0");
+      Check_Skip_Parity ("-1");
+      Check_Skip_Parity ("1.25e+2");
+      Check_Skip_Parity ("""text""");
+      Check_Skip_Parity ("""\uD83D\uDE00""");
+      Check_Skip_Parity ("[]");
+      Check_Skip_Parity ("[null,true,-1,""x""]");
+      Check_Skip_Parity ("{}");
+      Check_Skip_Parity ("{""a"":1,""b"":[false,{""c"":""x""}]}");
+      Check_Skip_Sequence;
+      Check_Skip_Map;
+      Check_Skip_Record;
+      Check_Skip_Optional;
+      Check_Skip_Variant;
+      Check_Skip_Arbitrary_Bounds;
+      pragma
+        Assert
+          (Within_Linear_Bound (Natural'Last, Natural'Last, 4, 8)
+             and then not Within_Linear_Bound (Natural'Last, 0, 4, 8)
+             and then Within_Step_Bound (Natural'Last, Natural'Last)
+             and then not Within_Step_Bound (Natural'Last, 0)
+             and then Within_Decoded_Bound (Natural'Last, Natural'Last)
+             and then not Within_Decoded_Bound (Natural'Last, 0));
+      Check_Skip_Work_Trace
+        ("{""a"":[null,true,""x"",1]}",
+         Policy,
+         Errors.No_Error,
+         23,
+         22,
+         48,
+         27,
+         2,
+         18);
+      Check_Skip_Work_Trace
+        ("null", Policy, Errors.No_Error, 4, 4, 7, 5, 0, 0);
+      Check_Skip_Work_Trace ("1", Policy, Errors.No_Error, 1, 1, 9, 3, 0, 0);
+      Check_Skip_Work_Trace ("[]", Policy, Errors.No_Error, 2, 0, 2, 2, 0, 2);
+      Check_Skip_Work_Trace
+        ("", Policy, Errors.Syntax_Error, 0, 0, 0, 0, 0, 0);
+      Check_Nested_Skip_Work_Trace (9, 3, 0, 0);
+      declare
+         Local_Policy : Policies.Decode_Policy := Policy;
+      begin
+         Local_Policy.Limits.Maximum_Input_Units := 6;
+         Check_Skip_Work_Trace
+           ("[null]", Local_Policy, Errors.No_Error, 6, 5, 11, 7, 0, 4);
+         Local_Policy.Limits.Maximum_Input_Units := 5;
+         Check_Skip_Work_Trace
+           ("[null]",
+            Local_Policy,
+            Errors.Capacity_Exceeded,
+            5,
+            5,
+            9,
+            5,
+            0,
+            3);
+         Local_Policy.Limits.Maximum_Input_Units := 3;
+         Check_Skip_Work_Trace
+           ("null", Local_Policy, Errors.Capacity_Exceeded, 0, 3, 6, 0, 0, 0);
+         Check_Skip_Work_Trace
+           ("12345", Local_Policy, Errors.Capacity_Exceeded, 0, 3, 9, 0, 0, 0);
+
+         Local_Policy := Policy;
+         Local_Policy.Limits.Maximum_Nesting_Depth := 1;
+         Check_Skip_Work_Trace
+           ("[]", Local_Policy, Errors.No_Error, 2, 0, 2, 2, 0, 2);
+         Local_Policy.Limits.Maximum_Nesting_Depth := 0;
+         Check_Skip_Work_Trace
+           ("[]", Local_Policy, Errors.Depth_Exceeded, 0, 0, 1, 0, 0, 0);
+
+         Local_Policy := Policy;
+         Local_Policy.Limits.Maximum_Container_Items := 1;
+         Check_Skip_Work_Trace
+           ("[null]", Local_Policy, Errors.No_Error, 6, 5, 11, 7, 0, 4);
+         Local_Policy.Limits.Maximum_Container_Items := 0;
+         Check_Skip_Work_Trace
+           ("[null]",
+            Local_Policy,
+            Errors.Capacity_Exceeded,
+            1,
+            0,
+            3,
+            1,
+            0,
+            2);
+
+         Local_Policy := Policy;
+         Local_Policy.Limits.Maximum_Text_Length := 1;
+         Check_Skip_Work_Trace
+           ("[""x""]", Local_Policy, Errors.No_Error, 5, 4, 8, 5, 1, 4);
+         Local_Policy.Limits.Maximum_Text_Length := 0;
+         Check_Skip_Work_Trace
+           ("[""x""]",
+            Local_Policy,
+            Errors.Capacity_Exceeded,
+            1,
+            4,
+            6,
+            1,
+            0,
+            3);
+         Check_Skip_Work_Trace
+           ("""abcdefghijklmnopqrstuvwxyz""",
+            Local_Policy,
+            Errors.Capacity_Exceeded,
+            0,
+            28,
+            29,
+            0,
+            0,
+            0);
+
+         Local_Policy := Policy;
+         Local_Policy.Limits.Maximum_Logical_Values := 1;
+         Check_Skip_Work_Trace
+           ("null", Local_Policy, Errors.No_Error, 4, 4, 7, 5, 0, 0);
+         Local_Policy.Limits.Maximum_Logical_Values := 0;
+         Check_Skip_Work_Trace
+           ("null", Local_Policy, Errors.Capacity_Exceeded, 0, 0, 0, 0, 0, 0);
+      end;
+      Check_Skip_Combined_Depth
+        (2,
+         Errors.Depth_Exceeded,
+         Expected_Offset   => 2,
+         Expected_Cursor   => 2,
+         Expected_Consumed => 2);
+      Check_Skip_Combined_Depth
+        (3,
+         Errors.No_Error,
+         Expected_Offset   => 0,
+         Expected_Cursor   => 5,
+         Expected_Consumed => 5);
+      for Summary in 0 .. 14 loop
+         Check_Skip_Payload_Mutation (Summary);
       end loop;
+      Check_Skip_Payload_Mutation (15, Expected_Success => True);
+      for Mutation in Skip_Mutation loop
+         Check_Skip_Mutation (Mutation);
+      end loop;
+      declare
+         Source : constant String := "{""a"":[null,true,""x"",1]}";
+      begin
+         for Matching_Calls_To_Skip in 0 .. 19 loop
+            Check_Skip_Exception
+              (Test_Hooks.Before_Source_Copy,
+               Matching_Calls_To_Skip,
+               Expected_Raise => True,
+               Source         => Source);
+         end loop;
+         Check_Skip_Exception
+           (Test_Hooks.Before_Source_Copy,
+            20,
+            Expected_Raise => False,
+            Source         => Source);
+         for Point in Test_Hooks.Before_Step .. Test_Hooks.After_Step loop
+            for Matching_Calls_To_Skip in 0 .. 26 loop
+               Check_Skip_Exception
+                 (Point,
+                  Matching_Calls_To_Skip,
+                  Expected_Raise => True,
+                  Source         => Source);
+            end loop;
+            Check_Skip_Exception
+              (Point, 27, Expected_Raise => False, Source => Source);
+         end loop;
+      end;
+      Check_Skip_Exception
+        (Test_Hooks.Before_Finish_Step,
+         0,
+         Expected_Raise => True,
+         Source         => "null");
+      Check_Skip_Exception
+        (Test_Hooks.Before_Finish_Step,
+         1,
+         Expected_Raise => False,
+         Source         => "null");
+      Check_Skip_Exception
+        (Test_Hooks.After_Finish_Step,
+         0,
+         Expected_Raise => True,
+         Source         => "null");
+      Check_Skip_Exception
+        (Test_Hooks.After_Finish_Step,
+         1,
+         Expected_Raise => False,
+         Source         => "null");
+      Check_Skip_Root_Adapter;
+
+      declare
+         Source       : constant String :=
+           " " & ASCII.LF & "{""a"":[null,true,""x"",1.5]}";
+         Local_Policy : Policies.Decode_Policy := Policy;
+      begin
+         for Maximum_Input in 0 .. Source'Length loop
+            Local_Policy := Policy;
+            Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
+            Check_Skip_Parity (Source, Local_Policy);
+         end loop;
+      end;
+
+      declare
+         type Trace_Array is array (Natural range <>) of Natural;
+         Expected_Offsets  : constant Trace_Array := [0, 1, 2, 3, 4, 5, 0];
+         Expected_Cursors  : constant Trace_Array := [0, 1, 1, 1, 1, 5, 6];
+         Expected_Consumed : constant Trace_Array := [0, 1, 1, 1, 1, 5, 6];
+         Local_Policy      : Policies.Decode_Policy := Policy;
+      begin
+         for Maximum_Input in 0 .. 6 loop
+            Local_Policy := Policy;
+            Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
+            Check_Skip_Expected
+              ("[null]",
+               Local_Policy,
+               (if Maximum_Input = 6
+                then Errors.No_Error
+                else Errors.Capacity_Exceeded),
+               Expected_Offsets (Maximum_Input),
+               Expected_Cursors (Maximum_Input),
+               Expected_Consumed (Maximum_Input));
+         end loop;
+      end;
+
+      Check_Skip_Parity ("");
+      Check_Skip_Parity ("n");
+      Check_Skip_Parity ("[");
+      Check_Skip_Parity ("[1");
+      Check_Skip_Parity ("[1,]");
+      Check_Skip_Parity ("[1x]");
+      Check_Skip_Expected
+        ("[1x]",
+         Policy,
+         Errors.Syntax_Error,
+         Expected_Offset   => 2,
+         Expected_Cursor   => 2,
+         Expected_Consumed => 2);
+      Check_Skip_Parity ("{");
+      Check_Skip_Parity ("{""a""}");
+      Check_Skip_Parity ("{""a"":}");
+      Check_Skip_Parity ("{""a"":1,}");
+
+      declare
+         Local_Policy : Policies.Decode_Policy := Policy;
+      begin
+         Local_Policy.Limits.Maximum_Nesting_Depth := 0;
+         Check_Skip_Parity ("[]", Local_Policy);
+         Check_Skip_Expected
+           ("[]",
+            Local_Policy,
+            Errors.Depth_Exceeded,
+            Expected_Offset   => 0,
+            Expected_Cursor   => 0,
+            Expected_Consumed => 0);
+         Local_Policy := Policy;
+         Local_Policy.Limits.Maximum_Nesting_Depth := 1;
+         Check_Skip_Parity ("[[]]", Local_Policy);
+         Check_Skip_Expected
+           ("[[]]",
+            Local_Policy,
+            Errors.Depth_Exceeded,
+            Expected_Offset   => 1,
+            Expected_Cursor   => 1,
+            Expected_Consumed => 1);
+         Local_Policy.Limits.Maximum_Nesting_Depth := 2;
+         Check_Skip_Expected
+           ("[[]]",
+            Local_Policy,
+            Errors.No_Error,
+            Expected_Offset   => 0,
+            Expected_Cursor   => 4,
+            Expected_Consumed => 4);
+         Local_Policy := Policy;
+         Local_Policy.Limits.Maximum_Container_Items := 0;
+         Check_Skip_Parity ("[null]", Local_Policy);
+         Check_Skip_Parity ("{""a"":null}", Local_Policy);
+         Check_Skip_Expected
+           ("[null]",
+            Local_Policy,
+            Errors.Capacity_Exceeded,
+            Expected_Offset   => 1,
+            Expected_Cursor   => 1,
+            Expected_Consumed => 1);
+         Check_Skip_Expected
+           ("{""a"":null}",
+            Local_Policy,
+            Errors.Capacity_Exceeded,
+            Expected_Offset   => 1,
+            Expected_Cursor   => 1,
+            Expected_Consumed => 1);
+         Local_Policy.Limits.Maximum_Container_Items := 1;
+         Check_Skip_Expected
+           ("[null]",
+            Local_Policy,
+            Errors.No_Error,
+            Expected_Offset   => 0,
+            Expected_Cursor   => 6,
+            Expected_Consumed => 6);
+         Check_Skip_Expected
+           ("{""a"":null}",
+            Local_Policy,
+            Errors.No_Error,
+            Expected_Offset   => 0,
+            Expected_Cursor   => 10,
+            Expected_Consumed => 10);
+         Check_Skip_Expected
+           ("[null,true]",
+            Local_Policy,
+            Errors.Capacity_Exceeded,
+            Expected_Offset   => 6,
+            Expected_Cursor   => 6,
+            Expected_Consumed => 6);
+         Check_Skip_Expected
+           ("{""a"":null,""b"":true}",
+            Local_Policy,
+            Errors.Capacity_Exceeded,
+            Expected_Offset   => 10,
+            Expected_Cursor   => 10,
+            Expected_Consumed => 10);
+         Local_Policy := Policy;
+         Local_Policy.Limits.Maximum_Text_Length := 0;
+         Check_Skip_Parity ("""x""", Local_Policy);
+         Check_Skip_Parity ("{""x"":null}", Local_Policy);
+         Check_Skip_Expected
+           ("[""x""]",
+            Local_Policy,
+            Errors.Capacity_Exceeded,
+            Expected_Offset   => 1,
+            Expected_Cursor   => 1,
+            Expected_Consumed => 1);
+         Check_Skip_Expected
+           ("{""x"":null}",
+            Local_Policy,
+            Errors.Capacity_Exceeded,
+            Expected_Offset   => 1,
+            Expected_Cursor   => 1,
+            Expected_Consumed => 1);
+         Local_Policy := Policy;
+         Local_Policy.Limits.Maximum_Text_Length := 1;
+         Check_Skip_Expected
+           ("[""x""]",
+            Local_Policy,
+            Errors.No_Error,
+            Expected_Offset   => 0,
+            Expected_Cursor   => 5,
+            Expected_Consumed => 5);
+         Local_Policy := Policy;
+         Local_Policy.Limits.Maximum_Logical_Values := 0;
+         Check_Skip_Parity ("null", Local_Policy);
+         Check_Skip_Expected
+           ("null",
+            Local_Policy,
+            Errors.Capacity_Exceeded,
+            Expected_Offset   => 0,
+            Expected_Cursor   => 0,
+            Expected_Consumed => 0,
+            Expected_Values   => 0);
+         Local_Policy := Policy;
+         Local_Policy.Limits.Maximum_Logical_Values := 1;
+         Check_Skip_Expected
+           ("null",
+            Local_Policy,
+            Errors.No_Error,
+            Expected_Offset   => 0,
+            Expected_Cursor   => 4,
+            Expected_Consumed => 4);
+      end;
 
       for Operation in Supported_Operation loop
          Check_Prelatched (Operation);
