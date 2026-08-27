@@ -990,7 +990,9 @@ package body Flyology_Serde.Deserializers.JSON is
    procedure Read_Boolean
      (Self  : in out Reader;
       Value : out Boolean;
-      Error : in out Errors.Error_Info) is
+      Error : in out Errors.Error_Info)
+   is
+      Candidate : Boolean := False;
    begin
       Value := False;
       Require_Leading (Self, "tf", Error);
@@ -1001,12 +1003,15 @@ package body Flyology_Serde.Deserializers.JSON is
       elsif Has_Input (Self) and then Current (Self) = 't' then
          Expect_Literal (Self, "true", Error);
          if Error.Code = Errors.No_Error then
-            Value := True;
+            Candidate := True;
          end if;
       else
          Expect_Literal (Self, "false", Error);
       end if;
       Finish_Value (Self, Error);
+      if Error.Code = Errors.No_Error then
+         Value := Candidate;
+      end if;
    end Read_Boolean;
 
    overriding
@@ -1019,6 +1024,7 @@ package body Flyology_Serde.Deserializers.JSON is
       Length     : Natural;
       Is_Integer : Boolean;
       Negative   : Boolean;
+      Candidate  : Interfaces.Integer_64 := 0;
    begin
       Value := 0;
       Require_Leading (Self, "-0123456789", Error);
@@ -1028,13 +1034,16 @@ package body Flyology_Serde.Deserializers.JSON is
          Fail (Self, Errors.Unexpected_Kind, Error, Self.Cursor - Length);
       elsif Error.Code = Errors.No_Error then
          begin
-            Value := Interfaces.Integer_64'Value (Buffer (1 .. Length));
+            Candidate := Interfaces.Integer_64'Value (Buffer (1 .. Length));
          exception
             when Constraint_Error =>
                Fail (Self, Errors.Out_Of_Range, Error, Self.Cursor - Length);
          end;
       end if;
       Finish_Value (Self, Error);
+      if Error.Code = Errors.No_Error then
+         Value := Candidate;
+      end if;
    end Read_Signed;
 
    overriding
@@ -1047,6 +1056,7 @@ package body Flyology_Serde.Deserializers.JSON is
       Length     : Natural;
       Is_Integer : Boolean;
       Negative   : Boolean;
+      Candidate  : Interfaces.Unsigned_64 := 0;
    begin
       Value := 0;
       Require_Leading (Self, "-0123456789", Error);
@@ -1058,13 +1068,16 @@ package body Flyology_Serde.Deserializers.JSON is
          Fail (Self, Errors.Out_Of_Range, Error, Self.Cursor - Length);
       elsif Error.Code = Errors.No_Error then
          begin
-            Value := Interfaces.Unsigned_64'Value (Buffer (1 .. Length));
+            Candidate := Interfaces.Unsigned_64'Value (Buffer (1 .. Length));
          exception
             when Constraint_Error =>
                Fail (Self, Errors.Out_Of_Range, Error, Self.Cursor - Length);
          end;
       end if;
       Finish_Value (Self, Error);
+      if Error.Code = Errors.No_Error then
+         Value := Candidate;
+      end if;
    end Read_Unsigned;
 
    overriding
@@ -1078,6 +1091,7 @@ package body Flyology_Serde.Deserializers.JSON is
       Is_Integer : Boolean;
       Negative   : Boolean;
       Parsed     : Interfaces.IEEE_Float_64;
+      Candidate  : Data_Model.Float_64_Value := Data_Model.Make_Finite (0.0);
    begin
       Value := Data_Model.Make_Finite (0.0);
       Require_Leading (Self, "-0123456789", Error);
@@ -1092,7 +1106,7 @@ package body Flyology_Serde.Deserializers.JSON is
             then
                Fail (Self, Errors.Out_Of_Range, Error, Self.Cursor - Length);
             else
-               Value := Data_Model.Make_Finite (Parsed);
+               Candidate := Data_Model.Make_Finite (Parsed);
             end if;
          exception
             when Constraint_Error =>
@@ -1100,6 +1114,9 @@ package body Flyology_Serde.Deserializers.JSON is
          end;
       end if;
       Finish_Value (Self, Error);
+      if Error.Code = Errors.No_Error then
+         Value := Candidate;
+      end if;
    end Read_Float_64;
 
    overriding

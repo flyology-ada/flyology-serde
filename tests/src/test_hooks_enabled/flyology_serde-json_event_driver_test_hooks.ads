@@ -12,6 +12,8 @@ private package Flyology_Serde.JSON_Event_Driver_Test_Hooks is
 
    procedure Disarm;
    procedure Arm (Point : Failure_Point);
+   procedure Arm_After
+     (Point : Failure_Point; Matching_Calls_To_Skip : Natural);
    procedure Raise_If_Armed (Point : Failure_Point);
    procedure Arm_Boolean_Override (Value : Boolean);
    procedure Apply_Boolean_Override (Value : in out Boolean);

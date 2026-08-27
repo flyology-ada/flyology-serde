@@ -22,6 +22,13 @@ private package Flyology_Serde.JSON_Event_Driver_Test_Hooks is
      Convention    => Ada,
      External_Name => "flyology_serde_disabled_json_driver_arm";
 
+   procedure Arm_After
+     (Point : Failure_Point; Matching_Calls_To_Skip : Natural)
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_arm_after";
+
    procedure Raise_If_Armed (Point : Failure_Point)
    with
      Import,

@@ -2,7 +2,8 @@
 
 Date: 2026-08-26
 
-Status: accepted architecture; implementation pending. It extends the accepted
+Status: accepted architecture; implementation in progress. The map slice is
+reviewed; the remaining container scope is pending. It extends the accepted
 private root-scalar milestone and grants no public backend-selection authority.
 
 ## Scope and authority
@@ -430,3 +431,18 @@ the first/subsequent separator grammar, exact map and optional phases,
 once-only root `Document_End`, terminal ownership and replay, remaining-depth
 raw skipping, common poison/unwind, and the required mutation and parity
 evidence. The shared Wire boundary review separately reported P0/P1/P2 none.
+
+## Map implementation review record
+
+The map implementation and its fix revisions received two independent diff
+reviews. The final reviews reported P0 none, P1 none, and P2 none. Fixes made
+during review covered successful reverse nesting, whitespace at every map
+representation boundary, exact item-limit traces without a public test
+observer, exceptions during scalar and popped-container map resolution,
+abort/reset from every implemented map phase, call-order misuse, and ownership
+of the outer map closer.
+
+The final verification ran the root build and assertion-enabled tests, the
+Flyology JSON dependency and Python checks, test-hook elision, every maintained
+Ada and Python generator gate, release-marker and fixture-manifest checks, APM
+0.28.0 install/compile/audit reproduction, formatting, and diff checks.

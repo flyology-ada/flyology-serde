@@ -1,6 +1,7 @@
 package body Flyology_Serde.JSON_Event_Driver_Test_Hooks is
    Armed                   : Boolean := False;
    Armed_Point             : Failure_Point := Before_Step;
+   Armed_Skip              : Natural := 0;
    Boolean_Override_Armed  : Boolean := False;
    Boolean_Override_Value  : Boolean := False;
    Source_Override_Armed   : Boolean := False;
@@ -23,6 +24,7 @@ package body Flyology_Serde.JSON_Event_Driver_Test_Hooks is
    begin
       Armed := False;
       Armed_Point := Before_Step;
+      Armed_Skip := 0;
       Boolean_Override_Armed := False;
       Boolean_Override_Value := False;
       Source_Override_Armed := False;
@@ -48,11 +50,24 @@ package body Flyology_Serde.JSON_Event_Driver_Test_Hooks is
       Armed := True;
    end Arm;
 
+   procedure Arm_After
+     (Point : Failure_Point; Matching_Calls_To_Skip : Natural) is
+   begin
+      Disarm;
+      Armed_Point := Point;
+      Armed_Skip := Matching_Calls_To_Skip;
+      Armed := True;
+   end Arm_After;
+
    procedure Raise_If_Armed (Point : Failure_Point) is
    begin
       if Armed and then Point = Armed_Point then
-         Armed := False;
-         raise Constraint_Error with "injected JSON driver failure";
+         if Armed_Skip > 0 then
+            Armed_Skip := Armed_Skip - 1;
+         else
+            Armed := False;
+            raise Constraint_Error with "injected JSON driver failure";
+         end if;
       end if;
    end Raise_If_Armed;
 

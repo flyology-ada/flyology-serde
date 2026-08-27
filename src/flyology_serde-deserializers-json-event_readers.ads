@@ -219,6 +219,8 @@ private
       Root_Terminal,
       Sequence_Child_Terminal,
       Sequence_End_Terminal,
+      Map_Key_Terminal,
+      Map_Value_Terminal,
       Record_Child_Terminal,
       Record_End_Terminal);
 

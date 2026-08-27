@@ -2370,7 +2370,10 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          End_Sequence_Operation,
          Begin_Record_Operation,
          Next_Field_Operation,
-         End_Record_Operation);
+         End_Record_Operation,
+         Begin_Map_Operation,
+         Next_Map_Entry_Operation,
+         End_Map_Operation);
 
       procedure Check_Prelatched (Operation : Supported_Operation) is
          Input          : aliased constant String := "null";
@@ -2449,6 +2452,17 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
 
             when End_Record_Operation     =>
                Event_Readers.End_Record (Item, Error);
+
+            when Begin_Map_Operation      =>
+               Event_Readers.Begin_Map (Item, Info, Error);
+               pragma Assert (not Info.Known and then Info.Length = 0);
+
+            when Next_Map_Entry_Operation =>
+               Event_Readers.Next_Map_Entry (Item, Available, Error);
+               pragma Assert (not Available);
+
+            when End_Map_Operation        =>
+               Event_Readers.End_Map (Item, Error);
          end case;
          pragma
            Assert
@@ -2475,25 +2489,20 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Skip_Value_Operation,
          Begin_Optional_Operation,
          End_Optional_Operation,
-         Begin_Map_Operation,
-         Next_Map_Entry_Operation,
-         End_Map_Operation,
          Read_Enumeration_Operation,
          Begin_Variant_Operation,
          End_Variant_Operation);
 
       procedure Check_Unsupported (Operation : Unsupported_Operation) is
-         Input     : aliased constant String := "null";
-         Item      : Event_Readers.Reader (Input'Access);
-         Error     : Errors.Error_Info;
-         Bytes     : Ada.Streams.Stream_Element_Array (5 .. 6) :=
-           [others => 9];
-         Text      : String (7 .. 14) := [others => 'x'];
-         Length    : Natural := 99;
-         Name_Len  : Natural := 99;
-         Available : Boolean := True;
-         Present   : Boolean := True;
-         Info      : Data_Model.Length_Information :=
+         Input    : aliased constant String := "null";
+         Item     : Event_Readers.Reader (Input'Access);
+         Error    : Errors.Error_Info;
+         Bytes    : Ada.Streams.Stream_Element_Array (5 .. 6) := [others => 9];
+         Text     : String (7 .. 14) := [others => 'x'];
+         Length   : Natural := 99;
+         Name_Len : Natural := 99;
+         Present  : Boolean := True;
+         Info     : Data_Model.Length_Information :=
            (Known => True, Length => 99);
          procedure Invoke is
          begin
@@ -2514,17 +2523,6 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
 
                when End_Optional_Operation     =>
                   Event_Readers.End_Optional (Item, Error);
-
-               when Begin_Map_Operation        =>
-                  Event_Readers.Begin_Map (Item, Info, Error);
-                  pragma Assert (not Info.Known and then Info.Length = 0);
-
-               when Next_Map_Entry_Operation   =>
-                  Event_Readers.Next_Map_Entry (Item, Available, Error);
-                  pragma Assert (not Available);
-
-               when End_Map_Operation          =>
-                  Event_Readers.End_Map (Item, Error);
 
                when Read_Enumeration_Operation =>
                   Event_Readers.Read_Enumeration
@@ -2632,6 +2630,1025 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Target.Candidate := 0;
          Target.Rollbacks := Target.Rollbacks + 1;
       end Rollback_U64;
+
+      procedure Check_Map_Parity (Maximum_Items : Natural := Natural'Last) is
+         Input              : aliased constant String :=
+           "[ [ 1 , true ] , [ null , [ 2 ] ] ]";
+         Oracle             : Reader (Input'Access);
+         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle_Error       : Errors.Error_Info;
+         Parallel_Error     : Errors.Error_Info;
+         Oracle_Length      : Data_Model.Length_Information;
+         Parallel_Length    : Data_Model.Length_Information;
+         Oracle_Available   : Boolean;
+         Parallel_Available : Boolean;
+         Oracle_Unsigned    : Interfaces.Unsigned_64;
+         Parallel_Unsigned  : Interfaces.Unsigned_64;
+         Oracle_Boolean     : Boolean;
+         Parallel_Boolean   : Boolean;
+         Local_Policy       : Policies.Decode_Policy := Policy;
+
+         procedure Compare is
+         begin
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end Compare;
+      begin
+         Local_Policy.Limits.Maximum_Container_Items := Maximum_Items;
+         Initialize (Oracle, Local_Policy);
+         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Begin_Map (Oracle, Oracle_Length, Oracle_Error);
+         Event_Readers.Begin_Map (Parallel, Parallel_Length, Parallel_Error);
+         Compare;
+         pragma
+           Assert (not Oracle_Length.Known and then not Parallel_Length.Known);
+
+         Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Map_Entry
+           (Parallel, Parallel_Available, Parallel_Error);
+         Compare;
+         pragma Assert (Oracle_Available and then Parallel_Available);
+         Read_Unsigned (Oracle, Oracle_Unsigned, Oracle_Error);
+         Event_Readers.Read_Unsigned
+           (Parallel, Parallel_Unsigned, Parallel_Error);
+         Compare;
+         pragma Assert (Oracle_Unsigned = 1 and then Parallel_Unsigned = 1);
+         Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
+         Event_Readers.Read_Boolean
+           (Parallel, Parallel_Boolean, Parallel_Error);
+         Compare;
+         pragma Assert (Oracle_Boolean and then Parallel_Boolean);
+
+         Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Map_Entry
+           (Parallel, Parallel_Available, Parallel_Error);
+         Compare;
+         pragma Assert (Oracle_Available and then Parallel_Available);
+         Read_Null (Oracle, Oracle_Error);
+         Event_Readers.Read_Null (Parallel, Parallel_Error);
+         Compare;
+         Begin_Sequence (Oracle, Oracle_Length, Oracle_Error);
+         Event_Readers.Begin_Sequence
+           (Parallel, Parallel_Length, Parallel_Error);
+         Compare;
+         Next_Element (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Element
+           (Parallel, Parallel_Available, Parallel_Error);
+         Compare;
+         Read_Unsigned (Oracle, Oracle_Unsigned, Oracle_Error);
+         Event_Readers.Read_Unsigned
+           (Parallel, Parallel_Unsigned, Parallel_Error);
+         Compare;
+         pragma Assert (Oracle_Unsigned = 2 and then Parallel_Unsigned = 2);
+         Next_Element (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Element
+           (Parallel, Parallel_Available, Parallel_Error);
+         Compare;
+         pragma Assert (not Oracle_Available and then not Parallel_Available);
+         End_Sequence (Oracle, Oracle_Error);
+         Event_Readers.End_Sequence (Parallel, Parallel_Error);
+         Compare;
+
+         Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Map_Entry
+           (Parallel, Parallel_Available, Parallel_Error);
+         Compare;
+         pragma Assert (not Oracle_Available and then not Parallel_Available);
+         End_Map (Oracle, Oracle_Error);
+         Event_Readers.End_Map (Parallel, Parallel_Error);
+         Compare;
+         Finish_Document (Oracle, Oracle_Error);
+         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Compare;
+         pragma Assert (Event_Readers.Is_Complete (Parallel));
+      end Check_Map_Parity;
+
+      procedure Check_Empty_Map_Parity is
+         Input              : aliased constant String := "[ ]";
+         Oracle             : Reader (Input'Access);
+         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle_Error       : Errors.Error_Info;
+         Parallel_Error     : Errors.Error_Info;
+         Oracle_Info        : Data_Model.Length_Information;
+         Parallel_Info      : Data_Model.Length_Information;
+         Oracle_Available   : Boolean := True;
+         Parallel_Available : Boolean := True;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Begin_Map (Oracle, Oracle_Info, Oracle_Error);
+         Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Map_Entry
+           (Parallel, Parallel_Available, Parallel_Error);
+         pragma Assert (not Oracle_Available and then not Parallel_Available);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         End_Map (Oracle, Oracle_Error);
+         Event_Readers.End_Map (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         Finish_Document (Oracle, Oracle_Error);
+         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+      end Check_Empty_Map_Parity;
+
+      procedure Check_Map_Container_Key_Parity is
+         Input              : aliased constant String := "[[[null],false]]";
+         Oracle             : Reader (Input'Access);
+         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle_Error       : Errors.Error_Info;
+         Parallel_Error     : Errors.Error_Info;
+         Oracle_Length      : Data_Model.Length_Information;
+         Parallel_Length    : Data_Model.Length_Information;
+         Oracle_Available   : Boolean;
+         Parallel_Available : Boolean;
+         Oracle_Boolean     : Boolean;
+         Parallel_Boolean   : Boolean;
+
+         procedure Compare is
+         begin
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end Compare;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Begin_Map (Oracle, Oracle_Length, Oracle_Error);
+         Event_Readers.Begin_Map (Parallel, Parallel_Length, Parallel_Error);
+         Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Map_Entry
+           (Parallel, Parallel_Available, Parallel_Error);
+         Compare;
+         Begin_Sequence (Oracle, Oracle_Length, Oracle_Error);
+         Event_Readers.Begin_Sequence
+           (Parallel, Parallel_Length, Parallel_Error);
+         Next_Element (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Element
+           (Parallel, Parallel_Available, Parallel_Error);
+         Read_Null (Oracle, Oracle_Error);
+         Event_Readers.Read_Null (Parallel, Parallel_Error);
+         Next_Element (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Element
+           (Parallel, Parallel_Available, Parallel_Error);
+         End_Sequence (Oracle, Oracle_Error);
+         Event_Readers.End_Sequence (Parallel, Parallel_Error);
+         Compare;
+         Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
+         Event_Readers.Read_Boolean
+           (Parallel, Parallel_Boolean, Parallel_Error);
+         Compare;
+         pragma Assert (not Oracle_Boolean and then not Parallel_Boolean);
+         Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Map_Entry
+           (Parallel, Parallel_Available, Parallel_Error);
+         End_Map (Oracle, Oracle_Error);
+         Event_Readers.End_Map (Parallel, Parallel_Error);
+         Finish_Document (Oracle, Oracle_Error);
+         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Compare;
+      end Check_Map_Container_Key_Parity;
+
+      procedure Check_Sequence_Map_Parity is
+         Input              : aliased constant String := "[[[null,true]]]";
+         Oracle             : Reader (Input'Access);
+         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle_Error       : Errors.Error_Info;
+         Parallel_Error     : Errors.Error_Info;
+         Oracle_Length      : Data_Model.Length_Information;
+         Parallel_Length    : Data_Model.Length_Information;
+         Oracle_Available   : Boolean;
+         Parallel_Available : Boolean;
+         Oracle_Boolean     : Boolean;
+         Parallel_Boolean   : Boolean;
+
+         procedure Compare is
+         begin
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end Compare;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Begin_Sequence (Oracle, Oracle_Length, Oracle_Error);
+         Event_Readers.Begin_Sequence
+           (Parallel, Parallel_Length, Parallel_Error);
+         Next_Element (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Element
+           (Parallel, Parallel_Available, Parallel_Error);
+         Begin_Map (Oracle, Oracle_Length, Oracle_Error);
+         Event_Readers.Begin_Map (Parallel, Parallel_Length, Parallel_Error);
+         Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Map_Entry
+           (Parallel, Parallel_Available, Parallel_Error);
+         Read_Null (Oracle, Oracle_Error);
+         Event_Readers.Read_Null (Parallel, Parallel_Error);
+         Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
+         Event_Readers.Read_Boolean
+           (Parallel, Parallel_Boolean, Parallel_Error);
+         Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Map_Entry
+           (Parallel, Parallel_Available, Parallel_Error);
+         pragma Assert (not Oracle_Available and then not Parallel_Available);
+         End_Map (Oracle, Oracle_Error);
+         Event_Readers.End_Map (Parallel, Parallel_Error);
+         Compare;
+         Next_Element (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Element
+           (Parallel, Parallel_Available, Parallel_Error);
+         pragma Assert (not Oracle_Available and then not Parallel_Available);
+         End_Sequence (Oracle, Oracle_Error);
+         Event_Readers.End_Sequence (Parallel, Parallel_Error);
+         Finish_Document (Oracle, Oracle_Error);
+         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Compare;
+         pragma
+           Assert
+             (Oracle_Error.Code = Errors.No_Error
+                and then Event_Readers.Is_Complete (Parallel));
+      end Check_Sequence_Map_Parity;
+
+      procedure Check_Nested_Map_Parity is
+         Input              : aliased constant String := "[[[],[]]]";
+         Oracle             : Reader (Input'Access);
+         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle_Error       : Errors.Error_Info;
+         Parallel_Error     : Errors.Error_Info;
+         Oracle_Info        : Data_Model.Length_Information;
+         Parallel_Info      : Data_Model.Length_Information;
+         Oracle_Available   : Boolean;
+         Parallel_Available : Boolean;
+
+         procedure Compare is
+         begin
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end Compare;
+
+         procedure Begin_Next is
+         begin
+            Begin_Map (Oracle, Oracle_Info, Oracle_Error);
+            Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+            Compare;
+            Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+            Event_Readers.Next_Map_Entry
+              (Parallel, Parallel_Available, Parallel_Error);
+            Compare;
+         end Begin_Next;
+
+         procedure End_Current is
+         begin
+            End_Map (Oracle, Oracle_Error);
+            Event_Readers.End_Map (Parallel, Parallel_Error);
+            Compare;
+         end End_Current;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Begin_Next;
+         pragma Assert (Oracle_Available and then Parallel_Available);
+         Begin_Next;
+         pragma Assert (not Oracle_Available and then not Parallel_Available);
+         End_Current;
+         Begin_Next;
+         pragma Assert (not Oracle_Available and then not Parallel_Available);
+         End_Current;
+         Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Map_Entry
+           (Parallel, Parallel_Available, Parallel_Error);
+         Compare;
+         pragma Assert (not Oracle_Available and then not Parallel_Available);
+         End_Current;
+         Finish_Document (Oracle, Oracle_Error);
+         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Compare;
+      end Check_Nested_Map_Parity;
+
+      type Map_Scalar_Operation is
+        (Map_Boolean, Map_Signed, Map_Unsigned, Map_Float, Map_Text);
+
+      type Map_Child_Position is (Map_Key, Map_Value);
+
+      type Map_Late_Failure is (Late_Syntax, Late_Capacity);
+
+      procedure Check_Map_Late_Scalar_Output
+        (Operation : Map_Scalar_Operation;
+         Position  : Map_Child_Position;
+         Failure   : Map_Late_Failure)
+      is
+         Token              : constant String :=
+           (case Operation is
+              when Map_Boolean  => "true",
+              when Map_Signed   => "-1",
+              when Map_Unsigned => "1",
+              when Map_Float    => "1.5",
+              when Map_Text     => """x""");
+         Source             : constant String :=
+           (case Position is
+              when Map_Key   =>
+                (case Failure is
+                   when Late_Syntax   => "[[" & Token & " true]]",
+                   when Late_Capacity => "[[" & Token & ",true]]"),
+              when Map_Value =>
+                (case Failure is
+                   when Late_Syntax   => "[[null," & Token & " x]]",
+                   when Late_Capacity => "[[null," & Token & "]]"));
+         Input              : aliased constant String := Source;
+         Oracle             : Reader (Input'Access);
+         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle_Error       : Errors.Error_Info;
+         Parallel_Error     : Errors.Error_Info;
+         Oracle_Info        : Data_Model.Length_Information;
+         Parallel_Info      : Data_Model.Length_Information;
+         Oracle_Available   : Boolean;
+         Parallel_Available : Boolean;
+         Oracle_Boolean     : Boolean := True;
+         Parallel_Boolean   : Boolean := True;
+         Oracle_Signed      : Interfaces.Integer_64 := 99;
+         Parallel_Signed    : Interfaces.Integer_64 := 99;
+         Oracle_Unsigned    : Interfaces.Unsigned_64 := 99;
+         Parallel_Unsigned  : Interfaces.Unsigned_64 := 99;
+         Oracle_Float       : Data_Model.Float_64_Value :=
+           Data_Model.Make_Finite (99.0);
+         Parallel_Float     : Data_Model.Float_64_Value :=
+           Data_Model.Make_Finite (99.0);
+         Oracle_Text        : String (5 .. 8) := [others => 'x'];
+         Parallel_Text      : String (9 .. 12) := [others => 'x'];
+         Oracle_Length      : Natural := 99;
+         Parallel_Length    : Natural := 99;
+         Local_Policy       : Policies.Decode_Policy := Policy;
+      begin
+         if Failure = Late_Capacity then
+            Local_Policy.Limits.Maximum_Input_Units :=
+              (case Position is
+                 when Map_Key   => 2 + Token'Length,
+                 when Map_Value => 7 + Token'Length);
+         end if;
+         Initialize (Oracle, Local_Policy);
+         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Begin_Map (Oracle, Oracle_Info, Oracle_Error);
+         Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+         Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Map_Entry
+           (Parallel, Parallel_Available, Parallel_Error);
+         pragma Assert (Oracle_Available and then Parallel_Available);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         if Position = Map_Value then
+            Read_Null (Oracle, Oracle_Error);
+            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end if;
+
+         case Operation is
+            when Map_Boolean  =>
+               Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
+               Event_Readers.Read_Boolean
+                 (Parallel, Parallel_Boolean, Parallel_Error);
+               pragma
+                 Assert (not Oracle_Boolean and then not Parallel_Boolean);
+
+            when Map_Signed   =>
+               Read_Signed (Oracle, Oracle_Signed, Oracle_Error);
+               Event_Readers.Read_Signed
+                 (Parallel, Parallel_Signed, Parallel_Error);
+               pragma Assert (Oracle_Signed = 0 and then Parallel_Signed = 0);
+
+            when Map_Unsigned =>
+               Read_Unsigned (Oracle, Oracle_Unsigned, Oracle_Error);
+               Event_Readers.Read_Unsigned
+                 (Parallel, Parallel_Unsigned, Parallel_Error);
+               pragma
+                 Assert (Oracle_Unsigned = 0 and then Parallel_Unsigned = 0);
+
+            when Map_Float    =>
+               Read_Float_64 (Oracle, Oracle_Float, Oracle_Error);
+               Event_Readers.Read_Float_64
+                 (Parallel, Parallel_Float, Parallel_Error);
+               pragma
+                 Assert
+                   (Data_Model.Category (Oracle_Float)
+                      = Data_Model.Finite_Float
+                      and then Data_Model.Finite_Value (Oracle_Float) = 0.0
+                      and then not Data_Model.Is_Negative_Zero (Oracle_Float)
+                      and then Data_Model.Category (Parallel_Float)
+                               = Data_Model.Finite_Float
+                      and then Data_Model.Finite_Value (Parallel_Float) = 0.0
+                      and then not Data_Model.Is_Negative_Zero
+                                     (Parallel_Float));
+
+            when Map_Text     =>
+               Read_Text (Oracle, Oracle_Text, Oracle_Length, Oracle_Error);
+               Event_Readers.Read_Text
+                 (Parallel, Parallel_Text, Parallel_Length, Parallel_Error);
+               pragma
+                 Assert
+                   (Oracle_Length = 0
+                      and then Parallel_Length = 0
+                      and then (for all Value of Oracle_Text => Value = ' ')
+                      and then (for all Value of Parallel_Text =>
+                                  Value = ' '));
+         end case;
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         pragma
+           Assert
+             (Oracle_Error.Code
+                = (case Failure is
+                     when Late_Syntax   => Errors.Syntax_Error,
+                     when Late_Capacity => Errors.Capacity_Exceeded),
+              Operation'Image & Position'Image & Failure'Image);
+      end Check_Map_Late_Scalar_Output;
+
+      type Map_Range_Operation is
+        (Map_Signed_Range, Map_Unsigned_Range, Map_Float_Range);
+
+      procedure Check_Map_Scalar_Range_Failure
+        (Operation : Map_Range_Operation; Position : Map_Child_Position)
+      is
+         Token              : constant String :=
+           (case Operation is
+              when Map_Signed_Range   => "9223372036854775808",
+              when Map_Unsigned_Range => "18446744073709551616",
+              when Map_Float_Range    => "1e309");
+         Source             : constant String :=
+           (case Position is
+              when Map_Key   => "[[" & Token & ",null]]",
+              when Map_Value => "[[null," & Token & "]]");
+         Input              : aliased constant String := Source;
+         Oracle             : Reader (Input'Access);
+         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle_Error       : Errors.Error_Info;
+         Parallel_Error     : Errors.Error_Info;
+         Oracle_Info        : Data_Model.Length_Information;
+         Parallel_Info      : Data_Model.Length_Information;
+         Oracle_Available   : Boolean;
+         Parallel_Available : Boolean;
+         Oracle_Signed      : Interfaces.Integer_64 := 99;
+         Parallel_Signed    : Interfaces.Integer_64 := 99;
+         Oracle_Unsigned    : Interfaces.Unsigned_64 := 99;
+         Parallel_Unsigned  : Interfaces.Unsigned_64 := 99;
+         Oracle_Float       : Data_Model.Float_64_Value :=
+           Data_Model.Make_Finite (99.0);
+         Parallel_Float     : Data_Model.Float_64_Value :=
+           Data_Model.Make_Finite (99.0);
+         Expected_Offset    : constant Natural :=
+           (case Position is
+              when Map_Key   => 2 + Token'Length,
+              when Map_Value => 7 + Token'Length);
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Begin_Map (Oracle, Oracle_Info, Oracle_Error);
+         Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+         Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Map_Entry
+           (Parallel, Parallel_Available, Parallel_Error);
+         pragma Assert (Oracle_Available and then Parallel_Available);
+         if Position = Map_Value then
+            Read_Null (Oracle, Oracle_Error);
+            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end if;
+
+         case Operation is
+            when Map_Signed_Range   =>
+               Read_Signed (Oracle, Oracle_Signed, Oracle_Error);
+               Event_Readers.Read_Signed
+                 (Parallel, Parallel_Signed, Parallel_Error);
+               pragma Assert (Oracle_Signed = 0 and then Parallel_Signed = 0);
+
+            when Map_Unsigned_Range =>
+               Read_Unsigned (Oracle, Oracle_Unsigned, Oracle_Error);
+               Event_Readers.Read_Unsigned
+                 (Parallel, Parallel_Unsigned, Parallel_Error);
+               pragma
+                 Assert (Oracle_Unsigned = 0 and then Parallel_Unsigned = 0);
+
+            when Map_Float_Range    =>
+               Read_Float_64 (Oracle, Oracle_Float, Oracle_Error);
+               Event_Readers.Read_Float_64
+                 (Parallel, Parallel_Float, Parallel_Error);
+               pragma
+                 Assert
+                   (Data_Model.Category (Oracle_Float)
+                      = Data_Model.Finite_Float
+                      and then Data_Model.Finite_Value (Oracle_Float) = 0.0
+                      and then Data_Model.Category (Parallel_Float)
+                               = Data_Model.Finite_Float
+                      and then Data_Model.Finite_Value (Parallel_Float) = 0.0);
+         end case;
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         pragma
+           Assert
+             (Oracle_Error.Code = Errors.Out_Of_Range
+                and then Input_Offset (Oracle) = Expected_Offset
+                and then Event_Readers.Input_Offset (Parallel)
+                         = Expected_Offset,
+              Operation'Image & Position'Image);
+      end Check_Map_Scalar_Range_Failure;
+
+      procedure Check_Map_Limit_Parity
+        (Maximum_Input   : Natural := Natural'Last;
+         Maximum_Values  : Natural := Natural'Last;
+         Maximum_Items   : Natural := Natural'Last;
+         Maximum_Depth   : Policies.Nesting_Limit :=
+           Policies.Nesting_Limit (Policies.Maximum_Supported_Nesting);
+         Expected_Code   : Errors.Error_Code := Errors.Capacity_Exceeded;
+         Expected_Offset : Natural)
+      is
+         Input              : aliased constant String :=
+           "[[null,true],[false,null]]";
+         Oracle             : Reader (Input'Access);
+         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle_Error       : Errors.Error_Info;
+         Parallel_Error     : Errors.Error_Info;
+         Oracle_Info        : Data_Model.Length_Information;
+         Parallel_Info      : Data_Model.Length_Information;
+         Oracle_Available   : Boolean;
+         Parallel_Available : Boolean;
+         Oracle_Boolean     : Boolean;
+         Parallel_Boolean   : Boolean;
+         Local_Policy       : Policies.Decode_Policy := Policy;
+
+         procedure Compare is
+         begin
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end Compare;
+
+         procedure Next_Entry is
+         begin
+            Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+            Event_Readers.Next_Map_Entry
+              (Parallel, Parallel_Available, Parallel_Error);
+            pragma Assert (Oracle_Available = Parallel_Available);
+            Compare;
+         end Next_Entry;
+      begin
+         Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
+         Local_Policy.Limits.Maximum_Logical_Values := Maximum_Values;
+         Local_Policy.Limits.Maximum_Container_Items := Maximum_Items;
+         Local_Policy.Limits.Maximum_Nesting_Depth := Maximum_Depth;
+         Initialize (Oracle, Local_Policy);
+         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Begin_Map (Oracle, Oracle_Info, Oracle_Error);
+         Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+         Compare;
+         if Oracle_Error.Code = Errors.No_Error then
+            Next_Entry;
+         end if;
+         if Oracle_Error.Code = Errors.No_Error then
+            Read_Null (Oracle, Oracle_Error);
+            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Compare;
+         end if;
+         if Oracle_Error.Code = Errors.No_Error then
+            Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
+            Event_Readers.Read_Boolean
+              (Parallel, Parallel_Boolean, Parallel_Error);
+            Compare;
+         end if;
+         if Oracle_Error.Code = Errors.No_Error then
+            Next_Entry;
+         end if;
+         if Oracle_Error.Code = Errors.No_Error then
+            Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
+            Event_Readers.Read_Boolean
+              (Parallel, Parallel_Boolean, Parallel_Error);
+            Compare;
+         end if;
+         if Oracle_Error.Code = Errors.No_Error then
+            Read_Null (Oracle, Oracle_Error);
+            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Compare;
+         end if;
+         pragma
+           Assert
+             (Parallel_Error.Code = Expected_Code
+                and then Parallel_Error.Input_Offset = Expected_Offset
+                and then Event_Readers.Input_Consumed (Parallel)
+                         = Expected_Offset,
+              Maximum_Input'Image
+                & Maximum_Values'Image
+                & Maximum_Items'Image
+                & Maximum_Depth'Image
+                & Parallel_Error.Code'Image
+                & Parallel_Error.Input_Offset'Image
+                & Event_Readers.Input_Consumed (Parallel)'Image);
+      end Check_Map_Limit_Parity;
+
+      procedure Check_End_Map_Closer_Denial is
+         Input              : aliased constant String := "[]";
+         Oracle             : Reader (Input'Access);
+         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle_Error       : Errors.Error_Info;
+         Parallel_Error     : Errors.Error_Info;
+         Oracle_Info        : Data_Model.Length_Information;
+         Parallel_Info      : Data_Model.Length_Information;
+         Oracle_Available   : Boolean := True;
+         Parallel_Available : Boolean := True;
+         Local_Policy       : Policies.Decode_Policy := Policy;
+      begin
+         Local_Policy.Limits.Maximum_Input_Units := 1;
+         Initialize (Oracle, Local_Policy);
+         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Begin_Map (Oracle, Oracle_Info, Oracle_Error);
+         Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Map_Entry
+           (Parallel, Parallel_Available, Parallel_Error);
+         pragma Assert (not Oracle_Available and then not Parallel_Available);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         End_Map (Oracle, Oracle_Error);
+         Event_Readers.End_Map (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         pragma
+           Assert
+             (Oracle_Error.Code = Errors.Capacity_Exceeded
+                and then Input_Offset (Oracle) = 1
+                and then Event_Readers.Input_Offset (Parallel) = 1
+                and then Event_Readers.Container_Depth (Parallel) = 0
+                and then Event_Readers.Budget_Depth (Parallel) = 0);
+      end Check_End_Map_Closer_Denial;
+
+      type Map_Syntax_Case is
+        (Map_Not_Array,
+         Missing_Entry_Opener,
+         Empty_Entry,
+         Extra_Entry_Child,
+         Missing_Outer_Comma,
+         Trailing_Outer_Comma,
+         Wrong_Outer_Closer);
+
+      procedure Check_Map_Syntax_Parity (Test_Case : Map_Syntax_Case) is
+         Source             : constant String :=
+           (case Test_Case is
+              when Map_Not_Array        => "{}",
+              when Missing_Entry_Opener => "[null]",
+              when Empty_Entry          => "[[]]",
+              when Extra_Entry_Child    => "[[null,true,false]]",
+              when Missing_Outer_Comma  => "[[null,true][false,null]]",
+              when Trailing_Outer_Comma => "[[null,true],]",
+              when Wrong_Outer_Closer   => "[[null,true]}");
+         Expected_Offset    : constant Natural :=
+           (case Test_Case is
+              when Map_Not_Array        => 0,
+              when Missing_Entry_Opener => 1,
+              when Empty_Entry          => 2,
+              when Extra_Entry_Child    => 11,
+              when Missing_Outer_Comma  => 12,
+              when Trailing_Outer_Comma => 13,
+              when Wrong_Outer_Closer   => 12);
+         Expected_Code      : constant Errors.Error_Code :=
+           (if Test_Case = Map_Not_Array
+            then Errors.Unexpected_Kind
+            else Errors.Syntax_Error);
+         Input              : aliased constant String := Source;
+         Oracle             : Reader (Input'Access);
+         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle_Error       : Errors.Error_Info;
+         Parallel_Error     : Errors.Error_Info;
+         Oracle_Info        : Data_Model.Length_Information;
+         Parallel_Info      : Data_Model.Length_Information;
+         Oracle_Available   : Boolean;
+         Parallel_Available : Boolean;
+         Oracle_Boolean     : Boolean := True;
+         Parallel_Boolean   : Boolean := True;
+
+         procedure Compare is
+         begin
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end Compare;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Begin_Map (Oracle, Oracle_Info, Oracle_Error);
+         Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+         Compare;
+         if Oracle_Error.Code = Errors.No_Error then
+            Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+            Event_Readers.Next_Map_Entry
+              (Parallel, Parallel_Available, Parallel_Error);
+            Compare;
+         end if;
+         if Oracle_Error.Code = Errors.No_Error then
+            Read_Null (Oracle, Oracle_Error);
+            Event_Readers.Read_Null (Parallel, Parallel_Error);
+            Compare;
+         end if;
+         if Oracle_Error.Code = Errors.No_Error then
+            Read_Boolean (Oracle, Oracle_Boolean, Oracle_Error);
+            Event_Readers.Read_Boolean
+              (Parallel, Parallel_Boolean, Parallel_Error);
+            Compare;
+         end if;
+         if Oracle_Error.Code = Errors.No_Error then
+            Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+            Event_Readers.Next_Map_Entry
+              (Parallel, Parallel_Available, Parallel_Error);
+            Compare;
+         end if;
+         pragma
+           Assert
+             (Parallel_Error.Code = Expected_Code
+                and then Parallel_Error.Input_Offset = Expected_Offset
+                and then Event_Readers.Input_Consumed (Parallel)
+                         = Expected_Offset,
+              Test_Case'Image
+                & Parallel_Error.Code'Image
+                & Parallel_Error.Input_Offset'Image
+                & Event_Readers.Input_Consumed (Parallel)'Image);
+      end Check_Map_Syntax_Parity;
+
+      type Map_Exception_Operation is
+        (Begin_Map_Exception, Next_Map_Exception, End_Map_Exception);
+
+      procedure Check_Map_Exception_Cleanup
+        (Operation : Map_Exception_Operation; Point : Test_Hooks.Failure_Point)
+      is
+         Source    : constant String :=
+           (case Operation is
+              when Begin_Map_Exception => "[]",
+              when Next_Map_Exception  => "[[null,true]]",
+              when End_Map_Exception   => "[]");
+         Input     : aliased constant String := Source;
+         Item      : Event_Readers.Reader (Input'Access);
+         Error     : Errors.Error_Info;
+         Info      : Data_Model.Length_Information;
+         Available : Boolean;
+         Raised    : Boolean := False;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         if Operation /= Begin_Map_Exception then
+            Event_Readers.Begin_Map (Item, Info, Error);
+         end if;
+         if Operation = End_Map_Exception then
+            Event_Readers.Next_Map_Entry (Item, Available, Error);
+            pragma Assert (not Available);
+         end if;
+         Test_Hooks.Arm (Point);
+         begin
+            case Operation is
+               when Begin_Map_Exception =>
+                  Event_Readers.Begin_Map (Item, Info, Error);
+
+               when Next_Map_Exception  =>
+                  Event_Readers.Next_Map_Entry (Item, Available, Error);
+
+               when End_Map_Exception   =>
+                  Event_Readers.End_Map (Item, Error);
+            end case;
+         exception
+            when Constraint_Error =>
+               Raised := True;
+         end;
+         pragma
+           Assert
+             (Raised
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0,
+              Operation'Image & Point'Image);
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         Event_Readers.Begin_Map (Item, Info, Error);
+         Event_Readers.Abort_Document (Item, Error);
+         pragma Assert (Error.Code = Errors.No_Error);
+      end Check_Map_Exception_Cleanup;
+
+      type Map_Resolution_Exception_Case is
+        (Scalar_Key_Resolution,
+         Scalar_Value_Resolution,
+         Sequence_Key_Resolution,
+         Sequence_Value_Resolution,
+         Record_Key_Resolution,
+         Record_Value_Resolution);
+
+      procedure Check_Map_Resolution_Exception
+        (Test_Case : Map_Resolution_Exception_Case;
+         Point     : Test_Hooks.Failure_Point)
+      is
+         Source        : constant String :=
+           (case Test_Case is
+              when Scalar_Key_Resolution     => "[[null ,true]]",
+              when Scalar_Value_Resolution   => "[[null,true]]",
+              when Sequence_Key_Resolution   => "[[[],true]]",
+              when Sequence_Value_Resolution => "[[null,[]]]",
+              when Record_Key_Resolution     => "[[{},true]]",
+              when Record_Value_Resolution   => "[[null,{}]]");
+         Input         : aliased constant String := Source;
+         Item          : Event_Readers.Reader (Input'Access);
+         Error         : Errors.Error_Info;
+         Info          : Data_Model.Length_Information;
+         Available     : Boolean;
+         Name          : String (5 .. 8);
+         Name_Length   : Natural;
+         Boolean_Value : Boolean;
+         Raised        : Boolean := False;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Begin_Map (Item, Info, Error);
+         Event_Readers.Next_Map_Entry (Item, Available, Error);
+         if Test_Case
+            in Scalar_Value_Resolution
+             | Sequence_Value_Resolution
+             | Record_Value_Resolution
+         then
+            Event_Readers.Read_Null (Item, Error);
+         end if;
+
+         case Test_Case is
+            when Scalar_Key_Resolution | Scalar_Value_Resolution =>
+               Test_Hooks.Arm_After (Point, Matching_Calls_To_Skip => 5);
+
+            when others                                          =>
+               if Test_Case
+                  in Sequence_Key_Resolution | Sequence_Value_Resolution
+               then
+                  Event_Readers.Begin_Sequence (Item, Info, Error);
+                  Event_Readers.Next_Element (Item, Available, Error);
+               else
+                  Event_Readers.Begin_Record (Item, "T", Info, Error);
+                  Event_Readers.Next_Field
+                    (Item, Name, Name_Length, Available, Error);
+               end if;
+               pragma
+                 Assert (Error.Code = Errors.No_Error and then not Available);
+               Test_Hooks.Arm_After (Point, Matching_Calls_To_Skip => 1);
+         end case;
+
+         begin
+            case Test_Case is
+               when Scalar_Key_Resolution                               =>
+                  Event_Readers.Read_Null (Item, Error);
+
+               when Scalar_Value_Resolution                             =>
+                  Event_Readers.Read_Boolean (Item, Boolean_Value, Error);
+
+               when Sequence_Key_Resolution | Sequence_Value_Resolution =>
+                  Event_Readers.End_Sequence (Item, Error);
+
+               when Record_Key_Resolution | Record_Value_Resolution     =>
+                  Event_Readers.End_Record (Item, Error);
+            end case;
+         exception
+            when Constraint_Error =>
+               Raised := True;
+         end;
+         pragma
+           Assert
+             (Raised
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0,
+              Test_Case'Image & Point'Image);
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         Event_Readers.Begin_Map (Item, Info, Error);
+         Event_Readers.Abort_Document (Item, Error);
+         pragma Assert (Error.Code = Errors.No_Error);
+      end Check_Map_Resolution_Exception;
+
+      type Map_Abort_State is
+        (Abort_Key_Ready,
+         Abort_Value_Ready,
+         Abort_Exhausted,
+         Abort_Nested_Key,
+         Abort_Nested_Value);
+
+      procedure Check_Map_Phase_Abort
+        (State : Map_Abort_State; With_Primary : Boolean)
+      is
+         Source    : constant String :=
+           (case State is
+              when Abort_Key_Ready    => "[[null,true]]",
+              when Abort_Value_Ready  => "[[null,true]]",
+              when Abort_Exhausted    => "[]",
+              when Abort_Nested_Key   => "[[[null],true]]",
+              when Abort_Nested_Value => "[[null,[true]]]");
+         Input     : aliased constant String := Source;
+         Item      : Event_Readers.Reader (Input'Access);
+         Error     : Errors.Error_Info;
+         Info      : Data_Model.Length_Information;
+         Available : Boolean;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Begin_Map (Item, Info, Error);
+         Event_Readers.Next_Map_Entry (Item, Available, Error);
+         if State in Abort_Value_Ready | Abort_Nested_Value then
+            Event_Readers.Read_Null (Item, Error);
+         end if;
+         if State in Abort_Nested_Key | Abort_Nested_Value then
+            Event_Readers.Begin_Sequence (Item, Info, Error);
+         elsif State = Abort_Exhausted then
+            pragma Assert (not Available);
+         end if;
+         pragma Assert (Error.Code = Errors.No_Error);
+         if With_Primary then
+            Errors.Fail
+              (Error, Errors.Application_Error, 37, Errors.Byte_Offset);
+         end if;
+         Event_Readers.Abort_Document (Item, Error);
+         pragma
+           Assert
+             ((if With_Primary
+               then
+                 Error.Code = Errors.Application_Error
+                 and then Error.Input_Offset = 37
+               else Error.Code = Errors.No_Error)
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0,
+              State'Image & With_Primary'Image);
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         Event_Readers.Begin_Map (Item, Info, Error);
+         Event_Readers.Abort_Document (Item, Error);
+         pragma Assert (Error.Code = Errors.No_Error);
+      end Check_Map_Phase_Abort;
+
+      type Map_Misuse_Case is
+        (Read_Before_Entry,
+         Next_While_Key_Ready,
+         End_While_Key_Ready,
+         Next_While_Value_Ready,
+         End_While_Value_Ready,
+         End_Before_Exhausted,
+         Next_After_Exhausted,
+         Read_After_Exhausted,
+         Next_While_Nested_Key,
+         End_While_Nested_Value);
+
+      procedure Check_Map_Phase_Misuse (Test_Case : Map_Misuse_Case) is
+         Source        : constant String :=
+           (case Test_Case is
+              when Next_After_Exhausted | Read_After_Exhausted => "[]",
+              when Next_While_Nested_Key                       =>
+                "[[[null],true]]",
+              when End_While_Nested_Value                      =>
+                "[[null,[true]]]",
+              when others                                      =>
+                "[[null,true]]");
+         Input         : aliased constant String := Source;
+         Item          : Event_Readers.Reader (Input'Access);
+         Error         : Errors.Error_Info;
+         Info          : Data_Model.Length_Information;
+         Available     : Boolean := True;
+         Boolean_Value : Boolean := True;
+         Before_Input  : Natural;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Begin_Map (Item, Info, Error);
+         if Test_Case /= Read_Before_Entry then
+            Event_Readers.Next_Map_Entry (Item, Available, Error);
+         end if;
+         if Test_Case
+            in Next_While_Value_Ready
+             | End_While_Value_Ready
+             | End_Before_Exhausted
+             | End_While_Nested_Value
+         then
+            Event_Readers.Read_Null (Item, Error);
+         end if;
+         if Test_Case = End_Before_Exhausted then
+            Event_Readers.Read_Boolean (Item, Boolean_Value, Error);
+         elsif Test_Case = Next_While_Nested_Key then
+            Event_Readers.Begin_Sequence (Item, Info, Error);
+         elsif Test_Case = End_While_Nested_Value then
+            Event_Readers.Begin_Sequence (Item, Info, Error);
+         elsif Test_Case in Next_After_Exhausted | Read_After_Exhausted then
+            pragma Assert (not Available);
+         end if;
+         pragma Assert (Error.Code = Errors.No_Error);
+         Before_Input := Event_Readers.Input_Consumed (Item);
+         Available := True;
+         Boolean_Value := True;
+
+         case Test_Case is
+            when Read_Before_Entry | Read_After_Exhausted =>
+               Event_Readers.Read_Boolean (Item, Boolean_Value, Error);
+               pragma Assert (not Boolean_Value);
+
+            when Next_While_Key_Ready
+               | Next_While_Value_Ready
+               | Next_After_Exhausted
+               | Next_While_Nested_Key                    =>
+               Event_Readers.Next_Map_Entry (Item, Available, Error);
+               pragma Assert (not Available);
+
+            when End_While_Key_Ready
+               | End_While_Value_Ready
+               | End_Before_Exhausted
+               | End_While_Nested_Value                   =>
+               Event_Readers.End_Map (Item, Error);
+         end case;
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then Event_Readers.Input_Consumed (Item) = Before_Input
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0,
+              Test_Case'Image
+                & Error.Code'Image
+                & Before_Input'Image
+                & Event_Readers.Input_Consumed (Item)'Image);
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         Event_Readers.Begin_Map (Item, Info, Error);
+         Event_Readers.Abort_Document (Item, Error);
+         pragma Assert (Error.Code = Errors.No_Error);
+      end Check_Map_Phase_Misuse;
 
       procedure Check_Sequence_Parity is
          Input                : aliased constant String :=
@@ -3867,6 +4884,157 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
       Check_Peek ("x");
       Check_Sequence_Parity;
       Check_Record_Parity;
+      Check_Map_Parity;
+      Check_Map_Parity (Maximum_Items => 2);
+      Check_Empty_Map_Parity;
+      Check_Map_Container_Key_Parity;
+      Check_Sequence_Map_Parity;
+      Check_Nested_Map_Parity;
+      for Operation in Map_Scalar_Operation loop
+         for Position in Map_Child_Position loop
+            for Failure in Map_Late_Failure loop
+               Check_Map_Late_Scalar_Output (Operation, Position, Failure);
+            end loop;
+         end loop;
+      end loop;
+      for Operation in Map_Range_Operation loop
+         for Position in Map_Child_Position loop
+            Check_Map_Scalar_Range_Failure (Operation, Position);
+         end loop;
+      end loop;
+      Check_Map_Limit_Parity (Maximum_Input => 0, Expected_Offset => 0);
+      Check_Map_Limit_Parity (Maximum_Values => 0, Expected_Offset => 0);
+      Check_Map_Limit_Parity
+        (Maximum_Depth   => 0,
+         Expected_Code   => Errors.Depth_Exceeded,
+         Expected_Offset => 1);
+      Check_Map_Limit_Parity (Maximum_Input => 2, Expected_Offset => 2);
+      Check_Map_Limit_Parity (Maximum_Items => 0, Expected_Offset => 2);
+      Check_Map_Limit_Parity (Maximum_Values => 1, Expected_Offset => 2);
+      Check_Map_Limit_Parity (Maximum_Input => 6, Expected_Offset => 6);
+      Check_Map_Limit_Parity (Maximum_Input => 7, Expected_Offset => 7);
+      Check_Map_Limit_Parity (Maximum_Values => 2, Expected_Offset => 7);
+      Check_Map_Limit_Parity (Maximum_Input => 11, Expected_Offset => 11);
+      Check_Map_Limit_Parity (Maximum_Input => 12, Expected_Offset => 12);
+      Check_Map_Limit_Parity (Maximum_Items => 1, Expected_Offset => 14);
+      Check_Map_Limit_Parity (Maximum_Values => 3, Expected_Offset => 14);
+      Check_End_Map_Closer_Denial;
+      for Test_Case in Map_Syntax_Case loop
+         Check_Map_Syntax_Parity (Test_Case);
+      end loop;
+      for Operation in Map_Exception_Operation loop
+         for Point in Test_Hooks.Before_Source_Copy .. Test_Hooks.After_Step
+         loop
+            Check_Map_Exception_Cleanup (Operation, Point);
+         end loop;
+      end loop;
+      for Test_Case in Map_Resolution_Exception_Case loop
+         for Point in Test_Hooks.Before_Step .. Test_Hooks.After_Step loop
+            Check_Map_Resolution_Exception (Test_Case, Point);
+         end loop;
+      end loop;
+      for State in Map_Abort_State loop
+         Check_Map_Phase_Abort (State, With_Primary => False);
+         Check_Map_Phase_Abort (State, With_Primary => True);
+      end loop;
+      for Test_Case in Map_Misuse_Case loop
+         Check_Map_Phase_Misuse (Test_Case);
+      end loop;
+
+      --  Every map structural array is independently validated. A malformed
+      --  entry opener, entry closer, or outer closer publishes no map phase
+      --  and unwinds both logical depth domains.
+      declare
+         Input     : aliased constant String := "[[]]";
+         Item      : Event_Readers.Reader (Input'Access);
+         Error     : Errors.Error_Info;
+         Info      : Data_Model.Length_Information;
+         Available : Boolean := True;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Begin_Map (Item, Info, Error);
+         Test_Hooks.Arm_Source_Offset_Override (0, 99);
+         Event_Readers.Next_Map_Entry (Item, Available, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then not Available
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0);
+      end;
+
+      declare
+         Input     : aliased constant String := "[[null,true]]";
+         Item      : Event_Readers.Reader (Input'Access);
+         Error     : Errors.Error_Info;
+         Info      : Data_Model.Length_Information;
+         Available : Boolean;
+         Value     : Boolean := True;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Begin_Map (Item, Info, Error);
+         Event_Readers.Next_Map_Entry (Item, Available, Error);
+         Event_Readers.Read_Null (Item, Error);
+         Test_Hooks.Arm_Source_Offset_Override (1, 99);
+         Event_Readers.Read_Boolean (Item, Value, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then not Value
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0);
+      end;
+
+      declare
+         Input     : aliased constant String := "[]";
+         Item      : Event_Readers.Reader (Input'Access);
+         Error     : Errors.Error_Info;
+         Info      : Data_Model.Length_Information;
+         Available : Boolean := True;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Begin_Map (Item, Info, Error);
+         Event_Readers.Next_Map_Entry (Item, Available, Error);
+         pragma Assert (not Available);
+         Test_Hooks.Arm_Payload_Contamination (0);
+         Event_Readers.End_Map (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0);
+      end;
+
+      --  Abort preserves a caller primary while discarding an active map.
+      --  Reset then constructs a fresh parser and budget operation.
+      declare
+         Input     : aliased constant String := "[]";
+         Item      : Event_Readers.Reader (Input'Access);
+         Error     : Errors.Error_Info;
+         Info      : Data_Model.Length_Information;
+         Available : Boolean;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Event_Readers.Begin_Map (Item, Info, Error);
+         Errors.Fail (Error, Errors.Application_Error, 31, Errors.Byte_Offset);
+         Event_Readers.Abort_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Application_Error
+                and then Error.Input_Offset = 31
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0);
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         Event_Readers.Begin_Map (Item, Info, Error);
+         Event_Readers.Next_Map_Entry (Item, Available, Error);
+         Event_Readers.End_Map (Item, Error);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Event_Readers.Is_Complete (Item));
+      end;
       Check_Sequence_Record_Parity;
       Check_Sequence_Denial_Parity ("[nullx]", 5, 5);
       Check_Sequence_Denial_Parity ("[null,,true]", 6, 6);
