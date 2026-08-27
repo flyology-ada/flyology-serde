@@ -288,6 +288,18 @@ package body Flyology_Serde.JSON_Event_Drivers is
       end if;
 
       Summary.Kind := Summary_Kind (Parsing.Kind (Item));
+      if Test_Hooks.Enabled then
+         declare
+            Kind_Position : Natural := Event_Kind'Pos (Summary.Kind);
+         begin
+            Test_Hooks.Apply_Kind_Override (Kind_Position);
+            if Kind_Position > Event_Kind'Pos (Event_Kind'Last) then
+               Fail (Self, Errors.Invalid_State, Error, Self.Offset);
+               return;
+            end if;
+            Summary.Kind := Event_Kind'Val (Kind_Position);
+         end;
+      end if;
       Summary.Source_Offset := Natural (Source.First);
       Summary.Source_Length := Natural (Source.Octet_Length);
       if Test_Hooks.Enabled then
@@ -343,6 +355,14 @@ package body Flyology_Serde.JSON_Event_Drivers is
          if Test_Hooks.Enabled then
             Test_Hooks.Apply_Boolean_Override (Summary.Boolean_Payload);
          end if;
+      end if;
+      if Test_Hooks.Enabled then
+         Test_Hooks.Apply_Payload_Contamination
+           (Summary.Has_Raw_Byte,
+            Summary.Raw_Byte,
+            Summary.Decoded_Length,
+            Summary.Decoded,
+            Summary.Boolean_Payload);
       end if;
    end Copy_Summary;
 
@@ -992,6 +1012,9 @@ package body Flyology_Serde.JSON_Event_Drivers is
    is
       Diagnostic : JSON_Errors.Diagnostic;
    begin
+      if Test_Hooks.Enabled then
+         Test_Hooks.Note_Abort;
+      end if;
       if Self.Initialized then
          if not Self.Diagnostic_Reported
            and then Parsing.State (Self.Parser)

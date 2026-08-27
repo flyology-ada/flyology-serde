@@ -19,6 +19,8 @@ package body Flyology_Serde.Deserializers.JSON is
          while Budgets.Depth (Self.Budget) > 0 loop
             Budgets.Leave_Container (Self.Budget, Error);
          end loop;
+         Self.Stack := [others => <>];
+         Self.Depth := 0;
          Self.Failed := True;
       end if;
    end Latch;
@@ -1399,7 +1401,9 @@ package body Flyology_Serde.Deserializers.JSON is
          return;
       end if;
       Skip_Whitespace (Self, Error);
-      if not Has_Input (Self) then
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif not Has_Input (Self) then
          Fail (Self, Errors.Syntax_Error, Error);
          return;
       elsif Current (Self) = ']' then
@@ -1466,7 +1470,9 @@ package body Flyology_Serde.Deserializers.JSON is
          return;
       end if;
       Skip_Whitespace (Self, Error);
-      if Has_Input (Self) and then Current (Self) = ']' then
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Has_Input (Self) and then Current (Self) = ']' then
          Self.Stack (Self.Depth).Exhausted := True;
          return;
       end if;
@@ -1535,7 +1541,9 @@ package body Flyology_Serde.Deserializers.JSON is
          return;
       end if;
       Skip_Whitespace (Self, Error);
-      if Has_Input (Self) and then Current (Self) = '}' then
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Has_Input (Self) and then Current (Self) = '}' then
          Self.Stack (Self.Depth).Exhausted := True;
          return;
       end if;

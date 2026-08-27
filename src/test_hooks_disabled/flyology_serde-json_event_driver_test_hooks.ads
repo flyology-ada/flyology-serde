@@ -1,3 +1,5 @@
+with Ada.Streams;
+
 private package Flyology_Serde.JSON_Event_Driver_Test_Hooks is
    Enabled : constant Boolean := False;
 
@@ -50,4 +52,51 @@ private package Flyology_Serde.JSON_Event_Driver_Test_Hooks is
      Import,
      Convention    => Ada,
      External_Name => "flyology_serde_disabled_json_driver_source_apply";
+
+   procedure Arm_Kind_Override (Value : Natural)
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_kind_arm";
+
+   procedure Apply_Kind_Override (Value : in out Natural)
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_kind_apply";
+
+   procedure Arm_Payload_Contamination (Summaries_To_Skip : Natural)
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_payload_arm";
+
+   procedure Apply_Payload_Contamination
+     (Has_Raw_Byte    : in out Boolean;
+      Raw_Byte        : in out Ada.Streams.Stream_Element;
+      Decoded_Length  : in out Natural;
+      Decoded         : in out Ada.Streams.Stream_Element_Array;
+      Boolean_Payload : in out Boolean)
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_payload_apply";
+
+   procedure Reset_Abort_Count
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_abort_reset";
+
+   procedure Note_Abort
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_abort_note";
+
+   function Abort_Count return Natural
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_abort_count";
 end Flyology_Serde.JSON_Event_Driver_Test_Hooks;

@@ -7,9 +7,9 @@ with Flyology_Serde.JSON_Event_Drivers;
 with Flyology_Serde.Policies;
 with Interfaces;
 
---  Private Flyology JSON event-to-Serde reader. The first implementation
---  milestone supports root scalars only; every other abstract operation fails
---  closed and the public handwritten Reader remains authoritative.
+--  Private Flyology JSON event-to-Serde reader. The public handwritten Reader
+--  remains authoritative until the complete event-backed data model passes
+--  the reviewed differential cutover gate.
 
 private package Flyology_Serde.Deserializers.JSON.Event_Readers is
    package Budgets renames Flyology_Serde.Budgets;
@@ -34,6 +34,8 @@ private package Flyology_Serde.Deserializers.JSON.Event_Readers is
    function Input_Offset (Self : Reader) return Natural;
    function Input_Consumed (Self : Reader) return Natural;
    function Values_Consumed (Self : Reader) return Natural;
+   function Container_Depth (Self : Reader) return Natural;
+   function Budget_Depth (Self : Reader) return Natural;
 
    overriding
    function Capabilities (Self : Reader) return Data_Model.Format_Capabilities;
@@ -179,26 +181,61 @@ private package Flyology_Serde.Deserializers.JSON.Event_Readers is
      (Self : in out Reader; Error : in out Errors.Error_Info);
 
 private
-   type Lifecycle_State is
-     (Uninitialized,
-      Ready,
-      Root_In_Progress,
-      Root_Complete,
-      Root_Complete_Retained,
-      Root_Complete_Deferred,
-      Root_Complete_Unclassified,
-      Complete,
-      Failed);
+   type Operation_State is (Uninitialized, Ready, Active, Complete, Failed);
+   type Root_State is (Root_Ready, Root_In_Progress, Root_Complete);
+
+   type Container_Kind is
+     (Optional_Container,
+      Sequence_Container,
+      Map_Container,
+      Record_Container,
+      Variant_Container);
+   type Child_State is (No_Child, Child_Ready, Child_In_Progress);
+   type Map_State is
+     (Map_Needs_Entry,
+      Map_Key_Ready,
+      Map_Key_In_Progress,
+      Map_Value_Ready,
+      Map_Value_In_Progress);
+
+   type Container_Frame is record
+      Kind       : Container_Kind := Sequence_Container;
+      Child      : Child_State := No_Child;
+      Map_Phase  : Map_State := Map_Needs_Entry;
+      First_Item : Boolean := True;
+      Exhausted  : Boolean := False;
+   end record;
+   type Container_Stack is
+     array (Positive range 1 .. Policies.Maximum_Supported_Nesting)
+     of Container_Frame;
+
+   type Terminal_State is
+     (No_Pending_Terminal,
+      Retained_Delimiter,
+      Deferred_Invalid_Follower,
+      Unclassified_Exhausted);
+   type Terminal_Owner is
+     (No_Terminal_Owner,
+      Root_Terminal,
+      Sequence_Child_Terminal,
+      Sequence_End_Terminal);
 
    type Reader (Source : not null access constant String) is limited
      new Deserialization.Deserializer
    with record
-      Policy            : Policies.Decode_Policy;
-      Budget            : Budgets.Decode_Budget;
-      Syntax            : JSON_Event_Drivers.Driver (Source);
-      Cursor            : Natural := 0;
-      Root_End_Offset   : Natural := 0;
-      State             : Lifecycle_State := Uninitialized;
-      Document_End_Seen : Boolean := False;
+      Policy              : Policies.Decode_Policy;
+      Budget              : Budgets.Decode_Budget;
+      Syntax              : JSON_Event_Drivers.Driver (Source);
+      Stack               : Container_Stack := [others => <>];
+      Depth               : Natural := 0;
+      Cursor              : Natural := 0;
+      Root_End_Offset     : Natural := 0;
+      Operation           : Operation_State := Uninitialized;
+      Root                : Root_State := Root_Ready;
+      Terminal            : Terminal_State := No_Pending_Terminal;
+      Owner               : Terminal_Owner := No_Terminal_Owner;
+      Owner_Depth         : Natural := 0;
+      Document_Begin_Seen : Boolean := False;
+      Document_End_Seen   : Boolean := False;
    end record;
 end Flyology_Serde.Deserializers.JSON.Event_Readers;
