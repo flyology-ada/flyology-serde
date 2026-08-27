@@ -661,7 +661,10 @@ package body {unit} is
    begin
       if Target.Active then
          Flyology_Serde.Errors.Fail (Error, Flyology_Serde.Errors.Invalid_State);
+      elsif not Target.Initialized then
+         Flyology_Serde.Errors.Fail (Error, Flyology_Serde.Errors.Invalid_State);
       else
+         Target.Candidate := Target.Published;
          Target.Active := True;
          Target.Root_Started := True;
       end if;

@@ -24,6 +24,8 @@ src/flyology_serde_generator-diagnostics.adb
 src/flyology_serde_generator-diagnostics.ads
 src/flyology_serde_generator-generation.adb
 src/flyology_serde_generator-generation.ads
+src/flyology_serde_generator-graph_work.adb
+src/flyology_serde_generator-graph_work.ads
 src/flyology_serde_generator-hashing.adb
 src/flyology_serde_generator-hashing.ads
 src/flyology_serde_generator-lowered_records.adb

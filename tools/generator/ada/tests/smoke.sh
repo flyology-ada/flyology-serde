@@ -2,9 +2,12 @@
 set -eu
 
 generator_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+serde_root=$(CDPATH= cd -- "$generator_root/../../.." && pwd)
 generator="$generator_root/bin/flyology_serde_generate"
 scaffold_tests="$generator_root/tests/bin/scaffold_tests"
-renderer_tests="$generator_root/tests/bin/renderer_tests"
+renderer_tests="$generator_root/tests/bin/flyology_serde_generator-renderer_tests"
+production_shape_renderer_tests="$generator_root/tests/bin/"
+production_shape_renderer_tests="${production_shape_renderer_tests}flyology_serde_generator-production_shape_renderer_tests"
 build_sha_256_tests="$generator_root/tests/bin/build_sha_256_tests"
 build_budgets_tests="$generator_root/tests/bin/build_budgets_tests"
 atomic_ledgers_tests="$generator_root/tests/bin/atomic_ledgers_tests"
@@ -61,6 +64,15 @@ do
 done
 
 test "$("$generator" --version)" = "serde-generator-v2"
+if find "$generator_root/obj" -type f \
+  \( -name '*test_fixtures*' -o -name '*production_shape*' \) -print | grep -q .; then
+   echo "test-only production-shape code escaped into the production generator build" >&2
+   exit 1
+fi
+if nm "$generator" | grep -Eqi 'test_fixtures|production_shapes'; then
+   echo "test-only production-shape symbol escaped into the production generator binary" >&2
+   exit 1
+fi
 "$build_sha_256_tests"
 "$build_budgets_tests"
 "$atomic_ledgers_tests"
@@ -153,6 +165,27 @@ python3 "$generator_root/../generate.py" --type-ir "$type_ir_fixture" \
   "$golden_root/flyology-generated.ads" "$golden_root/flyology-generated.adb" \
   "$test_root/python/flyology-generated.ads" "$test_root/python/flyology-generated.adb" \
   "$overlay_fixture" "$policy_overlay_fixture"
+mkdir "$test_root/production-generated"
+"$production_shape_renderer_tests" "$test_root/production-generated"
+GENERATED_DIR="$test_root/production-generated" \
+  alr -C "$serde_root" exec -- gprbuild -f -p -P \
+  "$generator_root/tests/production_shape_fixture/production_shape_fixture.gpr"
+"$generator_root/tests/production_shape_fixture/bin/production_shape_generated_tests"
+generated_ali="$generator_root/tests/production_shape_fixture/obj/production_shapes_serde.ali"
+generated_object="$generator_root/tests/production_shape_fixture/obj/production_shapes_serde.o"
+if grep -Eqi \
+  'type_ir|libadalang|flyology_wire|flyology_json|json_event|flyology_serde_generator|serde_generator' \
+  "$test_root/production-generated/production_shapes_serde.ads" \
+  "$test_root/production-generated/production_shapes_serde.adb" \
+  "$generated_ali"; then
+   echo "generated format-neutral adapter gained a forbidden authority/backend dependency" >&2
+   exit 1
+fi
+if strings "$generated_object" | grep -Eqi \
+  'type_ir|libadalang|flyology_wire|flyology_json|json_event|flyology_serde_generator|serde_generator'; then
+   echo "generated adapter object gained a forbidden authority/backend dependency" >&2
+   exit 1
+fi
 "$generator" --help >/dev/null
 
 if "$generator" >"$test_root/stdout" 2>"$test_root/stderr"; then
