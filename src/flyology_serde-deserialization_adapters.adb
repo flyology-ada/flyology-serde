@@ -28,6 +28,7 @@ package body Flyology_Serde.Deserialization_Adapters is
       when others =>
          From.Abort_Document (Error);
          Rollback_Candidate (Target);
+         Errors.Clear_Path (Error);
          raise;
    end Deserialize;
 end Flyology_Serde.Deserialization_Adapters;

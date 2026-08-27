@@ -44,14 +44,20 @@ is
      (Unknown_Offset, Byte_Offset, Code_Unit_Offset, Code_Point_Offset);
 
    type Error_Info is record
-      Code         : Error_Code := No_Error;
-      Input_Offset : Natural := 0;
-      Offset_Unit  : Input_Offset_Unit := Unknown_Offset;
-      Path_Length  : Natural range 0 .. Maximum_Path_Depth := 0;
-      Path         : Path_Array;
+      Code                  : Error_Code := No_Error;
+      Input_Offset          : Natural := 0;
+      Offset_Unit           : Input_Offset_Unit := Unknown_Offset;
+      Path_Length           : Natural range 0 .. Maximum_Path_Depth := 0;
+      Omitted_Path_Elements : Natural := 0;
+      Path                  : Path_Array;
    end record;
 
    procedure Reset (Item : out Error_Info);
+
+   --  Clears every retained and omitted path element while preserving the
+   --  primary code and input position. Call this or Reset after catching an
+   --  adapter exception before inspecting or reusing the actual Error_Info.
+   procedure Clear_Path (Item : in out Error_Info);
 
    procedure Fail
      (Item         : in out Error_Info;

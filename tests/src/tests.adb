@@ -21,6 +21,7 @@ with Flyology_Serde.Serializers.Counting;
 with Flyology_Serde.UTF_8;
 with Interfaces;
 with Enumeration_Adapter_Tests;
+with Error_Path_Saturation_Tests;
 with JSON_Reader_Tests;
 with JSON_Writer_Tests;
 with Handwritten_Type_Tests;
@@ -195,6 +196,7 @@ begin
    CBOR_Reader_Tests;
    CBOR_Writer_Tests;
    Enumeration_Adapter_Tests;
+   Error_Path_Saturation_Tests;
 
    declare
       Default : Data_Model.Float_64_Value;
@@ -271,20 +273,6 @@ begin
    end loop;
    Deep.Begin_Sequence ((Known => False, Length => 0), Error);
    pragma Assert (Error.Code = Errors.Depth_Exceeded);
-
-   Errors.Reset (Error);
-   for Index in 1 .. Errors.Maximum_Path_Depth loop
-      Errors.Push_Index (Error, Index);
-   end loop;
-   Errors.Push_Field (Error, "overflow");
-   pragma Assert (Error.Code = Errors.Depth_Exceeded);
-
-   Errors.Reset (Error);
-   Errors.Push_Field
-     (Error,
-      "a field name that is deliberately longer than sixty-four characters for truncation");
-   pragma Assert (Error.Code = Errors.No_Error);
-   pragma Assert (Error.Path (1).Name_Truncated);
 
    Errors.Reset (Error);
    Errors.Fail (Error, Errors.Syntax_Error, 12, Errors.Byte_Offset);

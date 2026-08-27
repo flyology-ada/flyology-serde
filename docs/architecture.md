@@ -93,6 +93,18 @@ error has no offset. JSON and CBOR therefore attach a byte position after the ty
 representations may change while this experimental crate evolves. Client exhaustive `case` statements intentionally
 require review when a new semantic status is added.
 
+`Error_Info` retains the outermost 32 logical path elements. A deeper valid
+traversal increments `Omitted_Path_Elements` instead of failing; the retained
+entries remain in root-to-leaf order and the omitted count describes the
+active suffix below them. Diagnostic capacity therefore does not lower the
+backend or operation nesting limit. Push and pop operations are no-ops after a
+primary status is latched so cleanup cannot erase the captured path. `Reset`
+clears the complete error; `Clear_Path` clears every retained and omitted path
+element while preserving the primary code and input position. Because Ada
+does not guarantee `in out` copy-out when an exception propagates, a caller
+that catches an adapter exception must call one of those operations normally
+before inspecting or reusing its `Error_Info` actual.
+
 ## Event grammar
 
 A serialization call emits exactly one value. Scalars and enumerations are complete values. A sequence is

@@ -42,6 +42,7 @@ package body Flyology_Serde.Serialization_Adapters is
       when others =>
          Validator.Abort_Document;
          Into.Abort_Document;
+         Errors.Clear_Path (Error);
          raise;
    end Serialize;
 end Flyology_Serde.Serialization_Adapters;
