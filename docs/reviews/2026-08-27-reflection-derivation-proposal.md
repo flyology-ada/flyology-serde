@@ -243,7 +243,7 @@ claim of this checkpoint.
 ## Uninstalled implementation checkpoint
 
 The repository now contains `experiments/reflection_serialization`, an uninstalled implementation against exact
-Reflection commit `b63e8c9b0a9aec3a97776ae9fbb4ce5c34d81c1c`. Its runner exports that commit into a fresh temporary source tree,
+Reflection commit `6dfd24575dfe1bec9a5c35c77b0dd8cfcf83473f`. Its runner exports that commit into a fresh temporary source tree,
 builds Reflection there, builds and runs the integration in fresh temporary object and executable directories,
 requires a mismatched source type and `Observe` procedure to fail at the external generic instantiation, and checks
 that Reflection or extractor dependencies do not enter the root Serde source/build closure. The maintained
@@ -275,3 +275,10 @@ profile, project, test, documentation, or workflow path changes across the range
 the release candidate while repository publication and the indexed release remain external promotion gates. Two
 independent Serde release/fix re-reviews also report P0/P1/P2 none and reran the complete exact archived-source
 integration against the clean detached release candidate successfully.
+
+The next attested checkpoint advances to
+`6dfd24575dfe1bec9a5c35c77b0dd8cfcf83473f`. Relative to the release candidate, it adds the reviewed
+consumer-neutral exact floating arithmetic helper and its evidence; it does not change existing generated value-view
+artifacts or enable generated floating roots, which remain `Unsupported_View`. Two independent exact-commit consumer
+reviews report P0/P1/P2 none. This remains an isolated uninstalled experiment and does not add Reflection to the root
+Serde dependency or build closure.

@@ -8,7 +8,7 @@ serde_root=$(CDPATH= cd -- "$experiment_dir/../.." && pwd)
 temporary_dir=$(mktemp -d)
 trap 'rm -rf -- "$temporary_dir"' EXIT HUP INT TERM
 
-expected_reflection_commit=b63e8c9b0a9aec3a97776ae9fbb4ce5c34d81c1c
+expected_reflection_commit=6dfd24575dfe1bec9a5c35c77b0dd8cfcf83473f
 actual_reflection_commit=$(git -C "$FLYOLOGY_REFLECTION_ROOT" rev-parse HEAD)
 if [ "$actual_reflection_commit" != "$expected_reflection_commit" ]
 then
