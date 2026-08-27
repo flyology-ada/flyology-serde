@@ -42,9 +42,13 @@ done
 
 #  Rebuild the production project from a clean object tree so obsolete ALIs
 #  cannot make an isolation check pass or fail depending on local history.
-alr -C "$repository" exec -- gprclean -r -P flyology_serde.gpr >/dev/null
+alr -C "$repository" exec -- gprclean -r -P flyology_serde.gpr \
+  -XLIBRARY_TYPE=static -XFLYOLOGY_JSON_LIBRARY_TYPE=static \
+  -XFLYOLOGY_SERDE_LIBRARY_TYPE=static >/dev/null
 alr -C "$repository" exec -- gprbuild -p -P flyology_serde.gpr \
-  -XFLYOLOGY_SERDE_TEST_HOOKS=disabled >/dev/null
+  -XFLYOLOGY_SERDE_TEST_HOOKS=disabled -XLIBRARY_TYPE=static \
+  -XFLYOLOGY_JSON_LIBRARY_TYPE=static \
+  -XFLYOLOGY_SERDE_LIBRARY_TYPE=static >/dev/null
 
 forbidden=$(
    find "$repository/src" "$repository/obj" "$repository/lib" -type f \
@@ -72,25 +76,32 @@ fi
 
 stage=$(mktemp -d /tmp/flyology-serde-install-check.XXXXXX)
 trap 'rm -rf "$stage"' EXIT HUP INT TERM
-json_project=$(
-   alr -C "$repository" exec -- sh -c '
-      old_ifs=$IFS
-      IFS=:
-      for directory in $GPR_PROJECT_PATH; do
-         if test -f "$directory/flyology_json.gpr"; then
-            printf "%s\n" "$directory/flyology_json.gpr"
-            IFS=$old_ifs
-            exit 0
-         fi
-      done
-      IFS=$old_ifs
-      exit 1
-   '
-)
 alr -C "$repository" exec -- gprinstall -r -p -m --mode=dev \
-  --prefix="$stage/install" -P "$json_project" >/dev/null
-alr -C "$repository" exec -- gprinstall -r -p -m --mode=dev \
-  --prefix="$stage/install" -P flyology_serde.gpr >/dev/null
+  --prefix="$stage/install" -P flyology_serde.gpr \
+  -XLIBRARY_TYPE=static -XFLYOLOGY_JSON_LIBRARY_TYPE=static \
+  -XFLYOLOGY_SERDE_LIBRARY_TYPE=static >/dev/null
+
+serde_gprs=$(find "$stage/install/share/gpr" -type f -name flyology_serde.gpr)
+if test "$(printf "%s\n" "$serde_gprs" | sed '/^$/d' | wc -l | tr -d ' ')" -ne 1; then
+   echo "staged install does not contain exactly one Serde project" >&2
+   exit 1
+fi
+if ! grep -Eq '^with "flyology_json";[[:space:]]*$' "$serde_gprs"; then
+   echo "installed Serde project lacks its top-level Flyology JSON import" >&2
+   exit 1
+fi
+if test "$(find "$stage/install/share/gpr" -type f -name flyology_json.gpr | wc -l | tr -d ' ')" -ne 1; then
+   echo "staged install does not contain exactly one Flyology JSON project" >&2
+   exit 1
+fi
+if test "$(find "$stage/install" -type f -name libFlyology_Serde.a | wc -l | tr -d ' ')" -ne 1; then
+   echo "staged install does not contain exactly one static Serde library" >&2
+   exit 1
+fi
+if test "$(find "$stage/install" -type f -name libFlyology_JSON.a | wc -l | tr -d ' ')" -ne 1; then
+   echo "staged install does not contain exactly one static Flyology JSON library" >&2
+   exit 1
+fi
 
 stage_forbidden=$(
    find "$stage/install" -type f -exec sh -c '
@@ -125,18 +136,32 @@ cp "$repository/tests/external_json_oracle_rejection/src/json_oracle_client.adb"
 
 gprbuild_command=$(alr -C "$repository" exec -- sh -c 'command -v gprbuild')
 gcc_command=$(alr -C "$repository" exec -- sh -c 'command -v gcc')
-toolchain_path=$(dirname "$gprbuild_command"):$(dirname "$gcc_command"):$PATH
+toolchain_path=$(dirname "$gprbuild_command"):$(dirname "$gcc_command"):/usr/bin:/bin
 client_project="$stage/client/external_json_oracle_rejection.gpr"
+mkdir -p "$stage/home" "$stage/tmp"
 (
    cd "$stage/client"
-   env -u GPR_PROJECT_PATH PATH="$toolchain_path" "$gprbuild_command" \
-     -f -p -aP"$stage/install/share/gpr" -P "$client_project" \
+   env -i PATH="$toolchain_path" HOME="$stage/home" TMPDIR="$stage/tmp" \
+     LANG=C LC_ALL=C GPR_PROJECT_PATH="$stage/install/share/gpr" \
+     LIBRARY_TYPE=static FLYOLOGY_JSON_LIBRARY_TYPE=static \
+     FLYOLOGY_SERDE_LIBRARY_TYPE=static \
+     "$gprbuild_command" -f -p -P "$client_project" \
      public_json_client.adb >/dev/null
 )
+client_binary="$stage/bin/public_json_client"
+if ! test -x "$client_binary"; then
+   echo "installed public client binary was not produced" >&2
+   exit 1
+fi
+env -i PATH=/usr/bin:/bin HOME="$stage/home" TMPDIR="$stage/tmp" \
+  LANG=C LC_ALL=C "$client_binary"
 if rejection=$(
    cd "$stage/client"
-   env -u GPR_PROJECT_PATH PATH="$toolchain_path" "$gprbuild_command" \
-     -f -p -aP"$stage/install/share/gpr" -P "$client_project" \
+   env -i PATH="$toolchain_path" HOME="$stage/home" TMPDIR="$stage/tmp" \
+     LANG=C LC_ALL=C GPR_PROJECT_PATH="$stage/install/share/gpr" \
+     LIBRARY_TYPE=static FLYOLOGY_JSON_LIBRARY_TYPE=static \
+     FLYOLOGY_SERDE_LIBRARY_TYPE=static \
+     "$gprbuild_command" -f -p -P "$client_project" \
      json_oracle_client.adb 2>&1
 ); then
    echo "external client unexpectedly compiled the test-only JSON oracle" >&2

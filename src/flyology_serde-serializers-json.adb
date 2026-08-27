@@ -664,7 +664,7 @@ package body Flyology_Serde.Serializers.JSON is
       elsif Target'Length < Self.Length then
          Errors.Fail (Error, Errors.Capacity_Exceeded);
       elsif Self.Length > 0 then
-         Target (Target'First .. Target'First + Self.Length - 1) :=
+         Target (Target'First .. Target'First + (Self.Length - 1)) :=
            Self.Buffer (1 .. Self.Length);
          Length := Self.Length;
       end if;

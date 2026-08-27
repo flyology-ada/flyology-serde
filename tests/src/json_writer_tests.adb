@@ -48,6 +48,38 @@ begin
    Assert_Output (Writer, "{""identifier"":42,""enabled"":true}");
    pragma Assert (Writer.Is_Complete);
 
+   declare
+      Expected   : constant String := "{""identifier"":42,""enabled"":true}";
+      First      : constant Positive := Positive'Last - Expected'Length + 1;
+      Buffer     : String (First .. Positive'Last);
+      Length     : Natural := 0;
+      Copy_Error : Errors.Error_Info;
+   begin
+      Writer.Copy_Output (Buffer, Length, Copy_Error);
+      pragma Assert (Copy_Error.Code = Errors.No_Error);
+      pragma Assert (Length = Expected'Length and then Buffer = Expected);
+   end;
+
+   declare
+      Expected    : constant String := "{""identifier"":42,""enabled"":true}";
+      Extra       : constant Positive := 7;
+      First       : constant Positive :=
+        Positive'Last - (Expected'Length + Extra) + 1;
+      Prefix_Last : constant Positive := First + (Expected'Length - 1);
+      Buffer      : String (First .. Positive'Last) := [others => 'X'];
+      Length      : Natural := 0;
+      Copy_Error  : Errors.Error_Info;
+   begin
+      Writer.Copy_Output (Buffer, Length, Copy_Error);
+      pragma Assert (Copy_Error.Code = Errors.No_Error);
+      pragma Assert (Length = Expected'Length);
+      pragma Assert (Buffer (First .. Prefix_Last) = Expected);
+      pragma
+        Assert
+          (for all Index in Prefix_Last + 1 .. Buffer'Last =>
+             Buffer (Index) = ' ');
+   end;
+
    Writer.Reset;
    Writer.Begin_Optional (True, Error);
    Writer.Begin_Optional (False, Error);

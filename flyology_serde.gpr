@@ -1,3 +1,4 @@
+with "flyology_json.gpr";
 with "config/flyology_serde_config.gpr";
 project Flyology_Serde is
 
