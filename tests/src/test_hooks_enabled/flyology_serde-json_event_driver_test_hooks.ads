@@ -21,6 +21,8 @@ private package Flyology_Serde.JSON_Event_Driver_Test_Hooks is
      (Summaries_To_Skip : Natural; Value : Natural);
    procedure Apply_Source_Offset_Override (Value : in out Natural);
    procedure Arm_Kind_Override (Value : Natural);
+   procedure Arm_Kind_Override_After
+     (Summaries_To_Skip : Natural; Value : Natural);
    procedure Apply_Kind_Override (Value : in out Natural);
    procedure Arm_Payload_Contamination (Summaries_To_Skip : Natural);
    procedure Apply_Payload_Contamination

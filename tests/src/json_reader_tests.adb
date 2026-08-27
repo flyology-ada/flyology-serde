@@ -14,6 +14,7 @@ procedure JSON_Reader_Tests is
    package JSON_Testing renames Flyology_Serde.Deserializers.JSON.Testing;
    package Policies renames Flyology_Serde.Policies;
    use type Ada.Streams.Stream_Element;
+   use type Ada.Streams.Stream_Element_Array;
    use type Errors.Error_Code;
    use type Errors.Input_Offset_Unit;
    use type Interfaces.IEEE_Float_64;
@@ -177,6 +178,25 @@ begin
       pragma
         Assert (Length = 2 and then Value (1) = 0 and then Value (2) = 255);
       Finish (Item, Error);
+   end;
+
+   --  The bytes envelope name is presentation syntax, not a decoded JSON
+   --  alias. Escaped lookalikes are rejected before the colon is consumed.
+   declare
+      Input  : aliased constant String := "{""\u0024bytes"":""""}";
+      Item   : JSON.Reader (Input'Access);
+      Error  : Errors.Error_Info;
+      Value  : Ada.Streams.Stream_Element_Array (1 .. 1) := [others => 9];
+      Length : Natural := Natural'Last;
+   begin
+      Item.Initialize;
+      Item.Read_Bytes (Value, Length, Error);
+      pragma
+        Assert
+          (Error.Code = Errors.Unexpected_Kind
+             and then Error.Input_Offset = 14
+             and then Length = 0
+             and then Value = [1 => 0]);
    end;
 
    declare

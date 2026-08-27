@@ -78,21 +78,29 @@ rebind a completed-child terminal to that exact frame's exhausted `End_*`
 phase without replay. Only the matching `End_*` may then charge/replay and
 clear it; a wrong End owner is protocol misuse.
 
-Variant-alternative strings, record/bytes names, and the bytes payload use
-operation-local terminal candidates rather than persistent bindings. Their
-`String_End`/`Name_End` may be retained, deferred, or unclassified, but the
-same `Begin_Variant`, `Next_Field`, or `Read_Bytes` call must synchronously
-resolve the exact comma/colon/closer before returning. The local candidate and
-any retained window are discarded on failure; they can never be rebound to a
-later public operation. Optional-some uses the same local rule, while optional-
-none alone binds its tag terminal to the published optional frame for
-`End_Optional`.
+Variant-alternative strings use operation-local terminal candidates rather
+than persistent bindings. Their `String_End` may be retained, deferred, or
+unclassified, but the same `Begin_Variant` call must synchronously resolve the
+exact comma before returning. The local candidate and any retained window are
+discarded on failure; they can never be rebound to a later public operation.
+Optional-some uses the same local rule, while optional-none alone binds its tag
+terminal to the published optional frame for `End_Optional`.
+
+The byte payload is narrower. The reviewed pinned Flyology JSON profile and
+one-byte driver emit `String_End` while consuming the closing quote, so
+`Read_Bytes` requires that event in the payload transcript before examining
+the object closer. It has no retained/deferred/unclassified payload-terminal
+fallback. A future dependency whose transcript omits or delays that event is
+rejected as `Invalid_State` until its grammar and accounting receive a new
+review; parser timing is not inferred or silently adapted.
 
 The installed Flyology JSON grammar emits `Name_End` while consuming the
-closing quote, so the private driver has no `Name_Terminal` selector. The
-record reader validates strict whitespace and the colon directly after the
-complete name transcript, before either can be admitted. The existing
-string/number/literal selectors retain their closed value-delimiter set. This
+closing quote, so the private driver has no `Name_Terminal` selector. Record
+and byte-envelope names require that eager event and reject an omitted or
+delayed event as `Invalid_State`. The record reader validates strict whitespace
+and the colon directly after the complete name transcript, before either can
+be admitted. The existing string/number/literal selectors retain their closed
+value-delimiter set. This
 follower classification remains a private Serde implementation detail and
 never enters Flyology JSON or the format-neutral traversal API.
 
@@ -402,12 +410,18 @@ every budget counter at each operation boundary. The matrix includes:
 - retained/deferred/unclassified terminals at every parent transition, with
   exact Syntax-versus-Capacity precedence, single replay, owner mismatch, and
   binding-clear assertions;
-- each operation-local candidate terminal—variant alternative, record name,
-  bytes envelope name, bytes payload, and optional-some tag—crossed with
+- each operation-local candidate terminal—variant alternative and
+  optional-some tag—crossed with
   retained, deferred-invalid, unclassified-exhausted, wrong-context, exact
   input-budget, and one-past-budget cases; each case proves synchronous
   resolution before publication, deterministic output clearing, and that no
   persistent terminal binding or parser window survives the call;
+- the record and byte-envelope names' eager `Name_End` transcripts, including
+  exact kind, source, form, decoded, and payload-contamination mutations, plus
+  fail-closed `Invalid_State` behavior for grammar drift;
+- the byte payload's eager `String_End` transcript, including exact source,
+  kind, form, raw-byte, decoded-byte, and payload-contamination mutations,
+  plus fail-closed `Invalid_State` behavior for grammar drift;
 - retained and unclassified `]`/`}` two-stage lookahead rebinds, matching End
   replay/denial, and wrong-End-owner rejection without lost windows;
 - structural kind/source/raw-byte mutations, missing/extra/reordered events,
@@ -503,6 +517,39 @@ nested sequence and map key/value traversal, call-order and wrong-End misuse,
 abort/reset from every variant phase with and without a primary diagnostic,
 exceptions after variant pop during map-parent resolution, and real root-adapter
 commit/rollback after the final closer or trailing-document failure.
+
+Final verification passed the root build and assertion-enabled tests, both
+Flyology JSON lock attestations and their seven Python tests, test-hook elision,
+the Ada generator build/scaffold/smoke suite, all 12 Python generator tests,
+release-marker and fixture-manifest checks, the generated-fixture crate, all 10
+APM 0.28.0 audit checks, formatting, the 110-column scan, and
+`git diff --check`.
+
+## Byte-envelope implementation review record
+
+The byte-envelope implementation and its fix re-reviews closed with P0 none,
+P1 none, and P2 none. `Read_Bytes` accepts only the Serde-private raw
+`{"$bytes":"<hex>"}` representation, charges one logical value without
+charging representation-only nesting or items, preflights each owned interval
+once, validates the exact Flyology JSON event transcript, and publishes output
+only after the object closer and parent transition succeed. Escaped or
+otherwise nonraw presentation-name lookalikes are rejected.
+
+Review fixes reused the first bounded name preflight rather than rescanning,
+made the handwritten oracle stop before scanning after an earlier error,
+classified arbitrary valid wrong names as `Unexpected_Kind` without a private
+tag-buffer cap, and added skip-capable event-kind mutation coverage. The
+accepted contract now records that the pinned one-byte driver emits name and
+byte-payload terminal events eagerly; an omitted or delayed event fails closed
+as `Invalid_State` rather than entering an unreviewed compatibility path.
+
+Differential tests cover empty and mixed-case hex, malformed names and payloads,
+every absolute input/value denial point, byte and destination limits, sequence
+and map key/value nesting, late parent-transition rollback, source and
+destination arrays ending at their maximum positive bounds, kind/source/form/
+raw/decoded/payload mutations, every reachable driver exception plus the
+one-past nonoccurrence, abort/reset, prelatched calls, and fixed, candidate, and
+allocating byte adapters.
 
 Final verification passed the root build and assertion-enabled tests, both
 Flyology JSON lock attestations and their seven Python tests, test-hook elision,

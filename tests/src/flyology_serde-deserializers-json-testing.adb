@@ -1,6 +1,9 @@
+with Ada.Containers;
 with Ada.Streams;
 with Flyology_JSON.Errors;
 with Flyology_JSON.Profiles;
+with Flyology_Serde.Adapters.Allocating_Bytes;
+with Flyology_Serde.Adapters.Bytes;
 with Flyology_Serde.Adapters.Optionals;
 with Flyology_Serde.Adapters.Unsigned_Integers;
 with Flyology_Serde.Adapters.Variants;
@@ -23,6 +26,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
    use type Ada.Streams.Stream_Element_Count;
    use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Array;
+   use type Ada.Containers.Count_Type;
    use type Data_Model.Float_64_Category;
    use type Data_Model.Length_Information;
    use type Data_Model.Value_Kind;
@@ -3950,6 +3954,824 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          pragma Assert (Error.Code = Errors.No_Error);
       end Check_Optional_End_Exception;
 
+      procedure Check_Bytes_Parity
+        (Source : String; Expected : Ada.Streams.Stream_Element_Array)
+      is
+         Input           : aliased constant String := Source;
+         Oracle          : Reader (Input'Access);
+         Parallel        : Event_Readers.Reader (Input'Access);
+         Oracle_Error    : Errors.Error_Info;
+         Parallel_Error  : Errors.Error_Info;
+         Oracle_Value    :
+           Ada.Streams.Stream_Element_Array
+             (5 .. 4 + Ada.Streams.Stream_Element_Offset (Expected'Length));
+         Parallel_Value  :
+           Ada.Streams.Stream_Element_Array
+             (5 .. 4 + Ada.Streams.Stream_Element_Offset (Expected'Length));
+         Oracle_Length   : Natural := Natural'Last;
+         Parallel_Length : Natural := Natural'Last;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Read_Bytes (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
+         Event_Readers.Read_Bytes
+           (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
+         pragma
+           Assert
+             (Oracle_Error.Code = Errors.No_Error
+                and then Parallel_Error.Code = Errors.No_Error
+                and then Oracle_Length = Expected'Length
+                and then Parallel_Length = Expected'Length
+                and then Oracle_Value = Expected
+                and then Parallel_Value = Expected);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         Finish_Document (Oracle, Oracle_Error);
+         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         pragma
+           Assert
+             (Oracle_Error.Code = Errors.No_Error
+                and then Event_Readers.Is_Complete (Parallel));
+      end Check_Bytes_Parity;
+
+      procedure Check_Bytes_Failure
+        (Source          : String;
+         Capacity        : Natural;
+         Expected_Code   : Errors.Error_Code;
+         Expected_Offset : Natural;
+         Maximum_Input   : Natural := Natural'Last;
+         Maximum_Bytes   : Natural := Natural'Last;
+         Maximum_Values  : Natural := Natural'Last)
+      is
+         Input           : aliased constant String := Source;
+         Oracle          : Reader (Input'Access);
+         Parallel        : Event_Readers.Reader (Input'Access);
+         Oracle_Error    : Errors.Error_Info;
+         Parallel_Error  : Errors.Error_Info;
+         Local_Policy    : Policies.Decode_Policy := Policy;
+         Oracle_Value    :
+           Ada.Streams.Stream_Element_Array
+             (5 .. 4 + Ada.Streams.Stream_Element_Offset (Capacity)) :=
+             [others => 9];
+         Parallel_Value  :
+           Ada.Streams.Stream_Element_Array
+             (5 .. 4 + Ada.Streams.Stream_Element_Offset (Capacity)) :=
+             [others => 9];
+         Oracle_Length   : Natural := Natural'Last;
+         Parallel_Length : Natural := Natural'Last;
+      begin
+         Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
+         Local_Policy.Limits.Maximum_Byte_Length := Maximum_Bytes;
+         Local_Policy.Limits.Maximum_Logical_Values := Maximum_Values;
+         Initialize (Oracle, Local_Policy);
+         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Read_Bytes (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
+         Event_Readers.Read_Bytes
+           (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
+         pragma
+           Assert
+             (Oracle_Error.Code = Expected_Code
+                and then Parallel_Error.Code = Expected_Code
+                and then Oracle_Error.Input_Offset = Expected_Offset
+                and then Parallel_Error.Input_Offset = Expected_Offset
+                and then Oracle_Length = 0
+                and then Parallel_Length = 0
+                and then (for all Item of Oracle_Value => Item = 0)
+                and then (for all Item of Parallel_Value => Item = 0),
+              Source
+                & Expected_Code'Image
+                & Oracle_Error.Code'Image
+                & Parallel_Error.Code'Image
+                & Expected_Offset'Image
+                & Oracle_Error.Input_Offset'Image
+                & Parallel_Error.Input_Offset'Image
+                & Input_Offset (Oracle)'Image
+                & Event_Readers.Input_Offset (Parallel)'Image);
+         pragma
+           Assert
+             (Event_Readers.Input_Offset (Parallel) = Input_Offset (Oracle),
+              Source
+                & Input_Offset (Oracle)'Image
+                & Event_Readers.Input_Offset (Parallel)'Image);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         pragma
+           Assert
+             (Event_Readers.Container_Depth (Parallel) = 0
+                and then Event_Readers.Budget_Depth (Parallel) = 0);
+      end Check_Bytes_Failure;
+
+      procedure Check_Bytes_Input_Limit (Maximum_Input : Natural) is
+         type Input_Trace is array (Natural range 0 .. 15) of Natural;
+         Expected_Consumed : constant Input_Trace :=
+           [0, 1, 1, 1, 1, 1, 1, 1, 1, 9, 10, 11, 11, 11, 14, 15];
+         Input             : aliased constant String := "{""$bytes"":""00""}";
+         Oracle            : Reader (Input'Access);
+         Parallel          : Event_Readers.Reader (Input'Access);
+         Oracle_Error      : Errors.Error_Info;
+         Parallel_Error    : Errors.Error_Info;
+         Local_Policy      : Policies.Decode_Policy := Policy;
+         Oracle_Value      : Ada.Streams.Stream_Element_Array (5 .. 5) :=
+           [others => 9];
+         Parallel_Value    : Ada.Streams.Stream_Element_Array (5 .. 5) :=
+           [others => 9];
+         Oracle_Length     : Natural := Natural'Last;
+         Parallel_Length   : Natural := Natural'Last;
+      begin
+         Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
+         Initialize (Oracle, Local_Policy);
+         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Read_Bytes (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
+         Event_Readers.Read_Bytes
+           (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         pragma
+           Assert
+             (Budgets.Input_Consumed (Oracle.Budget)
+                = Expected_Consumed (Maximum_Input)
+                and then Event_Readers.Input_Consumed (Parallel)
+                         = Expected_Consumed (Maximum_Input)
+                and then Budgets.Values_Consumed (Oracle.Budget) = 1
+                and then Event_Readers.Values_Consumed (Parallel) = 1,
+              Maximum_Input'Image
+                & Expected_Consumed (Maximum_Input)'Image
+                & Budgets.Input_Consumed (Oracle.Budget)'Image
+                & Event_Readers.Input_Consumed (Parallel)'Image
+                & Budgets.Values_Consumed (Oracle.Budget)'Image
+                & Event_Readers.Values_Consumed (Parallel)'Image);
+         if Maximum_Input < Input'Length then
+            pragma
+              Assert
+                (Oracle_Error.Code = Errors.Capacity_Exceeded
+                   and then Oracle_Error.Input_Offset = Maximum_Input
+                   and then Oracle_Length = 0
+                   and then Parallel_Length = 0
+                   and then Oracle_Value = [5 => 0]
+                   and then Parallel_Value = [5 => 0],
+                 Maximum_Input'Image
+                   & Oracle_Error.Code'Image
+                   & Oracle_Error.Input_Offset'Image
+                   & Input_Offset (Oracle)'Image
+                   & Event_Readers.Input_Offset (Parallel)'Image);
+         else
+            pragma
+              Assert
+                (Oracle_Error.Code = Errors.No_Error
+                   and then Oracle_Length = 1
+                   and then Parallel_Length = 1
+                   and then Oracle_Value = [5 => 0]
+                   and then Parallel_Value = [5 => 0]);
+            Finish_Document (Oracle, Oracle_Error);
+            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end if;
+      end Check_Bytes_Input_Limit;
+
+      procedure Check_Bytes_Container_Parity is
+         procedure Check_Sequence is
+            Input              : aliased constant String :=
+              "[{""$bytes"":""00""}]";
+            Oracle             : Reader (Input'Access);
+            Parallel           : Event_Readers.Reader (Input'Access);
+            Oracle_Error       : Errors.Error_Info;
+            Parallel_Error     : Errors.Error_Info;
+            Oracle_Info        : Data_Model.Length_Information;
+            Parallel_Info      : Data_Model.Length_Information;
+            Oracle_Available   : Boolean;
+            Parallel_Available : Boolean;
+            Oracle_Value       : Ada.Streams.Stream_Element_Array (5 .. 5);
+            Parallel_Value     : Ada.Streams.Stream_Element_Array (5 .. 5);
+            Oracle_Length      : Natural;
+            Parallel_Length    : Natural;
+         begin
+            Initialize (Oracle, Policy);
+            Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+            Begin_Sequence (Oracle, Oracle_Info, Oracle_Error);
+            Event_Readers.Begin_Sequence
+              (Parallel, Parallel_Info, Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+            Next_Element (Oracle, Oracle_Available, Oracle_Error);
+            Event_Readers.Next_Element
+              (Parallel, Parallel_Available, Parallel_Error);
+            pragma Assert (Oracle_Available and then Parallel_Available);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+            Read_Bytes (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
+            Event_Readers.Read_Bytes
+              (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
+            pragma
+              Assert
+                (Oracle_Value = [5 => 0]
+                   and then Parallel_Value = [5 => 0]
+                   and then Oracle_Length = 1
+                   and then Parallel_Length = 1);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+            Next_Element (Oracle, Oracle_Available, Oracle_Error);
+            Event_Readers.Next_Element
+              (Parallel, Parallel_Available, Parallel_Error);
+            pragma
+              Assert (not Oracle_Available and then not Parallel_Available);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+            End_Sequence (Oracle, Oracle_Error);
+            Event_Readers.End_Sequence (Parallel, Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+            Finish_Document (Oracle, Oracle_Error);
+            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end Check_Sequence;
+
+         procedure Check_Map is
+            Input              : aliased constant String :=
+              "[[{""$bytes"":""00""},{""$bytes"":""01""}]]";
+            Oracle             : Reader (Input'Access);
+            Parallel           : Event_Readers.Reader (Input'Access);
+            Oracle_Error       : Errors.Error_Info;
+            Parallel_Error     : Errors.Error_Info;
+            Oracle_Info        : Data_Model.Length_Information;
+            Parallel_Info      : Data_Model.Length_Information;
+            Oracle_Available   : Boolean;
+            Parallel_Available : Boolean;
+            Oracle_Value       : Ada.Streams.Stream_Element_Array (5 .. 5);
+            Parallel_Value     : Ada.Streams.Stream_Element_Array (5 .. 5);
+            Oracle_Length      : Natural;
+            Parallel_Length    : Natural;
+         begin
+            Initialize (Oracle, Policy);
+            Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+            Begin_Map (Oracle, Oracle_Info, Oracle_Error);
+            Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+            Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+            Event_Readers.Next_Map_Entry
+              (Parallel, Parallel_Available, Parallel_Error);
+            pragma Assert (Oracle_Available and then Parallel_Available);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+            for Expected in Ada.Streams.Stream_Element range 0 .. 1 loop
+               Read_Bytes (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
+               Event_Readers.Read_Bytes
+                 (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
+               pragma
+                 Assert
+                   (Oracle_Value = [5 => Expected]
+                      and then Parallel_Value = [5 => Expected]
+                      and then Oracle_Length = 1
+                      and then Parallel_Length = 1);
+               Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+            end loop;
+            Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+            Event_Readers.Next_Map_Entry
+              (Parallel, Parallel_Available, Parallel_Error);
+            pragma
+              Assert (not Oracle_Available and then not Parallel_Available);
+            End_Map (Oracle, Oracle_Error);
+            Event_Readers.End_Map (Parallel, Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+            Finish_Document (Oracle, Oracle_Error);
+            Event_Readers.Finish_Document (Parallel, Parallel_Error);
+            Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         end Check_Map;
+      begin
+         Check_Sequence;
+         Check_Map;
+      end Check_Bytes_Container_Parity;
+
+      type Bytes_Map_Failure_Stage is (Key_Finalization, Value_Finalization);
+
+      procedure Check_Bytes_Map_Failure
+        (Source            : String;
+         Stage             : Bytes_Map_Failure_Stage;
+         Expected_Code     : Errors.Error_Code;
+         Expected_Offset   : Natural;
+         Expected_Consumed : Natural;
+         Expected_Values   : Natural;
+         Maximum_Input     : Natural := Natural'Last)
+      is
+         Input              : aliased constant String := Source;
+         Oracle             : Reader (Input'Access);
+         Parallel           : Event_Readers.Reader (Input'Access);
+         Oracle_Error       : Errors.Error_Info;
+         Parallel_Error     : Errors.Error_Info;
+         Local_Policy       : Policies.Decode_Policy := Policy;
+         Oracle_Info        : Data_Model.Length_Information;
+         Parallel_Info      : Data_Model.Length_Information;
+         Oracle_Available   : Boolean;
+         Parallel_Available : Boolean;
+         Oracle_Value       : Ada.Streams.Stream_Element_Array (5 .. 5) :=
+           [others => 9];
+         Parallel_Value     : Ada.Streams.Stream_Element_Array (5 .. 5) :=
+           [others => 9];
+         Oracle_Length      : Natural := Natural'Last;
+         Parallel_Length    : Natural := Natural'Last;
+      begin
+         Local_Policy.Limits.Maximum_Input_Units := Maximum_Input;
+         Initialize (Oracle, Local_Policy);
+         Event_Readers.Initialize (Parallel, Local_Policy, Parallel_Error);
+         Begin_Map (Oracle, Oracle_Info, Oracle_Error);
+         Event_Readers.Begin_Map (Parallel, Parallel_Info, Parallel_Error);
+         Next_Map_Entry (Oracle, Oracle_Available, Oracle_Error);
+         Event_Readers.Next_Map_Entry
+           (Parallel, Parallel_Available, Parallel_Error);
+         pragma Assert (Oracle_Available and then Parallel_Available);
+         Read_Bytes (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
+         Event_Readers.Read_Bytes
+           (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
+         if Stage = Value_Finalization then
+            pragma
+              Assert
+                (Oracle_Error.Code = Errors.No_Error
+                   and then Parallel_Error.Code = Errors.No_Error
+                   and then Oracle_Value = [5 => 0]
+                   and then Parallel_Value = [5 => 0]
+                   and then Oracle_Length = 1
+                   and then Parallel_Length = 1);
+            Read_Bytes (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
+            Event_Readers.Read_Bytes
+              (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
+         end if;
+         pragma
+           Assert
+             (Oracle_Error.Code = Expected_Code
+                and then Parallel_Error.Code = Expected_Code
+                and then Oracle_Error.Input_Offset = Expected_Offset
+                and then Parallel_Error.Input_Offset = Expected_Offset
+                and then Oracle_Length = 0
+                and then Parallel_Length = 0
+                and then Oracle_Value = [5 => 0]
+                and then Parallel_Value = [5 => 0]
+                and then Budgets.Input_Consumed (Oracle.Budget)
+                         = Expected_Consumed
+                and then Event_Readers.Input_Consumed (Parallel)
+                         = Expected_Consumed
+                and then Budgets.Values_Consumed (Oracle.Budget)
+                         = Expected_Values
+                and then Event_Readers.Values_Consumed (Parallel)
+                         = Expected_Values,
+              Stage'Image
+                & Source
+                & Oracle_Error.Code'Image
+                & Parallel_Error.Code'Image
+                & Oracle_Error.Input_Offset'Image
+                & Parallel_Error.Input_Offset'Image
+                & Input_Offset (Oracle)'Image
+                & Event_Readers.Input_Offset (Parallel)'Image
+                & Budgets.Input_Consumed (Oracle.Budget)'Image
+                & Event_Readers.Input_Consumed (Parallel)'Image
+                & Budgets.Values_Consumed (Oracle.Budget)'Image
+                & Event_Readers.Values_Consumed (Parallel)'Image);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         pragma
+           Assert
+             (Event_Readers.Container_Depth (Parallel) = 0
+                and then Event_Readers.Budget_Depth (Parallel) = 0);
+         Errors.Reset (Parallel_Error);
+         Event_Readers.Reset (Parallel, Policy, Parallel_Error);
+         Event_Readers.Abort_Document (Parallel, Parallel_Error);
+         pragma Assert (Parallel_Error.Code = Errors.No_Error);
+      end Check_Bytes_Map_Failure;
+
+      procedure Check_Bytes_Arbitrary_Bounds is
+         Input           : aliased constant String :=
+           [Positive'Last - 14 => '{',
+            Positive'Last - 13 => '"',
+            Positive'Last - 12 => '$',
+            Positive'Last - 11 => 'b',
+            Positive'Last - 10 => 'y',
+            Positive'Last - 9  => 't',
+            Positive'Last - 8  => 'e',
+            Positive'Last - 7  => 's',
+            Positive'Last - 6  => '"',
+            Positive'Last - 5  => ':',
+            Positive'Last - 4  => '"',
+            Positive'Last - 3  => '0',
+            Positive'Last - 2  => '1',
+            Positive'Last - 1  => '"',
+            Positive'Last      => '}'];
+         Oracle          : Reader (Input'Access);
+         Parallel        : Event_Readers.Reader (Input'Access);
+         Oracle_Error    : Errors.Error_Info;
+         Parallel_Error  : Errors.Error_Info;
+         Oracle_Value    :
+           Ada.Streams.Stream_Element_Array
+             (Ada.Streams.Stream_Element_Offset'Last
+              .. Ada.Streams.Stream_Element_Offset'Last);
+         Parallel_Value  :
+           Ada.Streams.Stream_Element_Array
+             (Ada.Streams.Stream_Element_Offset'Last
+              .. Ada.Streams.Stream_Element_Offset'Last);
+         Oracle_Length   : Natural;
+         Parallel_Length : Natural;
+      begin
+         Initialize (Oracle, Policy);
+         Event_Readers.Initialize (Parallel, Policy, Parallel_Error);
+         Read_Bytes (Oracle, Oracle_Value, Oracle_Length, Oracle_Error);
+         Event_Readers.Read_Bytes
+           (Parallel, Parallel_Value, Parallel_Length, Parallel_Error);
+         pragma
+           Assert
+             (Oracle_Value (Oracle_Value'Last) = 1
+                and then Parallel_Value (Parallel_Value'Last) = 1
+                and then Oracle_Length = 1
+                and then Parallel_Length = 1);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+         Finish_Document (Oracle, Oracle_Error);
+         Event_Readers.Finish_Document (Parallel, Parallel_Error);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Parallel_Error);
+      end Check_Bytes_Arbitrary_Bounds;
+
+      procedure Check_Bytes_Payload_Mutation (Summaries_To_Skip : Natural) is
+         Input  : aliased constant String := "{""$bytes"":""00""}";
+         Item   : Event_Readers.Reader (Input'Access);
+         Error  : Errors.Error_Info;
+         Value  : Ada.Streams.Stream_Element_Array (5 .. 5) := [others => 9];
+         Length : Natural := Natural'Last;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Test_Hooks.Arm_Payload_Contamination (Summaries_To_Skip);
+         Event_Readers.Read_Bytes (Item, Value, Length, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then Length = 0
+                and then Value = [5 => 0]
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0,
+              Summaries_To_Skip'Image & Error.Code'Image);
+      end Check_Bytes_Payload_Mutation;
+
+      type Bytes_Mutation is
+        (Source_Offset_Mutation,
+         Decoded_Form_Mutation,
+         Fragment_Byte_Mutation,
+         Event_Kind_Mutation);
+
+      procedure Check_Bytes_Metadata_Mutation
+        (Mutation : Bytes_Mutation; Summaries_To_Skip : Natural)
+      is
+         Input  : aliased constant String := "{""$bytes"":""00""}";
+         Item   : Event_Readers.Reader (Input'Access);
+         Error  : Errors.Error_Info;
+         Value  : Ada.Streams.Stream_Element_Array (5 .. 5) := [others => 9];
+         Length : Natural := Natural'Last;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         case Mutation is
+            when Source_Offset_Mutation =>
+               Test_Hooks.Arm_Source_Offset_Override (Summaries_To_Skip, 99);
+
+            when Decoded_Form_Mutation  =>
+               Test_Hooks.Arm_Decoded_Form_Override
+                 (Summaries_To_Skip,
+                  JSON_Event_Drivers.Decoded_Form'Pos
+                    (JSON_Event_Drivers.Inline_Decoded));
+
+            when Fragment_Byte_Mutation =>
+               Test_Hooks.Arm_Fragment_Byte_Override
+                 (Summaries_To_Skip,
+                  Ada.Streams.Stream_Element (Character'Pos ('F')),
+                  Ada.Streams.Stream_Element (Character'Pos ('F')));
+
+            when Event_Kind_Mutation    =>
+               Test_Hooks.Arm_Kind_Override_After
+                 (Summaries_To_Skip,
+                  JSON_Event_Drivers.Event_Kind'Pos
+                    (JSON_Event_Drivers.Null_Value));
+         end case;
+         Event_Readers.Read_Bytes (Item, Value, Length, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Invalid_State
+                and then Length = 0
+                and then Value = [5 => 0]
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0,
+              Mutation'Image & Summaries_To_Skip'Image & Error.Code'Image);
+      end Check_Bytes_Metadata_Mutation;
+
+      procedure Check_Bytes_Exception
+        (Point                  : Test_Hooks.Failure_Point;
+         Matching_Calls_To_Skip : Natural;
+         Source                 : String := "{""$bytes"":""00""}")
+      is
+         Input  : aliased constant String := Source;
+         Item   : Event_Readers.Reader (Input'Access);
+         Error  : Errors.Error_Info;
+         Value  : Ada.Streams.Stream_Element_Array (5 .. 5);
+         Length : Natural;
+         Raised : Boolean := False;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Test_Hooks.Reset_Abort_Count;
+         Test_Hooks.Arm_After (Point, Matching_Calls_To_Skip);
+         begin
+            Event_Readers.Read_Bytes (Item, Value, Length, Error);
+         exception
+            when Constraint_Error =>
+               Raised := True;
+         end;
+         pragma
+           Assert
+             (Raised
+                and then Test_Hooks.Abort_Count = 1
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0,
+              Point'Image
+                & Matching_Calls_To_Skip'Image
+                & Raised'Image
+                & Test_Hooks.Abort_Count'Image);
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Test_Hooks.Abort_Count = 1);
+         Event_Readers.Read_Bytes (Item, Value, Length, Error);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Length = 1
+                and then Value = [5 => 0]
+                and then Event_Readers.Is_Complete (Item));
+      end Check_Bytes_Exception;
+
+      procedure Check_Bytes_Exception_Unreachable
+        (Point                  : Test_Hooks.Failure_Point;
+         Matching_Calls_To_Skip : Natural;
+         Source                 : String)
+      is
+         Input  : aliased constant String := Source;
+         Item   : Event_Readers.Reader (Input'Access);
+         Error  : Errors.Error_Info;
+         Value  : Ada.Streams.Stream_Element_Array (5 .. 5);
+         Length : Natural;
+         Raised : Boolean := False;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Test_Hooks.Arm_After (Point, Matching_Calls_To_Skip);
+         begin
+            Event_Readers.Read_Bytes (Item, Value, Length, Error);
+         exception
+            when Constraint_Error =>
+               Raised := True;
+         end;
+         Test_Hooks.Disarm;
+         pragma
+           Assert
+             (not Raised
+                and then Error.Code = Errors.No_Error
+                and then Length = 1
+                and then Value = [5 => 0],
+              Point'Image
+                & Matching_Calls_To_Skip'Image
+                & Raised'Image
+                & Error.Code'Image);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Event_Readers.Is_Complete (Item));
+      end Check_Bytes_Exception_Unreachable;
+
+      type Bytes_Root_Builder is limited record
+         Published : Ada.Streams.Stream_Element_Array (1 .. 2) := [9, 9];
+         Candidate : Ada.Streams.Stream_Element_Array (1 .. 2) := [0, 0];
+         Commits   : Natural := 0;
+         Rollbacks : Natural := 0;
+      end record;
+
+      procedure Begin_Bytes
+        (Target : in out Bytes_Root_Builder; Error : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Error);
+      begin
+         Target.Candidate := [0, 0];
+      end Begin_Bytes;
+
+      procedure Read_Bytes_Value
+        (From   : in out Deserialization.Deserializer'Class;
+         Target : in out Bytes_Root_Builder;
+         Policy : Policies.Decode_Policy;
+         Error  : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Policy);
+      begin
+         Flyology_Serde.Adapters.Bytes.Deserialize_Exact
+           (From, Target.Candidate, Error);
+      end Read_Bytes_Value;
+
+      procedure Commit_Bytes
+        (Target : in out Bytes_Root_Builder; Error : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Error);
+      begin
+         Target.Published := Target.Candidate;
+         Target.Commits := Target.Commits + 1;
+      end Commit_Bytes;
+
+      procedure Rollback_Bytes (Target : in out Bytes_Root_Builder) is
+      begin
+         Target.Candidate := [0, 0];
+         Target.Rollbacks := Target.Rollbacks + 1;
+      end Rollback_Bytes;
+
+      package Bytes_Root is new
+        Flyology_Serde.Deserialization_Adapters
+          (Builder_Type       => Bytes_Root_Builder,
+           Begin_Candidate    => Begin_Bytes,
+           Deserialize_Value  => Read_Bytes_Value,
+           Commit_Candidate   => Commit_Bytes,
+           Rollback_Candidate => Rollback_Bytes);
+
+      procedure Check_Bytes_Root_Adapter is
+         procedure Run
+           (Source             : String;
+            Expected_Code      : Errors.Error_Code;
+            Expected_Published : Ada.Streams.Stream_Element_Array;
+            Commits            : Natural;
+            Rollbacks          : Natural)
+         is
+            Input  : aliased constant String := Source;
+            Item   : Event_Readers.Reader (Input'Access);
+            Target : Bytes_Root_Builder;
+            Error  : Errors.Error_Info;
+         begin
+            Event_Readers.Initialize (Item, Policy, Error);
+            Bytes_Root.Deserialize (Item, Target, Error);
+            pragma
+              Assert
+                (Error.Code = Expected_Code
+                   and then Target.Published = Expected_Published
+                   and then Target.Commits = Commits
+                   and then Target.Rollbacks = Rollbacks
+                   and then Target.Candidate
+                            = (if Expected_Code = Errors.No_Error
+                               then Expected_Published
+                               else Ada.Streams.Stream_Element_Array'[0, 0]),
+                 Source
+                   & Error.Code'Image
+                   & Target.Commits'Image
+                   & Target.Rollbacks'Image);
+         end Run;
+      begin
+         Run
+           ("{""$bytes"":""0001""}",
+            Errors.No_Error,
+            Ada.Streams.Stream_Element_Array'[0, 1],
+            Commits   => 1,
+            Rollbacks => 0);
+         Run
+           ("{""$bytes"":""0001""}x",
+            Errors.Syntax_Error,
+            Ada.Streams.Stream_Element_Array'[9, 9],
+            Commits   => 0,
+            Rollbacks => 1);
+      end Check_Bytes_Root_Adapter;
+
+      procedure Check_Bytes_Candidate_Adapter is
+         Input  : aliased constant String := "{""$bytes"":""0001""}";
+         Item   : Event_Readers.Reader (Input'Access);
+         Error  : Errors.Error_Info;
+         Target : Ada.Streams.Stream_Element_Array (5 .. 7) := [9, 9, 0];
+         Length : Natural := Natural'Last;
+      begin
+         Event_Readers.Initialize (Item, Policy, Error);
+         Flyology_Serde.Adapters.Bytes.Deserialize_Candidate
+           (Item, Target, Length, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Length = 2
+                and then Target = [0, 1, 0]);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Event_Readers.Is_Complete (Item));
+      end Check_Bytes_Candidate_Adapter;
+
+      package Allocating_Bytes renames
+        Flyology_Serde.Adapters.Allocating_Bytes;
+
+      function Allocation_Policy return Policies.Decode_Policy is
+         Result : Policies.Decode_Policy := Policy;
+      begin
+         Result.Limits.Maximum_Byte_Length := 2;
+         return Result;
+      end Allocation_Policy;
+
+      Bytes_Allocation_Policy : constant Policies.Decode_Policy :=
+        Allocation_Policy;
+
+      type Allocating_Bytes_Root_Builder is limited record
+         Published : Allocating_Bytes.Value;
+         Candidate : Allocating_Bytes.Value;
+         Commits   : Natural := 0;
+         Rollbacks : Natural := 0;
+      end record;
+
+      procedure Begin_Allocating_Bytes
+        (Target : in out Allocating_Bytes_Root_Builder;
+         Error  : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Error);
+      begin
+         Target.Candidate.Clear;
+      end Begin_Allocating_Bytes;
+
+      procedure Read_Allocating_Bytes
+        (From   : in out Deserialization.Deserializer'Class;
+         Target : in out Allocating_Bytes_Root_Builder;
+         Policy : Policies.Decode_Policy;
+         Error  : in out Errors.Error_Info) is
+      begin
+         Allocating_Bytes.Deserialize_Candidate
+           (From, Target.Candidate, Policy, Error);
+      end Read_Allocating_Bytes;
+
+      procedure Commit_Allocating_Bytes
+        (Target : in out Allocating_Bytes_Root_Builder;
+         Error  : in out Errors.Error_Info)
+      is
+         pragma Unreferenced (Error);
+      begin
+         Target.Published := Target.Candidate;
+         Target.Commits := Target.Commits + 1;
+      end Commit_Allocating_Bytes;
+
+      procedure Rollback_Allocating_Bytes
+        (Target : in out Allocating_Bytes_Root_Builder) is
+      begin
+         Target.Candidate.Clear;
+         Target.Rollbacks := Target.Rollbacks + 1;
+      end Rollback_Allocating_Bytes;
+
+      package Allocating_Bytes_Root is new
+        Flyology_Serde.Deserialization_Adapters
+          (Builder_Type       => Allocating_Bytes_Root_Builder,
+           Policy             => Bytes_Allocation_Policy,
+           Begin_Candidate    => Begin_Allocating_Bytes,
+           Deserialize_Value  => Read_Allocating_Bytes,
+           Commit_Candidate   => Commit_Allocating_Bytes,
+           Rollback_Candidate => Rollback_Allocating_Bytes);
+
+      procedure Check_Allocating_Bytes_Root_Adapter is
+         procedure Run
+           (Source        : String;
+            Expected_Code : Errors.Error_Code;
+            Commits       : Natural;
+            Rollbacks     : Natural)
+         is
+            Input  : aliased constant String := Source;
+            Item   : Event_Readers.Reader (Input'Access);
+            Target : Allocating_Bytes_Root_Builder;
+            Error  : Errors.Error_Info;
+         begin
+            Target.Published.Append (9);
+            Event_Readers.Initialize (Item, Bytes_Allocation_Policy, Error);
+            Allocating_Bytes_Root.Deserialize (Item, Target, Error);
+            pragma
+              Assert
+                (Error.Code = Expected_Code
+                   and then Target.Commits = Commits
+                   and then Target.Rollbacks = Rollbacks
+                   and then Target.Candidate.Length
+                            = (if Expected_Code = Errors.No_Error
+                               then 2
+                               else 0)
+                   and then Target.Published.Length
+                            = (if Expected_Code = Errors.No_Error
+                               then 2
+                               else 1),
+                 Source
+                   & Error.Code'Image
+                   & Target.Candidate.Length'Image
+                   & Target.Published.Length'Image
+                   & Target.Commits'Image
+                   & Target.Rollbacks'Image);
+            if Expected_Code = Errors.No_Error then
+               pragma
+                 Assert
+                   (Target.Published (0) = 0
+                      and then Target.Published (1) = 1);
+            else
+               pragma Assert (Target.Published (0) = 9);
+            end if;
+         end Run;
+      begin
+         Run
+           ("{""$bytes"":""0001""}",
+            Errors.No_Error,
+            Commits   => 1,
+            Rollbacks => 0);
+         Run
+           ("{""$bytes"":""0001""}x",
+            Errors.Syntax_Error,
+            Commits   => 0,
+            Rollbacks => 1);
+         Run
+           ("{""$bytes"":""0G""}",
+            Errors.Syntax_Error,
+            Commits   => 0,
+            Rollbacks => 1);
+      end Check_Allocating_Bytes_Root_Adapter;
+
       type Supported_Operation is
         (Peek_Operation,
          Read_Null_Operation,
@@ -3958,6 +4780,7 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Read_Unsigned_Operation,
          Read_Float_Operation,
          Read_Text_Operation,
+         Read_Bytes_Operation,
          Begin_Sequence_Operation,
          Next_Element_Operation,
          End_Sequence_Operation,
@@ -3984,6 +4807,8 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
          Float_Value    : Data_Model.Float_64_Value :=
            Data_Model.Make_Finite (99.0);
          Text           : String (5 .. 8) := [others => 'x'];
+         Bytes          : Ada.Streams.Stream_Element_Array (5 .. 6) :=
+           [others => 9];
          Length         : Natural := 99;
          Info           : Data_Model.Length_Information :=
            (Known => True, Length => 99);
@@ -4025,6 +4850,12 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                  Assert
                    (Length = 0
                       and then (for all Value of Text => Value = ' '));
+
+            when Read_Bytes_Operation       =>
+               Event_Readers.Read_Bytes (Item, Bytes, Length, Error);
+               pragma
+                 Assert
+                   (Length = 0 and then (for all Value of Bytes => Value = 0));
 
             when Begin_Sequence_Operation   =>
                Event_Readers.Begin_Sequence (Item, Info, Error);
@@ -4110,25 +4941,15 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
                 & Event_Readers.Input_Offset (Item)'Image);
       end Check_Prelatched;
 
-      type Unsupported_Operation is
-        (Read_Bytes_Operation, Skip_Value_Operation);
+      type Unsupported_Operation is (Skip_Value_Operation);
 
       procedure Check_Unsupported (Operation : Unsupported_Operation) is
-         Input  : aliased constant String := "null";
-         Item   : Event_Readers.Reader (Input'Access);
-         Error  : Errors.Error_Info;
-         Bytes  : Ada.Streams.Stream_Element_Array (5 .. 6) := [others => 9];
-         Length : Natural := 99;
+         Input : aliased constant String := "null";
+         Item  : Event_Readers.Reader (Input'Access);
+         Error : Errors.Error_Info;
          procedure Invoke is
          begin
             case Operation is
-               when Read_Bytes_Operation =>
-                  Event_Readers.Read_Bytes (Item, Bytes, Length, Error);
-                  pragma
-                    Assert
-                      (Length = 0
-                         and then (for all Value of Bytes => Value = 0));
-
                when Skip_Value_Operation =>
                   Event_Readers.Skip_Value (Item, Error);
             end case;
@@ -8710,6 +9531,244 @@ package body Flyology_Serde.Deserializers.JSON.Testing is
            Assert
              (Error.Code = Errors.No_Error
                 and then Event_Readers.Is_Complete (Item));
+      end;
+
+      Check_Bytes_Parity
+        ("{""$bytes"":""""}", Ada.Streams.Stream_Element_Array'(1 .. 0 => 0));
+      Check_Bytes_Parity
+        (" { ""$bytes"" : ""00aF"" } ",
+         Ada.Streams.Stream_Element_Array'[0, 16#AF#]);
+      Check_Bytes_Container_Parity;
+      Check_Bytes_Map_Failure
+        ("[[{""$bytes"":""00""} {""$bytes"":""01""}]]",
+         Key_Finalization,
+         Errors.Syntax_Error,
+         Expected_Offset   => 18,
+         Expected_Consumed => 18,
+         Expected_Values   => 2);
+      Check_Bytes_Map_Failure
+        ("[[{""$bytes"":""00""},{""$bytes"":""01""}]]",
+         Key_Finalization,
+         Errors.Capacity_Exceeded,
+         Expected_Offset   => 17,
+         Expected_Consumed => 17,
+         Expected_Values   => 2,
+         Maximum_Input     => 17);
+      Check_Bytes_Map_Failure
+        ("[[{""$bytes"":""00""},{""$bytes"":""01""}}]",
+         Value_Finalization,
+         Errors.Syntax_Error,
+         Expected_Offset   => 33,
+         Expected_Consumed => 33,
+         Expected_Values   => 3);
+      Check_Bytes_Map_Failure
+        ("[[{""$bytes"":""00""},{""$bytes"":""01""}]]",
+         Value_Finalization,
+         Errors.Capacity_Exceeded,
+         Expected_Offset   => 33,
+         Expected_Consumed => 33,
+         Expected_Values   => 3,
+         Maximum_Input     => 33);
+      Check_Bytes_Arbitrary_Bounds;
+      for Maximum_Input in 0 .. 15 loop
+         Check_Bytes_Input_Limit (Maximum_Input);
+      end loop;
+      for Summaries_To_Skip in 0 .. 13 loop
+         Check_Bytes_Payload_Mutation (Summaries_To_Skip);
+      end loop;
+      for Summaries_To_Skip in 9 .. 13 loop
+         Check_Bytes_Metadata_Mutation
+           (Source_Offset_Mutation, Summaries_To_Skip);
+      end loop;
+      for Summaries_To_Skip in 9 .. 12 loop
+         Check_Bytes_Metadata_Mutation
+           (Decoded_Form_Mutation, Summaries_To_Skip);
+      end loop;
+      for Summaries_To_Skip in 10 .. 11 loop
+         Check_Bytes_Metadata_Mutation
+           (Fragment_Byte_Mutation, Summaries_To_Skip);
+      end loop;
+      for Summaries_To_Skip in 9 .. 13 loop
+         Check_Bytes_Metadata_Mutation
+           (Event_Kind_Mutation, Summaries_To_Skip);
+      end loop;
+      for Matching_Calls_To_Skip in 0 .. 14 loop
+         Check_Bytes_Exception
+           (Test_Hooks.Before_Source_Copy, Matching_Calls_To_Skip);
+      end loop;
+      for Point in Test_Hooks.Before_Step .. Test_Hooks.After_Step loop
+         for Matching_Calls_To_Skip in 0 .. 14 loop
+            Check_Bytes_Exception (Point, Matching_Calls_To_Skip);
+         end loop;
+      end loop;
+      Check_Bytes_Exception_Unreachable
+        (Test_Hooks.Before_Source_Copy,
+         Matching_Calls_To_Skip => 15,
+         Source                 => "{""$bytes"":""00""}");
+      for Point in Test_Hooks.Before_Step .. Test_Hooks.After_Step loop
+         Check_Bytes_Exception_Unreachable
+           (Point,
+            Matching_Calls_To_Skip => 15,
+            Source                 => "{""$bytes"":""00""}");
+      end loop;
+      for Matching_Calls_To_Skip in 0 .. 15 loop
+         Check_Bytes_Exception
+           (Test_Hooks.Before_Source_Copy,
+            Matching_Calls_To_Skip,
+            Source => "{""$bytes"":""00"" }");
+      end loop;
+      for Point in Test_Hooks.Before_Step .. Test_Hooks.After_Step loop
+         for Matching_Calls_To_Skip in 0 .. 15 loop
+            Check_Bytes_Exception
+              (Point,
+               Matching_Calls_To_Skip,
+               Source => "{""$bytes"":""00"" }");
+         end loop;
+      end loop;
+      Check_Bytes_Exception_Unreachable
+        (Test_Hooks.Before_Source_Copy,
+         Matching_Calls_To_Skip => 16,
+         Source                 => "{""$bytes"":""00"" }");
+      for Point in Test_Hooks.Before_Step .. Test_Hooks.After_Step loop
+         Check_Bytes_Exception_Unreachable
+           (Point,
+            Matching_Calls_To_Skip => 16,
+            Source                 => "{""$bytes"":""00"" }");
+      end loop;
+      Check_Bytes_Root_Adapter;
+      Check_Bytes_Candidate_Adapter;
+      Check_Allocating_Bytes_Root_Adapter;
+      declare
+         Input        : aliased constant String := "{""$bytes"":""00""}";
+         Item         : Event_Readers.Reader (Input'Access);
+         Error        : Errors.Error_Info;
+         Local_Policy : Policies.Decode_Policy := Policy;
+         Value        : Ada.Streams.Stream_Element_Array (5 .. 5) :=
+           [others => 9];
+         Length       : Natural := Natural'Last;
+      begin
+         Local_Policy.Limits.Maximum_Byte_Length := 0;
+         Event_Readers.Initialize (Item, Local_Policy, Error);
+         Event_Readers.Read_Bytes (Item, Value, Length, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Capacity_Exceeded
+                and then Length = 0
+                and then Value = [5 => 0]);
+         Errors.Reset (Error);
+         Event_Readers.Read_Bytes (Item, Value, Length, Error);
+         pragma Assert (Error.Code = Errors.Invalid_State);
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         Event_Readers.Read_Bytes (Item, Value, Length, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Length = 1
+                and then Value = [5 => 0]);
+         Errors.Fail (Error, Errors.Application_Error, 29, Errors.Byte_Offset);
+         Event_Readers.Abort_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.Application_Error
+                and then Error.Input_Offset = 29
+                and then Event_Readers.Container_Depth (Item) = 0
+                and then Event_Readers.Budget_Depth (Item) = 0);
+         Errors.Reset (Error);
+         Event_Readers.Reset (Item, Policy, Error);
+         Event_Readers.Read_Bytes (Item, Value, Length, Error);
+         Event_Readers.Finish_Document (Item, Error);
+         pragma
+           Assert
+             (Error.Code = Errors.No_Error
+                and then Event_Readers.Is_Complete (Item));
+      end;
+      Check_Bytes_Failure
+        ("null", 2, Errors.Unexpected_Kind, Expected_Offset => 0);
+      Check_Bytes_Failure ("{}", 2, Errors.Syntax_Error, Expected_Offset => 1);
+      Check_Bytes_Failure
+        ("{""x"":""""}", 2, Errors.Unexpected_Kind, Expected_Offset => 4);
+      Check_Bytes_Failure
+        ("{""$byte"":""""}", 2, Errors.Unexpected_Kind, Expected_Offset => 8);
+      Check_Bytes_Failure
+        ("{""$bytesx"":""""}",
+         2,
+         Errors.Unexpected_Kind,
+         Expected_Offset => 10);
+      Check_Bytes_Failure
+        ("{""$BYTES"":""""}", 2, Errors.Unexpected_Kind, Expected_Offset => 9);
+      Check_Bytes_Failure
+        ("{""\u0024bytes"":""""}",
+         2,
+         Errors.Unexpected_Kind,
+         Expected_Offset => 14);
+      Check_Bytes_Failure
+        ("{""$bytes"" """"}", 2, Errors.Syntax_Error, Expected_Offset => 10);
+      Check_Bytes_Failure
+        ("{""$bytes"":null}", 2, Errors.Syntax_Error, Expected_Offset => 10);
+      Check_Bytes_Failure
+        ("{""$bytes"":""\u0030""}",
+         2,
+         Errors.Syntax_Error,
+         Expected_Offset => 11);
+      Check_Bytes_Failure
+        ("{""$bytes"":""0G""}", 2, Errors.Syntax_Error, Expected_Offset => 12);
+      Check_Bytes_Failure
+        ("{""$bytes"":""0""}", 2, Errors.Syntax_Error, Expected_Offset => 12);
+      Check_Bytes_Failure
+        ("{""$bytes"":""00", 2, Errors.Syntax_Error, Expected_Offset => 13);
+      Check_Bytes_Failure
+        ("{""$bytes"":""00""", 2, Errors.Syntax_Error, Expected_Offset => 14);
+      Check_Bytes_Failure
+        ("{""$bytes"":""00""]", 2, Errors.Syntax_Error, Expected_Offset => 14);
+      Check_Bytes_Failure
+        ("{""$bytes"":""0001""}",
+         1,
+         Errors.Capacity_Exceeded,
+         Expected_Offset => 11);
+      Check_Bytes_Failure
+        ("{""$bytes"":""0001""}",
+         2,
+         Errors.Capacity_Exceeded,
+         Expected_Offset => 11,
+         Maximum_Bytes   => 1);
+      Check_Bytes_Failure
+        ("{""$bytes"":""00""}",
+         1,
+         Errors.Capacity_Exceeded,
+         Expected_Offset => 0,
+         Maximum_Values  => 0);
+      Check_Bytes_Failure
+        ("{""$bytes"":""00"",""x"":1}",
+         2,
+         Errors.Syntax_Error,
+         Expected_Offset => 14);
+
+      declare
+         Input        : aliased constant String := "{""$bytes"":""""}";
+         Oracle       : Reader (Input'Access);
+         Parallel     : Event_Readers.Reader (Input'Access);
+         Oracle_Error : Errors.Error_Info;
+         Event_Error  : Errors.Error_Info;
+         Local_Policy : Policies.Decode_Policy := Policy;
+         Oracle_Value : Ada.Streams.Stream_Element_Array (1 .. 0);
+         Event_Value  : Ada.Streams.Stream_Element_Array (1 .. 0);
+         Oracle_Count : Natural;
+         Event_Count  : Natural;
+      begin
+         Local_Policy.Limits.Maximum_Text_Length := 0;
+         Initialize (Oracle, Local_Policy);
+         Event_Readers.Initialize (Parallel, Local_Policy, Event_Error);
+         Read_Bytes (Oracle, Oracle_Value, Oracle_Count, Oracle_Error);
+         Event_Readers.Read_Bytes
+           (Parallel, Event_Value, Event_Count, Event_Error);
+         pragma
+           Assert
+             (Oracle_Error.Code = Errors.No_Error
+                and then Event_Error.Code = Errors.No_Error
+                and then Oracle_Count = 0
+                and then Event_Count = 0);
+         Assert_Same (Oracle, Parallel, Oracle_Error, Event_Error);
       end;
 
       for Operation in Unsupported_Operation loop

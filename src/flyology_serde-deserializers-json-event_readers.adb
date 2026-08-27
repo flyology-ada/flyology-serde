@@ -2022,16 +2022,282 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          raise;
    end Read_Text;
 
+   procedure Collect_Record_Name
+     (Self            : in out Reader;
+      Candidate       : out String;
+      Length          : out Natural;
+      Check_Length    : Boolean;
+      Store_Value     : Boolean;
+      Prechecked      : Boolean;
+      Checked_Summary : Preflights.String_Summary;
+      Consume_Colon   : Boolean;
+      Error           : in out Errors.Error_Info);
+
+   procedure Collect_Hex_String
+     (Self       : in out Reader;
+      Raw_Length : Natural;
+      Error      : in out Errors.Error_Info)
+   is
+      Events      :
+        Drivers.Event_Summary_Array (1 .. Drivers.Maximum_Event_Summaries);
+      Count       : Natural;
+      Phase       : Natural range 1 .. 2 := 1;
+      Characters  : Natural := 0;
+      Token_First : constant Natural := Self.Cursor - 1;
+      Token_Last  : constant Natural := Token_First + Raw_Length + 2;
+      Next_Source : Natural := Self.Cursor;
+
+      procedure Accept_String_End (Item : Drivers.Event_Summary) is
+      begin
+         if Phase /= 1
+           or else not Valid_Quote (Item, Drivers.String_End)
+           or else Item.Source_Offset /= Next_Source
+           or else Item.Source_Offset /= Token_Last - 1
+         then
+            Reject_Transcript (Self, Error);
+         else
+            Phase := 2;
+         end if;
+      end Accept_String_End;
+
+   begin
+      for Byte_Index in 1 .. Raw_Length + 1 loop
+         exit when Error.Code /= Errors.No_Error;
+         Consume_Owned_Byte (Self, Events, Count, Error);
+         if Error.Code = Errors.No_Error and then Count > 0 then
+            for Index in Events'First .. Events'First + Count - 1 loop
+               case Events (Index).Kind is
+                  when Drivers.String_Fragment =>
+                     if Phase /= 1
+                       or else not Valid_Text_Fragment
+                                     (Self,
+                                      Token_First,
+                                      Token_Last,
+                                      Events (Index),
+                                      Drivers.String_Fragment)
+                       or else Events (Index).Decoded_Form
+                               /= Drivers.Raw_Decoded
+                       or else Events (Index).Source_Offset /= Next_Source
+                       or else Events (Index).Source_Offset <= Token_First
+                       or else Events (Index).Source_Offset >= Token_Last - 1
+                       or else Hex_Value
+                                 (Self.Source
+                                    (Self.Source'First
+                                     + Events (Index).Source_Offset))
+                               = 16
+                     then
+                        Reject_Transcript (Self, Error);
+                     else
+                        Characters := Characters + 1;
+                        Next_Source := Next_Source + 1;
+                     end if;
+
+                  when Drivers.String_End      =>
+                     Accept_String_End (Events (Index));
+
+                  when others                  =>
+                     Reject_Transcript (Self, Error);
+               end case;
+               exit when Error.Code /= Errors.No_Error;
+            end loop;
+         end if;
+      end loop;
+
+      if Error.Code = Errors.No_Error and then Characters /= Raw_Length then
+         Reject_Transcript (Self, Error);
+      elsif Error.Code = Errors.No_Error and then Phase /= 2 then
+         Reject_Transcript (Self, Error);
+      end if;
+   end Collect_Hex_String;
+
    overriding
    procedure Read_Bytes
      (Self   : in out Reader;
       Value  : out Ada.Streams.Stream_Element_Array;
       Length : out Natural;
-      Error  : in out Errors.Error_Info) is
+      Error  : in out Errors.Error_Info)
+   is
+      Position         : Natural;
+      Raw_Length       : Natural := 0;
+      Byte_Length      : Natural := 0;
+      Input_Remaining  : Natural;
+      Tag              : String (1 .. 1);
+      Tag_Length       : Natural;
+      Tag_Summary      : Preflights.String_Summary;
+      Saw_Document_End : Boolean;
+      Payload_First    : Natural := 0;
+      Raw_Tag          : Boolean := False;
+      Tag_First        : Natural := 0;
    begin
       Value := [others => 0];
       Length := 0;
-      Reject_Unsupported (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Require_Leading (Self, "{", Error);
+      Prepare_Value (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Claim_Boundary (Self, Error);
+      Consume_Structure
+        (Self,
+         '{',
+         Drivers.Object_Begin,
+         Allow_Document_End => False,
+         Saw_Document_End   => Saw_Document_End,
+         Error              => Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Saw_Document_End then
+         Reject_Transcript (Self, Error);
+         return;
+      end if;
+      Commit_Value_Whitespace (Self, Error);
+      Tag_First := Self.Cursor;
+      Preflights.Scan_String
+        (Self.Source.all,
+         Self.Cursor,
+         Budgets.Input_Remaining (Self.Budget),
+         Tag_Summary,
+         Error);
+      if Error.Code /= Errors.No_Error then
+         Latch (Self, Error);
+         return;
+      elsif Tag_Summary.Raw_Length = 8 then
+         Raw_Tag :=
+           Self.Source
+             (Self.Source'First
+              + Tag_First
+              .. Self.Source'First + Tag_First + 7)
+           = """$bytes""";
+      end if;
+      Collect_Record_Name
+        (Self,
+         Tag,
+         Tag_Length,
+         Check_Length    => False,
+         Store_Value     => False,
+         Prechecked      => True,
+         Checked_Summary => Tag_Summary,
+         Consume_Colon   => False,
+         Error           => Error);
+      if Error.Code = Errors.No_Error and then not Raw_Tag then
+         Reject (Self, Errors.Unexpected_Kind, Error);
+      end if;
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Commit_Value_Whitespace (Self, Error);
+      Consume_Separator (Self, ':', Error);
+      Commit_Value_Whitespace (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif not Has_Input (Self) or else Current (Self) /= '"' then
+         Reject (Self, Errors.Syntax_Error, Error);
+         return;
+      end if;
+
+      Consume_Structure
+        (Self,
+         '"',
+         Drivers.String_Begin,
+         Allow_Document_End => False,
+         Saw_Document_End   => Saw_Document_End,
+         Error              => Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      elsif Saw_Document_End then
+         Reject_Transcript (Self, Error);
+         return;
+      end if;
+
+      Payload_First := Self.Cursor;
+      Position := Payload_First;
+      Input_Remaining := Budgets.Input_Remaining (Self.Budget);
+      while Position < Self.Source'Length loop
+         if Position - Self.Cursor >= Input_Remaining then
+            Reject
+              (Self,
+               Errors.Capacity_Exceeded,
+               Error,
+               Self.Cursor + Input_Remaining);
+            return;
+         elsif Self.Source (Self.Source'First + Position) = '"' then
+            exit;
+         elsif Hex_Value (Self.Source (Self.Source'First + Position)) = 16 then
+            Reject (Self, Errors.Syntax_Error, Error, Position);
+            return;
+         end if;
+         Raw_Length := Raw_Length + 1;
+         Position := Position + 1;
+      end loop;
+      if Position = Self.Source'Length or else Raw_Length mod 2 /= 0 then
+         Reject (Self, Errors.Syntax_Error, Error, Position);
+         return;
+      end if;
+      Byte_Length := Raw_Length / 2;
+      Budgets.Check_Byte_Length (Self.Budget, Byte_Length, Error);
+      if Error.Code = Errors.No_Error and then Byte_Length > Value'Length then
+         Errors.Fail (Error, Errors.Capacity_Exceeded);
+      end if;
+      if Error.Code /= Errors.No_Error then
+         Latch (Self, Error);
+         return;
+      end if;
+
+      Collect_Hex_String (Self, Raw_Length, Error);
+      if Error.Code = Errors.No_Error and then not Has_Input (Self) then
+         Reject (Self, Errors.Syntax_Error, Error);
+      elsif Error.Code = Errors.No_Error
+        and then Is_Whitespace (Current (Self))
+      then
+         Consume_Separator (Self, Current (Self), Error);
+         Commit_Value_Whitespace (Self, Error);
+      end if;
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Consume_Structure
+        (Self,
+         '}',
+         Drivers.Object_End,
+         Allow_Document_End => Self.Depth = 0,
+         Saw_Document_End   => Saw_Document_End,
+         Error              => Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+
+      if Byte_Length > 0 then
+         for Index in 0 .. Byte_Length - 1 loop
+            Value (Value'First + Ada.Streams.Stream_Element_Offset (Index)) :=
+              Ada.Streams.Stream_Element
+                (Hex_Value
+                   (Self.Source
+                      (Self.Source'First + Payload_First + Index * 2))
+                 * 16
+                 + Hex_Value
+                     (Self.Source
+                        (Self.Source'First + Payload_First + Index * 2 + 1)));
+         end loop;
+      end if;
+      Length := Byte_Length;
+      Finish_Value
+        (Self,
+         No_Pending_Terminal,
+         Error,
+         Saw_Document_End => Saw_Document_End);
+      if Error.Code /= Errors.No_Error then
+         Value := [others => 0];
+         Length := 0;
+      end if;
+   exception
+      when others =>
+         Poison_After_Exception (Self);
+         Value := [others => 0];
+         Length := 0;
+         raise;
    end Read_Bytes;
 
    overriding
@@ -2594,12 +2860,17 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
    end End_Map;
 
    procedure Collect_Record_Name
-     (Self      : in out Reader;
-      Candidate : out String;
-      Length    : out Natural;
-      Error     : in out Errors.Error_Info)
+     (Self            : in out Reader;
+      Candidate       : out String;
+      Length          : out Natural;
+      Check_Length    : Boolean;
+      Store_Value     : Boolean;
+      Prechecked      : Boolean;
+      Checked_Summary : Preflights.String_Summary;
+      Consume_Colon   : Boolean;
+      Error           : in out Errors.Error_Info)
    is
-      Summary     : Preflights.String_Summary;
+      Summary     : Preflights.String_Summary := Checked_Summary;
       Events      :
         Drivers.Event_Summary_Array (1 .. Drivers.Maximum_Event_Summaries);
       Count       : Natural;
@@ -2632,12 +2903,14 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          return;
       end if;
 
-      Preflights.Scan_String
-        (Self.Source.all,
-         Self.Cursor,
-         Budgets.Input_Remaining (Self.Budget),
-         Summary,
-         Error);
+      if not Prechecked then
+         Preflights.Scan_String
+           (Self.Source.all,
+            Self.Cursor,
+            Budgets.Input_Remaining (Self.Budget),
+            Summary,
+            Error);
+      end if;
       if Error.Code /= Errors.No_Error then
          Latch (Self, Error);
          return;
@@ -2646,8 +2919,12 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          return;
       end if;
       Token_Last := Token_First + Summary.Raw_Length;
-      Budgets.Check_Text_Length (Self.Budget, Summary.Decoded_Length, Error);
+      if Check_Length then
+         Budgets.Check_Text_Length
+           (Self.Budget, Summary.Decoded_Length, Error);
+      end if;
       if Error.Code = Errors.No_Error
+        and then Store_Value
         and then Summary.Decoded_Length > Candidate'Length
       then
          Errors.Fail (Error, Errors.Capacity_Exceeded);
@@ -2688,13 +2965,16 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
                        or else Events (Index).Source_Offset >= Token_Last - 1
                        or else Events (Index).Source_Length
                                > Token_Last - 1 - Events (Index).Source_Offset
-                       or else Copied > Candidate'Length
-                       or else Events (Index).Decoded_Length
-                               > Candidate'Length - Copied
+                       or else (Store_Value
+                                and then (Copied > Candidate'Length
+                                          or else Events (Index).Decoded_Length
+                                                  > Candidate'Length - Copied))
                      then
                         Reject_Transcript (Self, Error);
                      else
-                        if Events (Index).Decoded_Length > 0 then
+                        if Store_Value
+                          and then Events (Index).Decoded_Length > 0
+                        then
                            for Fragment_Index in
                              0 .. Events (Index).Decoded_Length - 1
                            loop
@@ -2735,17 +3015,22 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
          return;
       end if;
 
+      Length := Copied;
+      if not Consume_Colon then
+         return;
+      end if;
+
       Commit_Value_Whitespace (Self, Error);
       Consume_Separator (Self, ':', Error);
       Commit_Value_Whitespace (Self, Error);
       if Error.Code /= Errors.No_Error then
          Candidate := [others => ' '];
+         Length := 0;
       elsif not Has_Input (Self) or else not Is_Value_Leading (Current (Self))
       then
          Reject (Self, Errors.Syntax_Error, Error);
          Candidate := [others => ' '];
-      else
-         Length := Copied;
+         Length := 0;
       end if;
    end Collect_Record_Name;
 
@@ -2759,7 +3044,16 @@ package body Flyology_Serde.Deserializers.JSON.Event_Readers is
       Name := [others => ' '];
       Length := 0;
       Available := False;
-      Collect_Record_Name (Self, Name, Length, Error);
+      Collect_Record_Name
+        (Self,
+         Name,
+         Length,
+         Check_Length    => True,
+         Store_Value     => True,
+         Prechecked      => False,
+         Checked_Summary => (others => <>),
+         Consume_Colon   => True,
+         Error           => Error);
       if Error.Code /= Errors.No_Error then
          return;
       end if;

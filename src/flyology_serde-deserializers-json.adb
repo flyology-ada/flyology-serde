@@ -1143,21 +1143,38 @@ package body Flyology_Serde.Deserializers.JSON is
       Length : out Natural;
       Error  : in out Errors.Error_Info)
    is
-      Position        : Natural;
-      Count           : Natural := 0;
-      Tag             : String (1 .. 6);
-      Tag_Length      : Natural;
-      Input_Remaining : Natural;
+      Position           : Natural;
+      Count              : Natural := 0;
+      Tag_Raw_Length     : Natural;
+      Tag_Decoded_Length : Natural;
+      Input_Remaining    : Natural;
+      Raw_Tag            : Boolean := False;
+      Tag_First          : Natural := 0;
    begin
       Value := [others => 0];
       Length := 0;
       Require_Leading (Self, "{", Error);
       Prepare_Value (Self, Error);
       Expect (Self, '{', Error);
-      Decode_String (Self, Tag, Tag_Length, False, Error);
+      Skip_Whitespace (Self, Error);
+      if Error.Code /= Errors.No_Error then
+         return;
+      end if;
+      Tag_First := Self.Cursor;
+      Scan_String (Self, Tag_Raw_Length, Tag_Decoded_Length, Error);
       if Error.Code = Errors.No_Error
-        and then (Tag_Length /= 6 or else Tag /= "$bytes")
+        and then Tag_Raw_Length = 8
+        and then Tag_Decoded_Length = 6
       then
+         Raw_Tag :=
+           Self.Source
+             (Self.Source'First
+              + Tag_First
+              .. Self.Source'First + Tag_First + 7)
+           = """$bytes""";
+      end if;
+      Advance (Self, Tag_Raw_Length, Error);
+      if Error.Code = Errors.No_Error and then not Raw_Tag then
          Fail (Self, Errors.Unexpected_Kind, Error);
       end if;
       Expect (Self, ':', Error);

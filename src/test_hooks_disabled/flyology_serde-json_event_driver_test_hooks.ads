@@ -66,6 +66,13 @@ private package Flyology_Serde.JSON_Event_Driver_Test_Hooks is
      Convention    => Ada,
      External_Name => "flyology_serde_disabled_json_driver_kind_arm";
 
+   procedure Arm_Kind_Override_After
+     (Summaries_To_Skip : Natural; Value : Natural)
+   with
+     Import,
+     Convention    => Ada,
+     External_Name => "flyology_serde_disabled_json_driver_kind_after_arm";
+
    procedure Apply_Kind_Override (Value : in out Natural)
    with
      Import,
