@@ -22,6 +22,7 @@ with Flyology_Serde.UTF_8;
 with Interfaces;
 with Enumeration_Adapter_Tests;
 with Error_Path_Saturation_Tests;
+with Fixed_Array_Adapter_Tests;
 with JSON_Reader_Tests;
 with JSON_Writer_Tests;
 with Handwritten_Type_Tests;
@@ -197,6 +198,7 @@ begin
    CBOR_Writer_Tests;
    Enumeration_Adapter_Tests;
    Error_Path_Saturation_Tests;
+   Fixed_Array_Adapter_Tests;
 
    declare
       Default : Data_Model.Float_64_Value;
