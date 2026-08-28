@@ -29,6 +29,7 @@ with Handwritten_Type_Tests;
 with Optional_Parity_Tests;
 with Record_Adapter_Tests;
 with Scalar_Parity_Tests;
+with Serialization_Only_Adapter_Tests;
 with Variant_Adapter_Tests;
 
 procedure Tests is
@@ -235,6 +236,7 @@ begin
    Optional_Parity_Tests;
    Record_Adapter_Tests;
    Scalar_Parity_Tests;
+   Serialization_Only_Adapter_Tests;
    Variant_Adapter_Tests;
 
    Sample_Serialization.Serialize

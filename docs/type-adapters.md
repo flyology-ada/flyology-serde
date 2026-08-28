@@ -44,6 +44,10 @@ all declared mappings before a format event or typed read, then serializes the c
 every literal so an ambiguous handwritten matcher is rejected and an unmatched name is invalid. It never indexes by
 `Enum_Rep`, assumes monotonic representation values, or emits an Ada position.
 
+Adapters.Enumeration_Serializers is the additive serialization-only form for generated mappings that do not claim
+construction authority. It accepts primary names only, copies them into bounded operation-local storage, and
+reobserves every name before the first output event. The instance imports no deserialization policy or builder hook.
+
 The bounded runtime supplies leaf adapters for Boolean, signed and modular integers, validated UTF-8 text,
 caller-buffer bytes, the semantic binary64 wrapper, and application-defined null values. Byte decode has prefix and
 exact-cardinality forms; the exact form leaves its candidate unchanged on a length mismatch. The binary64 adapter
@@ -88,6 +92,9 @@ Comparator equivalence defines its logical equality. `Decode_Policy.Maps.Duplica
 pair, or keeps the first key object while replacing its value. A rejected logical duplicate reports `Duplicate_Key`;
 record and variant presentation-name duplicates remain `Duplicate_Field`.
 
+Adapters.Fixed_Array_Serializers is the corresponding serialization-only constrained-array form. It emits the
+array's complete range in Ada component order and imports no element-construction callback.
+
 ## Records, discriminants, and variants
 
 Record fields are matched by bounded name lookup or generator-private local ordinals. Input order need not match
@@ -111,6 +118,11 @@ field-decode errors, and use the canonical primary name for missing fields, subj
 `Maximum_Name_Length`; longer names retain the bounded prefix and set `Name_Truncated`. A missing hook returning
 `Applied = False` performs no field mutation. Null records use a separate adapter, since Ada has no empty enumeration
 from which to manufacture a safe ordinal.
+
+Adapters.Record_Serializers accepts only the source type, field ordinal, bounded primary-name metadata, and one
+field serializer. It validates and reobserves all metadata before Begin_Record, emits every ordinal in order, and has
+no aliases, missing/default policy, candidate, or decode operation. It is suitable for generated serialization-only
+mappings; bidirectional mappings continue to use Adapters.Records.
 
 A discriminated record is never built by changing the discriminants of an existing object. The adapter first
 decodes discriminants and enough field state to select exactly one variant path, validates every component against
